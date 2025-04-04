@@ -30,10 +30,9 @@ if not question:
 # === Initialize OpenAI client ===
 client = OpenAI(api_key=openai_key)
 
-# === Generate Cypher query from natural language ===
-with st.spinner("💬 Thinking..."):
-    prompt = f"""
-    You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
+# === Prompt engineering with schema ===
+prompt = f"""
+You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
 
 Schema:
 - (:Case {{id: int}})
@@ -55,27 +54,23 @@ A: MATCH (c:Case)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'Yes'}}) RETURN count(DI
 Q: How many male toddlers?
 A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}) RETURN count(DISTINCT c) AS male_cases
 
-Examples:
-Q: How many toddlers have ASD traits?
-A: MATCH (c:Case)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'Yes'}}) RETURN count(DISTINCT c) AS total
-
-Q: How many male toddlers?
-A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}) RETURN count(DISTINCT c) AS male_cases
-
 Q: How many female toddlers with family history of ASD?
-A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'f'}}),
-             (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Family_mem_with_ASD', value: 'yes'}})
+A: MATCH (c:Case)
+      -[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'f'}}),
+      (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Family_mem_with_ASD', value: 'yes'}})
    RETURN count(DISTINCT c) AS total
 
 Now, translate this user question into Cypher:
 Q: {question}
 
-Only return the Cypher query, no explanation.
+Only return the Cypher query, no explanation, no markdown.
 """
 
+# === Generate Cypher query from natural language ===
+with st.spinner("💬 Thinking..."):
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-2024-08-06",
+            model="gpt-4o-2024-08-06",  # Or your fine-tuned model
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
