@@ -32,8 +32,7 @@ client = OpenAI(api_key=openai_key)
 
 # === Generate Cypher query from natural language ===
 with st.spinner("💬 Thinking..."):
-prompt = f"""
-You are a Cypher expert working with this Neo4j knowledge graph about toddlers and autism.
+    prompt = f"""You are a Cypher expert working with this Neo4j knowledge graph about toddlers and autism.
 
 Schema:
 - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type, value}})
