@@ -32,12 +32,28 @@ client = OpenAI(api_key=openai_key)
 
 # === Generate Cypher query from natural language ===
 with st.spinner("💬 Thinking..."):
-    prompt = f"""Convert the following natural language question into a Cypher query that can run on a Neo4j knowledge graph about toddlers and autism:
-    
-    Question: {question}
+    prompt = f"""
+You are a Cypher expert working with this Neo4j knowledge graph about autism in toddlers.
 
-    Just return the Cypher query without explanations or markdown."""
-    
+Schema:
+- (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type, value}})
+- (:Case)-[:SCREENED_FOR]->(:ASD_Trait {{value}})
+- (:Case)-[:HAS_ANSWER {{value}}]->(:BehaviorQuestion {{name}})
+- (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
+
+Examples:
+Q: How many toddlers have ASD traits?
+A: MATCH (c:Case)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'Yes'}}) RETURN count(DISTINCT c) AS total
+
+Q: How many male toddlers?
+A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}) RETURN count(DISTINCT c) AS male_cases
+
+Now, translate this user question into Cypher:
+Q: {question}
+
+Only return the Cypher query, no explanation.
+"""
+
     try:
         response = client.chat.completions.create(
             model="ft:gpt-4o-mini-2024-07-18:bouchouras:my-5-3-experiment:BHDlqQLO",
