@@ -1,11 +1,15 @@
 import streamlit as st
 import openai
 from neo4j import GraphDatabase
-
+from dotenv import load_dotenv
+import os
+load_dotenv()
 # === Neo4j Settings ===
-NEO4J_URI = "bolt://localhost:7687"  # Change if using a remote DB
-NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "palatiou"
+
+NEO4J_URI = os.getenv("NEO4J_URI")
+NEO4J_USER = os.getenv("NEO4J_USER")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # === Streamlit UI ===
 st.set_page_config(page_title="LLM to Cypher (ASD KG)", layout="centered")
