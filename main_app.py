@@ -32,8 +32,8 @@ client = OpenAI(api_key=openai_key)
 
 # === Generate Cypher query from natural language ===
 with st.spinner("💬 Thinking..."):
-    prompt = f"""
-You are a Cypher expert working with this Neo4j knowledge graph about autism in toddlers.
+prompt = f"""
+You are a Cypher expert working with this Neo4j knowledge graph about toddlers and autism.
 
 Schema:
 - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type, value}})
@@ -41,12 +41,25 @@ Schema:
 - (:Case)-[:HAS_ANSWER {{value}}]->(:BehaviorQuestion {{name}})
 - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
 
+Relevant Values:
+- Sex: 'm', 'f'
+- Ethnicity: 'middle eastern', 'White European', 'Hispanic', 'black', 'asian', 'south asian', 'Native Indian', 'Others', 'Latino', 'mixed', 'Pacifica'
+- Jaundice: 'yes', 'no'
+- Family History: 'yes', 'no'
+- Submitter: 'family member', 'Health Care Professional', 'Health care professional', 'Self', 'Others'
+- ASD Trait Class: 'Yes', 'No'
+
 Examples:
 Q: How many toddlers have ASD traits?
 A: MATCH (c:Case)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'Yes'}}) RETURN count(DISTINCT c) AS total
 
 Q: How many male toddlers?
 A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}) RETURN count(DISTINCT c) AS male_cases
+
+Q: How many female toddlers with family history of ASD?
+A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'f'}}),
+             (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Family_mem_with_ASD', value: 'yes'}})
+   RETURN count(DISTINCT c) AS total
 
 Now, translate this user question into Cypher:
 Q: {question}
