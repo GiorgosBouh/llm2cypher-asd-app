@@ -12,6 +12,16 @@ NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
+# === Title and Description ===
+st.title("🧠 NeuroCypher ASD")
+st.markdown("""
+A natural language interface to explore autism-related knowledge in a Neo4j graph.
+
+---
+
+**Made in the Intelligent Systems Laboratory of the University of the Aegean by Bouchouras G., Doumanas D., Kotis K. (2025)**
+""")
+
 # === App UI ===
 st.title("🧠 Ask the Autism Knowledge Graph")
 st.markdown("Ask a question in natural language and get answers from Neo4j using OpenAI.")
