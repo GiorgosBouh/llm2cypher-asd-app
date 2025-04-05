@@ -16,13 +16,36 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 st.title("🧠 Ask the Autism Knowledge Graph")
 st.markdown("Ask a question in natural language and get answers from Neo4j using OpenAI.")
 
-openai_key = st.secrets["OPENAI_API_KEY"]
-question = st.text_input("📝 Ask your question in natural language")
+# === Optional: Prompt Schema Visualizer ===
+with st.expander("🧠 Graph Schema Help"):
+    st.markdown("### 🧩 Node Types")
+    st.markdown("""
+    - `Case`: Each screening instance  
+    - `BehaviorQuestion`: Questions A1–A10  
+    - `ASD_Trait`: Classification result (`Yes` / `No`)  
+    - `DemographicAttribute`: Sex, Ethnicity, Jaundice, etc.  
+    - `SubmitterType`: Who completed the test  
+    """)
 
-# === Guard conditions ===
-if not openai_key:
-    st.warning("Please enter your OpenAI API key.")
-    st.stop()
+    st.markdown("### 🔗 Relationships")
+    st.markdown("""
+    - `(:Case)-[:HAS_ANSWER]->(:BehaviorQuestion)`  
+    - `(:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)`  
+    - `(:Case)-[:SCREENED_FOR]->(:ASD_Trait)`  
+    - `(:Case)-[:SUBMITTED_BY]->(:SubmitterType)`  
+    """)
+
+    st.markdown("### 💡 Example Questions")
+    st.code("""
+Q: How many toddlers have ASD traits?
+Q: How many answered 1 to question A3?
+Q: How many male toddlers with jaundice?
+Q: Who completed the test most often?
+    """)
+
+# === Input fields ===
+openai_key = os.getenv("OPENAI_API_KEY")
+question = st.text_input("📝 Ask your question in natural language")
 
 if not question:
     st.stop()
@@ -66,11 +89,11 @@ Q: {question}
 Only return the Cypher query, no explanation, no markdown.
 """
 
-# === Generate Cypher query from natural language ===
+# === Generate Cypher query ===
 with st.spinner("💬 Thinking..."):
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-2024-08-06",  # Or your fine-tuned model
+            model="gpt-4o-2024-08-06",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
@@ -81,7 +104,7 @@ with st.spinner("💬 Thinking..."):
         st.error(f"OpenAI error: {e}")
         st.stop()
 
-# === Run Cypher query ===
+# === Run query on Neo4j ===
 with st.spinner("📡 Querying Neo4j..."):
     try:
         driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
