@@ -12,14 +12,15 @@ NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
-# === Title and Description ===
+# === Title, Subtitle & Attribution ===
 st.title("🧠 NeuroCypher ASD")
+st.markdown(
+    "<i>The graph is based on Q-Chat-10 plus survey and other individuals characteristics that have proved to be effective in detecting the ASD cases from controls in behaviour science.</i>",
+    unsafe_allow_html=True,
+)
 st.markdown("""
-A natural language interface to explore autism-related knowledge in a Neo4j graph.
-
 ---
-
-**Made in the Intelligent Systems Laboratory of the University of the Aegean by Bouchouras G., Doumanas D., Kotis K. (2025)**
+**Made in the Intelligent Systems Laboratory of the University of the Aegean by Bouchouras G., Doumanas D., Kotis K. (2025)**  
 """)
 
 # === App UI ===
