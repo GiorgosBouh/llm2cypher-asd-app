@@ -24,7 +24,6 @@ st.markdown("""
 """)
 
 # === App UI ===
-st.title("🧠 Ask the Autism Knowledge Graph")
 st.markdown("Ask a question in natural language and get answers from Neo4j using OpenAI.")
 
 # === Optional: Prompt Schema Visualizer ===
