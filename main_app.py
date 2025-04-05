@@ -16,7 +16,7 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 st.title("🧠 Ask the Autism Knowledge Graph")
 st.markdown("Ask a question in natural language and get answers from Neo4j using OpenAI.")
 
-openai_key = st.text_input("🔑 Enter your OpenAI API Key", type="password", value=os.getenv("OPENAI_API_KEY"))
+openai_key = st.secrets["OPENAI_API_KEY"]
 question = st.text_input("📝 Ask your question in natural language")
 
 # === Guard conditions ===
