@@ -104,6 +104,7 @@ Only return the Cypher query.
                 temperature=0
             )
             cypher_query = response.choices[0].message.content.strip()
+            cypher_query = cypher_query.replace("```cypher", "").replace("```", "").strip()
             st.code(cypher_query, language="cypher")
         except Exception as e:
             st.error(f"OpenAI error: {e}")
