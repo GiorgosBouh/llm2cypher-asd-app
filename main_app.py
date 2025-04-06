@@ -8,6 +8,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import uuid
+
 st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
 # === Load environment variables ===
@@ -65,15 +66,24 @@ Q: How many toddlers have ASD traits?
 Q: How many answered 1 to question A3?
 Q: How many male toddlers with jaundice?
 Q: Who completed the test most often?
-Q: Total children with autism traits?
-Q: Most common submitter type?
-Q: Number of toddlers diagnosed with ASD?
-Q: Count all ASD-positive cases
     """)
 
 # === NATURAL LANGUAGE TO CYPHER ===
 st.header("💬 Natural Language to Cypher")
 question = st.text_input("Ask a question in natural language:")
+
+# === Rewording Suggestions ===
+with st.expander("✏️ Need help rephrasing?"):
+    st.markdown("Try rephrasing your question like:")
+    st.markdown("- How many toddlers have ASD traits?")
+    st.markdown("- How many answered 1 to question A3?")
+    st.markdown("- How many male toddlers with jaundice?")
+    st.markdown("- Who completed the test most often?")
+
+# === Logging function ===
+def log_translation(nl_question, cypher_query, result, success=True):
+    with open("nl_to_cypher_log.csv", "a") as f:
+        f.write(f'"{nl_question}","{cypher_query}","{str(result)}",{success}\n')
 
 if question:
     question = question.strip().replace("```cypher", "").replace("```", "").strip()
@@ -93,18 +103,9 @@ Relationships:
 - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
 - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
 
-Examples:
-Q: How many toddlers have ASD traits?
-A: MATCH (c:Case)-[:SCREENED_FOR]->(a:ASD_Trait {{value: 'Yes'}}) RETURN count(c) AS numberOfToddlersWithASDTraits
-
-Q: How many answered 1 to question A3?
-A: MATCH (c:Case)-[r:HAS_ANSWER {{value: 1}}]->(q:BehaviorQuestion {{name: 'A3'}}) RETURN count(DISTINCT c) AS total
-
-Q: How many male toddlers with jaundice?
-A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}), (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Jaundice', value: 'yes'}}) RETURN count(DISTINCT c) AS total
-
-Q: Who completed the test most often?
-A: MATCH (c:Case)-[:SUBMITTED_BY]->(s:SubmitterType) RETURN s.type AS submitter, count(*) AS frequency ORDER BY frequency DESC LIMIT 1
+Rewording Examples:
+- "How many kids are autistic?" → "How many toddlers have ASD traits?"
+- "Show me all answered 1 on A5" → "How many answered 1 to question A5?"
 
 Translate this question to Cypher:
 Q: {question}
@@ -138,12 +139,11 @@ Only return the Cypher query.
                 st.json(records)
             else:
                 st.warning("⚠️ No results found.")
+            log_translation(question, cypher_query, records, success=True)
         except Exception as e:
             st.error(f"Neo4j error: {e}")
+            log_translation(question, cypher_query, str(e), success=False)
 
-# === ML SECTION ===
-st.markdown("---")
-st.header("🧠 Predict Autism Traits")
 
 # Check GDS support
 # After initializing driver
