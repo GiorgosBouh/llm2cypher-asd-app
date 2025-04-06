@@ -127,18 +127,8 @@ st.markdown("---")
 st.header("🧠 Predict Autism Traits")
 
 # Check GDS support
-def is_gds_supported(driver):
-    try:
-        with driver.session() as session:
-            result = session.run("CALL gds.debug.sysInfo()")
-            data = result.data()
-            return len(data) > 0
-    except Exception as e:
-        st.error(f"GDS test failed: {e}")
-        return False
-
 if not is_gds_supported(driver):
-    st.warning("⚠️ Node2Vec is not supported on your Neo4j instance. Please use Neo4j Desktop or Aura Pro.")
+    st.warning("⚠️ GDS is not available. Please ensure it is installed in the 'neo4j' database.")
     st.stop()
 
 # Continue with embedding + ML prediction if GDS is supported
