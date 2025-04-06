@@ -125,6 +125,21 @@ Only return the Cypher query.
 st.markdown("---")
 st.header("🧠 Predict Autism Traits")
 
+# Check GDS support
+GDS_SUPPORTED = True
+with driver.session() as session:
+    try:
+        session.run("CALL gds.debug.sysInfo()")
+    except Exception as e:
+        GDS_SUPPORTED = False
+
+if not GDS_SUPPORTED:
+    st.warning("⚠️ Node2Vec is not supported on Neo4j AuraDB Free. Please switch to Neo4j Desktop or Aura Professional to enable graph-based machine learning features.")
+    st.stop()
+
+# Continue with embedding + ML prediction if GDS is supported
+
+# Helper functions
 def prepare_graph_for_embeddings():
     with driver.session() as session:
         session.run("CALL gds.graph.drop('asd-graph', false)")
@@ -214,7 +229,7 @@ def extract_user_embedding(upload_id):
         record = res.single()
         return [record["embedding"]] if record else None
 
-# === Model Evaluation on Graph Data ===
+# === Model Evaluation on Existing Graph Data ===
 st.subheader("📊 Model Evaluation on Existing Graph Data")
 prepare_graph_for_embeddings()
 run_node2vec()
@@ -226,7 +241,7 @@ y_pred = clf.predict(X_test)
 report = classification_report(y_test, y_pred, output_dict=True)
 st.write(pd.DataFrame(report).transpose())
 
-# === User Upload for New Prediction ===
+# === Upload CSV and Predict ASD ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
@@ -252,4 +267,4 @@ if uploaded_file:
             label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
             st.success(f"🔍 Prediction: **{label}**")
         else:
-            st.error("❌ No embedding found for the new Case.")
+            st.error("❌ No embedding found for the new Case.")..
