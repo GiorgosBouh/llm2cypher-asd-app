@@ -262,7 +262,16 @@ clf = RandomForestClassifier(n_estimators=100, random_state=42)
 clf.fit(X_train, y_train)
 y_pred = clf.predict(X_test)
 report = classification_report(y_test, y_pred, output_dict=True)
+
+# Display the report
 st.write(pd.DataFrame(report).transpose())
+
+# Add explanation of 0 and 1
+st.markdown("""
+**Explanation of Results:**
+- `0` represents **Control Case** (No ASD traits detected).
+- `1` represents **ASD-positive Case** (ASD traits detected).
+""")
 
 # === Upload CSV and Predict ASD ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
