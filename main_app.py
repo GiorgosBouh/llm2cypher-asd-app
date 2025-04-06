@@ -267,4 +267,4 @@ if uploaded_file:
             label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
             st.success(f"🔍 Prediction: **{label}**")
         else:
-            st.error("❌ No embedding found for the new Case.").
+            st.error("❌ No embedding found for the new Case.")
