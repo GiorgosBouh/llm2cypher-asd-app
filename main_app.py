@@ -127,13 +127,16 @@ st.markdown("---")
 st.header("🧠 Predict Autism Traits")
 
 # Check GDS support
-GDS_SUPPORTED = True
-with driver.session() as session:
+def is_gds_supported(driver):
     try:
-        session.run("CALL gds.debug.sysInfo()")
+        with driver.session() as session:
+            result = session.run("CALL gds.debug.sysInfo()")
+            data = result.data()
+            return len(data) > 0
     except Exception as e:
-        GDS_SUPPORTED = False
-
+        st.error(f"GDS test failed: {e}")
+        return False
+        
 if not GDS_SUPPORTED:
     st.warning("⚠️ Node2Vec is not supported on Neo4j AuraDB Free. Please switch to Neo4j Desktop or Aura Professional to enable graph-based machine learning features.")
     st.stop()
