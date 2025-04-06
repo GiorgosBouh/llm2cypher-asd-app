@@ -191,7 +191,7 @@ def extract_training_data():
     with driver.session() as session:
         result = session.run("""
             MATCH (c:Case)-[:SCREENED_FOR]->(t:ASD_Trait)
-            WHERE exists(c.embedding)
+            WHERE c.embedding IS NOT NULL
             RETURN c.embedding AS embedding, t.value AS label
         """)
         records = result.data()
