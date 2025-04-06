@@ -127,6 +127,22 @@ st.markdown("---")
 st.header("🧠 Predict Autism Traits")
 
 # Check GDS support
+# After initializing driver
+driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+
+# Define the function BEFORE using it
+def is_gds_supported(driver):
+    try:
+        with driver.session(database="neo4j") as session:
+            result = session.run("CALL gds.version()")
+            version = result.single()[0]
+            st.info(f"✅ GDS version detected: {version}")
+            return True
+    except Exception as e:
+        st.error(f"GDS test failed: {e}")
+        return False
+
+# Now it's safe to call it
 if not is_gds_supported(driver):
     st.warning("⚠️ GDS is not available. Please ensure it is installed in the 'neo4j' database.")
     st.stop()
