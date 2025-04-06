@@ -72,8 +72,7 @@ st.header("💬 Natural Language to Cypher")
 question = st.text_input("Ask a question in natural language:")
 
 if question:
-   # Clean any markdown formatting from user input
-question = question.strip().replace("```cypher", "").replace("```", "").strip()
+    question = question.strip().replace("```cypher", "").replace("```", "").strip()
     prompt = f"""
 You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
 
