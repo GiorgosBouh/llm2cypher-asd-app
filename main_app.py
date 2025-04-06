@@ -136,9 +136,9 @@ def is_gds_supported(driver):
     except Exception as e:
         st.error(f"GDS test failed: {e}")
         return False
-        
-if not GDS_SUPPORTED:
-    st.warning("⚠️ Node2Vec is not supported on Neo4j AuraDB Free. Please switch to Neo4j Desktop or Aura Professional to enable graph-based machine learning features.")
+
+if not is_gds_supported(driver):
+    st.warning("⚠️ Node2Vec is not supported on your Neo4j instance. Please use Neo4j Desktop or Aura Pro.")
     st.stop()
 
 # Continue with embedding + ML prediction if GDS is supported
