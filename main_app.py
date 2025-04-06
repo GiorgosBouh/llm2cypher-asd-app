@@ -95,13 +95,13 @@ Relationships:
 
 Examples:
 Q: How many toddlers have ASD traits?
-A: MATCH (c:Case)-[:SCREENED_FOR]->(a:ASD_Trait {value: 'Yes'}) RETURN count(c) AS numberOfToddlersWithASDTraits
+A: MATCH (c:Case)-[:SCREENED_FOR]->(a:ASD_Trait {{value: 'Yes'}}) RETURN count(c) AS numberOfToddlersWithASDTraits
 
 Q: How many answered 1 to question A3?
-A: MATCH (c:Case)-[r:HAS_ANSWER {value: 1}]->(q:BehaviorQuestion {name: 'A3'}) RETURN count(DISTINCT c) AS total
+A: MATCH (c:Case)-[r:HAS_ANSWER {{value: 1}}]->(q:BehaviorQuestion {{name: 'A3'}}) RETURN count(DISTINCT c) AS total
 
 Q: How many male toddlers with jaundice?
-A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {type: 'Sex', value: 'm'}), (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {type: 'Jaundice', value: 'yes'}) RETURN count(DISTINCT c) AS total
+A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}), (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Jaundice', value: 'yes'}}) RETURN count(DISTINCT c) AS total
 
 Q: Who completed the test most often?
 A: MATCH (c:Case)-[:SUBMITTED_BY]->(s:SubmitterType) RETURN s.type AS submitter, count(*) AS frequency ORDER BY frequency DESC LIMIT 1
