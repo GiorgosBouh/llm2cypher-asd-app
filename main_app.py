@@ -198,6 +198,11 @@ uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
+    df.columns = df.columns.str.strip()  # Clean up column names
+
+    # Check the column names to ensure 'Sex' is available
+    st.write("Columns in the uploaded CSV:", df.columns)  # This will display the column names
+
     if len(df) != 1:
         st.error("❌ Please upload exactly one row (one child).")
         st.stop()
@@ -205,15 +210,17 @@ if uploaded_file:
     row = df.iloc[0]
     upload_id = str(uuid.uuid4())
 
+    # Proceed with the insert_user_case function
     with st.spinner("📥 Inserting into graph..."):
         insert_user_case(row, upload_id)
 
     with st.spinner("🔄 Generating embedding..."):
         run_node2vec()
+
     with st.spinner("🔮 Predicting..."):
         new_embedding = extract_user_embedding(upload_id)
         if new_embedding:
-            prediction = xgb_model.predict(new_embedding)[0]
+            prediction = clf.predict(new_embedding)[0]
             label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
             st.success(f"🔍 Prediction: **{label}**")
         else:
