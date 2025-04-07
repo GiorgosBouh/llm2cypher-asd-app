@@ -4,8 +4,8 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import pandas as pd
-import xgboost as xgb
-from sklearn.ensemble import RandomForestClassifier
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier  # Import the RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import uuid
@@ -27,7 +27,7 @@ def get_driver():
 driver = get_driver()
 
 # === Title, Subtitle & Attribution ===
-st.title("🧠 NeuroCypher ASD1")
+st.title("🧠 NeuroCypher ASD")
 st.markdown(
     "<i>The graph is based on Q-Chat-10 plus survey and other individuals characteristics that have proved to be effective in detecting the ASD cases from controls in behaviour science.</i>",
     unsafe_allow_html=True,
@@ -145,6 +145,7 @@ Only return the Cypher query.
 
 
 # Check GDS support
+# After initializing driver
 def is_gds_supported(driver):
     try:
         with driver.session(database="neo4j") as session:
@@ -215,13 +216,12 @@ def insert_user_case(row, upload_id):
         session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
         for i in range(1, 11):
             q = f"A{i}"
-            if q in row:
-                val = int(row[q])
-                session.run("""
-                    MATCH (q:BehaviorQuestion {name: $q})
-                    MATCH (c:Case {upload_id: $upload_id})
-                    CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
-                """, q=q, val=val, upload_id=upload_id)
+            val = int(row[q])
+            session.run("""
+                MATCH (q:BehaviorQuestion {name: $q})
+                MATCH (c:Case {upload_id: $upload_id})
+                CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
+            """, q=q, val=val, upload_id=upload_id)
 
         demo = {
             "Sex": row["Sex"],
@@ -281,7 +281,6 @@ if uploaded_file:
     if len(df) != 1:
         st.error("❌ Please upload exactly one row (one child).")
         st.stop()
-
     row = df.iloc[0]
     upload_id = str(uuid.uuid4())
 
