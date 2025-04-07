@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestClassifier  # Import the RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import uuid
@@ -272,7 +272,6 @@ st.markdown("""
 - `1` represents **ASD-positive Case** (ASD traits detected).
 """)
 
-# === Upload CSV and Predict ASD ===
 # === Upload CSV and Predict ASD ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
