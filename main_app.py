@@ -4,12 +4,11 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
+from imblearn.over_sampling import SMOTE
 import uuid
-
-st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
 # === Load environment variables ===
 load_dotenv()
@@ -68,101 +67,7 @@ Q: How many male toddlers with jaundice?
 Q: Who completed the test most often?
     """)
 
-# === NATURAL LANGUAGE TO CYPHER ===
-st.header("💬 Natural Language to Cypher")
-question = st.text_input("Ask a question in natural language:")
-
-# === Rewording Suggestions ===
-with st.expander("✏️ Need help rephrasing?"):
-    st.markdown("Try rephrasing your question like:")
-    st.markdown("- How many toddlers have ASD traits?")
-    st.markdown("- How many answered 1 to question A3?")
-    st.markdown("- How many male toddlers with jaundice?")
-    st.markdown("- Who completed the test most often?")
-
-# === Logging function ===
-def log_translation(nl_question, cypher_query, result, success=True):
-    with open("nl_to_cypher_log.csv", "a") as f:
-        f.write(f'"{nl_question}","{cypher_query}","{str(result)}",{success}\n')
-
-if question:
-    question = question.strip().replace("```cypher", "").replace("```", "").strip()
-    prompt = f"""
-You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
-
-Schema:
-- (:Case {{id: int}})
-- (:BehaviorQuestion {{name: string}})
-- (:ASD_Trait {{value: 'Yes' | 'No'}})
-- (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
-- (:SubmitterType {{type: string}})
-
-Relationships:
-- (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
-- (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
-- (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
-- (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
-
-Rewording Examples:
-- "How many kids are autistic?" → "How many toddlers have ASD traits?"
-- "Show me all answered 1 on A5" → "How many answered 1 to question A5?"
-
-Translate this question to Cypher:
-Q: {question}
-Only return the Cypher query.
-    """
-
-    client = OpenAI(api_key=OPENAI_API_KEY)
-
-    with st.spinner("💡 Translating to Cypher..."):
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-2024-08-06",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0
-            )
-            cypher_query = response.choices[0].message.content.strip()
-            cypher_query = cypher_query.replace("```cypher", "").replace("```", "").strip()
-            st.code(cypher_query, language="cypher")
-        except Exception as e:
-            st.error(f"OpenAI error: {e}")
-            st.stop()
-
-    with st.spinner("📡 Executing query in Neo4j..."):
-        try:
-            with driver.session() as session:
-                result = session.run(cypher_query)
-                records = [record.data() for record in result]
-
-            if records:
-                st.success("✅ Results:")
-                st.json(records)
-            else:
-                st.warning("⚠️ No results found.")
-            log_translation(question, cypher_query, records, success=True)
-        except Exception as e:
-            st.error(f"Neo4j error: {e}")
-            log_translation(question, cypher_query, str(e), success=False)
-
-
-# Check GDS support
-# After initializing driver
-def is_gds_supported(driver):
-    try:
-        with driver.session(database="neo4j") as session:
-            result = session.run("CALL gds.version()")
-            version = result.single()[0]
-            st.info(f"✅ GDS version detected: {version}")
-            return True
-    except Exception as e:
-        st.error(f"GDS test failed: {e}")
-        return False
-
-if not is_gds_supported(driver):
-    st.warning("⚠️ GDS is not available. Please ensure it is installed in the 'neo4j' database.")
-    st.stop()
-
-# ML functions
+# === ML Functions ===
 def prepare_graph_for_embeddings():
     with driver.session() as session:
         session.run("CALL gds.graph.drop('asd-graph', false)")
@@ -258,9 +163,20 @@ prepare_graph_for_embeddings()
 run_node2vec()
 X, y = extract_training_data()
 X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
-clf = RandomForestClassifier(n_estimators=100, random_state=42)
-clf.fit(X_train, y_train)
-y_pred = clf.predict(X_test)
+
+# Use SMOTE to balance the classes
+smote = SMOTE(sampling_strategy='auto', random_state=42)
+X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+
+# Create XGBoost model
+xgb_model = xgb.XGBClassifier(
+    scale_pos_weight=2,  # Adjust for class imbalance (adjust based on your case)
+    eval_metric='logloss',
+    use_label_encoder=False
+)
+xgb_model.fit(X_train_resampled, y_train_resampled)
+
+y_pred = xgb_model.predict(X_test)
 report = classification_report(y_test, y_pred, output_dict=True)
 
 # Display the report
@@ -295,9 +211,8 @@ if uploaded_file:
     with st.spinner("🔮 Predicting..."):
         new_embedding = extract_user_embedding(upload_id)
         if new_embedding:
-            prediction = clf.predict(new_embedding)[0]
+            prediction = xgb_model.predict(new_embedding)[0]
             label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
             st.success(f"🔍 Prediction: **{label}**")
         else:
             st.error("❌ No embedding found for the new Case.")
-
