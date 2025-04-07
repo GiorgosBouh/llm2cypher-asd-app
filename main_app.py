@@ -273,6 +273,7 @@ st.markdown("""
 """)
 
 # === Upload CSV and Predict ASD ===
+# === Upload CSV and Predict ASD ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
@@ -281,6 +282,7 @@ if uploaded_file:
     if len(df) != 1:
         st.error("❌ Please upload exactly one row (one child).")
         st.stop()
+
     row = df.iloc[0]
     upload_id = str(uuid.uuid4())
 
@@ -290,11 +292,20 @@ if uploaded_file:
     with st.spinner("🔄 Generating embedding..."):
         run_node2vec()
 
+    # === Check if the new embedding is valid ===
     with st.spinner("🔮 Predicting..."):
         new_embedding = extract_user_embedding(upload_id)
         if new_embedding:
-            prediction = clf.predict(new_embedding)[0]
-            label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
-            st.success(f"🔍 Prediction: **{label}**")
+            # Check if the new embedding contains NaN values
+            if any(pd.isna(val) for val in new_embedding[0]):
+                st.error("❌ The embedding contains NaN values. Please check the input data.")
+            else:
+                # Reshape the embedding into 2D if necessary
+                new_embedding_reshaped = new_embedding[0].reshape(1, -1)
+                
+                # Perform the prediction
+                prediction = clf.predict(new_embedding_reshaped)[0]
+                label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
+                st.success(f"🔍 Prediction: **{label}**")
         else:
             st.error("❌ No embedding found for the new Case.")
