@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 import xgboost as xgb
+from sklearn.ensemble import RandomForestClassifier  # Import the RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import uuid
