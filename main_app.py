@@ -7,7 +7,6 @@ import pandas as pd
 import xgboost as xgb
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
-from imblearn.over_sampling import SMOTE
 import uuid
 
 # === Load environment variables ===
@@ -67,7 +66,101 @@ Q: How many male toddlers with jaundice?
 Q: Who completed the test most often?
     """)
 
-# === ML Functions ===
+# === NATURAL LANGUAGE TO CYPHER ===
+st.header("💬 Natural Language to Cypher")
+question = st.text_input("Ask a question in natural language:")
+
+# === Rewording Suggestions ===
+with st.expander("✏️ Need help rephrasing?"):
+    st.markdown("Try rephrasing your question like:")
+    st.markdown("- How many toddlers have ASD traits?")
+    st.markdown("- How many answered 1 to question A3?")
+    st.markdown("- How many male toddlers with jaundice?")
+    st.markdown("- Who completed the test most often?")
+
+# === Logging function ===
+def log_translation(nl_question, cypher_query, result, success=True):
+    with open("nl_to_cypher_log.csv", "a") as f:
+        f.write(f'"{nl_question}","{cypher_query}","{str(result)}",{success}\n')
+
+if question:
+    question = question.strip().replace("```cypher", "").replace("```", "").strip()
+    prompt = f"""
+You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
+
+Schema:
+- (:Case {{id: int}})
+- (:BehaviorQuestion {{name: string}})
+- (:ASD_Trait {{value: 'Yes' | 'No'}})
+- (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
+- (:SubmitterType {{type: string}})
+
+Relationships:
+- (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
+- (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
+- (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
+- (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
+
+Rewording Examples:
+- "How many kids are autistic?" → "How many toddlers have ASD traits?"
+- "Show me all answered 1 on A5" → "How many answered 1 to question A5?"
+
+Translate this question to Cypher:
+Q: {question}
+Only return the Cypher query.
+    """
+
+    client = OpenAI(api_key=OPENAI_API_KEY)
+
+    with st.spinner("💡 Translating to Cypher..."):
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-2024-08-06",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0
+            )
+            cypher_query = response.choices[0].message.content.strip()
+            cypher_query = cypher_query.replace("```cypher", "").replace("```", "").strip()
+            st.code(cypher_query, language="cypher")
+        except Exception as e:
+            st.error(f"OpenAI error: {e}")
+            st.stop()
+
+    with st.spinner("📡 Executing query in Neo4j..."):
+        try:
+            with driver.session() as session:
+                result = session.run(cypher_query)
+                records = [record.data() for record in result]
+
+            if records:
+                st.success("✅ Results:")
+                st.json(records)
+            else:
+                st.warning("⚠️ No results found.")
+            log_translation(question, cypher_query, records, success=True)
+        except Exception as e:
+            st.error(f"Neo4j error: {e}")
+            log_translation(question, cypher_query, str(e), success=False)
+
+
+# Check GDS support
+# After initializing driver
+def is_gds_supported(driver):
+    try:
+        with driver.session(database="neo4j") as session:
+            result = session.run("CALL gds.version()")
+            version = result.single()[0]
+            st.info(f"✅ GDS version detected: {version}")
+            return True
+    except Exception as e:
+        st.error(f"GDS test failed: {e}")
+        return False
+
+if not is_gds_supported(driver):
+    st.warning("⚠️ GDS is not available. Please ensure it is installed in the 'neo4j' database.")
+    st.stop()
+
+# ML functions
 def prepare_graph_for_embeddings():
     with driver.session() as session:
         session.run("CALL gds.graph.drop('asd-graph', false)")
@@ -117,24 +210,18 @@ def extract_training_data():
     y = [1 if r["label"] == "Yes" else 0 for r in records]
     return pd.DataFrame(X), pd.Series(y)
 
-# Adjust the function to handle the correct column names from your file
 def insert_user_case(row, upload_id):
     with driver.session() as session:
-        # Create the Case node with upload_id
         session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
-        
-        # Loop through the A1 to A10 columns and insert them into Neo4j
         for i in range(1, 11):
             q = f"A{i}"
-            if q in row:  # Ensure the column exists in the uploaded data
-                val = int(row[q])
-                session.run("""
-                    MATCH (q:BehaviorQuestion {name: $q})
-                    MATCH (c:Case {upload_id: $upload_id})
-                    CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
-                """, q=q, val=val, upload_id=upload_id)
+            val = int(row[q])
+            session.run("""
+                MATCH (q:BehaviorQuestion {name: $q})
+                MATCH (c:Case {upload_id: $upload_id})
+                CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
+            """, q=q, val=val, upload_id=upload_id)
 
-        # Inserting demographic information
         demo = {
             "Sex": row["Sex"],
             "Ethnicity": row["Ethnicity"],
@@ -148,12 +235,11 @@ def insert_user_case(row, upload_id):
                 CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
             """, k=k, v=v, upload_id=upload_id)
 
-        # Inserting the SubmitterType relationship
         session.run("""
             MATCH (s:SubmitterType {type: $who})
             MATCH (c:Case {upload_id: $upload_id})
             CREATE (c)-[:SUBMITTED_BY]->(s)
-        """, who=row["Who_completed_the_test"], upload_id=upload_id)
+        """, who=row["Who_completed"], upload_id=upload_id)
 
 def extract_user_embedding(upload_id):
     with driver.session() as session:
@@ -170,16 +256,9 @@ prepare_graph_for_embeddings()
 run_node2vec()
 X, y = extract_training_data()
 X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
-
-# Create XGBoost model without SMOTE
-xgb_model = xgb.XGBClassifier(
-    scale_pos_weight=2,  # Adjust for class imbalance (adjust based on your case)
-    eval_metric='logloss',
-    use_label_encoder=False
-)
-xgb_model.fit(X_train, y_train)
-
-y_pred = xgb_model.predict(X_test)
+clf = RandomForestClassifier(n_estimators=100, random_state=42)
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
 report = classification_report(y_test, y_pred, output_dict=True)
 
 # Display the report
@@ -197,12 +276,7 @@ st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    df.columns = df.columns.str.strip()  # Clean up column names
-
-    # Check the column names to ensure 'Sex' is available
-    st.write("Columns in the uploaded CSV:", df.columns)  # This will display the column names
-
+    df = pd.read_csv(uploaded_file, delimiter=";")  # Ensure the correct delimiter is used
     if len(df) != 1:
         st.error("❌ Please upload exactly one row (one child).")
         st.stop()
@@ -210,7 +284,6 @@ if uploaded_file:
     row = df.iloc[0]
     upload_id = str(uuid.uuid4())
 
-    # Proceed with the insert_user_case function
     with st.spinner("📥 Inserting into graph..."):
         insert_user_case(row, upload_id)
 
