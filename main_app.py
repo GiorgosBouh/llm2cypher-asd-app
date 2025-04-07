@@ -240,7 +240,7 @@ def insert_user_case(row, upload_id):
             MATCH (s:SubmitterType {type: $who})
             MATCH (c:Case {upload_id: $upload_id})
             CREATE (c)-[:SUBMITTED_BY]->(s)
-        """, who=row["Who_completed"], upload_id=upload_id)
+        """, who=row["Who_completed_the_test"], upload_id=upload_id)
 
 def extract_user_embedding(upload_id):
     with driver.session() as session:
