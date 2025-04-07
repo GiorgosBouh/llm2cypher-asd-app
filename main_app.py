@@ -295,8 +295,9 @@ if uploaded_file:
     # === Check if the new embedding is valid ===
     with st.spinner("🔮 Predicting..."):
         new_embedding = extract_user_embedding(upload_id)
+        
         if new_embedding:
-            # Check if the new embedding contains NaN values
+            # Ensure the embedding is valid before proceeding
             if any(pd.isna(val) for val in new_embedding[0]):
                 st.error("❌ The embedding contains NaN values. Please check the input data.")
             else:
