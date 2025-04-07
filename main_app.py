@@ -171,17 +171,13 @@ run_node2vec()
 X, y = extract_training_data()
 X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
 
-# Use SMOTE to balance the classes
-smote = SMOTE(sampling_strategy='auto', random_state=42)
-X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
-
-# Create XGBoost model
+# Create XGBoost model without SMOTE
 xgb_model = xgb.XGBClassifier(
     scale_pos_weight=2,  # Adjust for class imbalance (adjust based on your case)
     eval_metric='logloss',
     use_label_encoder=False
 )
-xgb_model.fit(X_train_resampled, y_train_resampled)
+xgb_model.fit(X_train, y_train)
 
 y_pred = xgb_model.predict(X_test)
 report = classification_report(y_test, y_pred, output_dict=True)
@@ -214,7 +210,6 @@ if uploaded_file:
 
     with st.spinner("🔄 Generating embedding..."):
         run_node2vec()
-
     with st.spinner("🔮 Predicting..."):
         new_embedding = extract_user_embedding(upload_id)
         if new_embedding:
