@@ -117,18 +117,24 @@ def extract_training_data():
     y = [1 if r["label"] == "Yes" else 0 for r in records]
     return pd.DataFrame(X), pd.Series(y)
 
+# Adjust the function to handle the correct column names from your file
 def insert_user_case(row, upload_id):
     with driver.session() as session:
+        # Create the Case node with upload_id
         session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
+        
+        # Loop through the A1 to A10 columns and insert them into Neo4j
         for i in range(1, 11):
             q = f"A{i}"
-            val = int(row[q])
-            session.run("""
-                MATCH (q:BehaviorQuestion {name: $q})
-                MATCH (c:Case {upload_id: $upload_id})
-                CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
-            """, q=q, val=val, upload_id=upload_id)
+            if q in row:  # Ensure the column exists in the uploaded data
+                val = int(row[q])
+                session.run("""
+                    MATCH (q:BehaviorQuestion {name: $q})
+                    MATCH (c:Case {upload_id: $upload_id})
+                    CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
+                """, q=q, val=val, upload_id=upload_id)
 
+        # Inserting demographic information
         demo = {
             "Sex": row["Sex"],
             "Ethnicity": row["Ethnicity"],
@@ -142,11 +148,12 @@ def insert_user_case(row, upload_id):
                 CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
             """, k=k, v=v, upload_id=upload_id)
 
+        # Inserting the SubmitterType relationship
         session.run("""
             MATCH (s:SubmitterType {type: $who})
             MATCH (c:Case {upload_id: $upload_id})
             CREATE (c)-[:SUBMITTED_BY]->(s)
-        """, who=row["Who_completed"], upload_id=upload_id)
+        """, who=row["Who_completed_the_test"], upload_id=upload_id)
 
 def extract_user_embedding(upload_id):
     with driver.session() as session:
