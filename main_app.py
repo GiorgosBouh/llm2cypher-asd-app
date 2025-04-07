@@ -27,7 +27,7 @@ def get_driver():
 driver = get_driver()
 
 # === Title, Subtitle & Attribution ===
-st.title("🧠 NeuroCypher ASD")
+st.title("🧠 NeuroCypher ASD1")
 st.markdown(
     "<i>The graph is based on Q-Chat-10 plus survey and other individuals characteristics that have proved to be effective in detecting the ASD cases from controls in behaviour science.</i>",
     unsafe_allow_html=True,
