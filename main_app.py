@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 import xgboost as xgb
-from sklearn.ensemble import RandomForestClassifier  # Import the RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import uuid
@@ -145,7 +145,6 @@ Only return the Cypher query.
 
 
 # Check GDS support
-# After initializing driver
 def is_gds_supported(driver):
     try:
         with driver.session(database="neo4j") as session:
@@ -216,12 +215,13 @@ def insert_user_case(row, upload_id):
         session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
         for i in range(1, 11):
             q = f"A{i}"
-            val = int(row[q])
-            session.run("""
-                MATCH (q:BehaviorQuestion {name: $q})
-                MATCH (c:Case {upload_id: $upload_id})
-                CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
-            """, q=q, val=val, upload_id=upload_id)
+            if q in row:
+                val = int(row[q])
+                session.run("""
+                    MATCH (q:BehaviorQuestion {name: $q})
+                    MATCH (c:Case {upload_id: $upload_id})
+                    CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
+                """, q=q, val=val, upload_id=upload_id)
 
         demo = {
             "Sex": row["Sex"],
