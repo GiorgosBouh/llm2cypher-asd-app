@@ -297,7 +297,7 @@ st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
 if uploaded_file:
-    df = pd.read_csv(uploaded_file, delimiter=";")  # Ensure the correct delimiter is used
+    df = pd.read_csv(uploaded_file, delimiter=";")
     if len(df) != 1:
         st.error("❌ Please upload exactly one row (one child).")
         st.stop()
@@ -305,7 +305,8 @@ if uploaded_file:
     row = df.iloc[0]
 
     # Δημιουργία μοναδικού ID για το νέο περιστατικό
-    upload_id = str(uuid.uuid4())  # Moved inside the 'if uploaded_file:' block
+    upload_id = str(uuid.uuid4())
+    st.info(f"Generated upload_id: {upload_id}")  # Add this line
 
     # Εισαγωγή των νέων δεδομένων στον γράφο
     with st.spinner("📥 Inserting into graph..."):
