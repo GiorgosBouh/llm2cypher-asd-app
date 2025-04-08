@@ -29,6 +29,21 @@ def get_driver():
     return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
 driver = get_driver()
+# === Generate Embeddings using Node2Vec ===
+def run_node2vec():
+    with driver.session() as session:
+        session.run("""
+            CALL gds.node2vec.write(
+                'asd-graph',
+                {
+                    nodeLabels: ['Case'],
+                    embeddingDimension: 64,
+                    writeProperty: 'embedding',
+                    iterations: 10,
+                    randomSeed: 42
+                }
+            )
+        """)
 
 # === Insert User Case function (Place it here) ===
 def insert_user_case(row, upload_id):
