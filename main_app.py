@@ -139,7 +139,11 @@ def extract_user_embedding(upload_id):
             RETURN c.embedding AS embedding
         """, upload_id=upload_id)
         record = res.single()
-        return [record["embedding"]] if record else None
+        if record and record["embedding"]:
+            return [record["embedding"]]
+        else:
+            st.error(f"❌ No embedding found for the case with upload_id: {upload_id}")
+            return None
 
 # === Get Existing Embeddings for Anomaly Detection ===
 def get_existing_embeddings():
