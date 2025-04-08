@@ -66,6 +66,15 @@ def insert_user_case(row, upload_id):
 # === Generate Embeddings using Node2Vec ===
 def run_node2vec():
     with driver.session() as session:
+        # Check if the graph exists and drop it if it does
+        session.run("""
+            CALL gds.graph.exists('asd-graph')
+            YIELD exists
+            WITH exists
+            WHERE exists = true
+            CALL gds.graph.drop('asd-graph')
+        """)
+        # Create the graph projection
         session.run("""
             CALL gds.graph.project(
                 'asd-graph',
@@ -73,6 +82,7 @@ def run_node2vec():
                 '*'
             )
         """)
+        # Run Node2Vec
         session.run("""
             CALL gds.node2vec.write(
                 'asd-graph',
