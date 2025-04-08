@@ -247,22 +247,24 @@ if uploaded_file:
         st.stop()
 
     row = df.iloc[0]
-    upload_id = str(uuid.uuid4())
+    
+    # Δημιουργία μοναδικού ID για το νέο περιστατικό
+    upload_id = str(uuid.uuid4())  # Δημιουργεί ένα μοναδικό αναγνωριστικό ID για το νέο περιστατικό
 
-    # Insert the new case data into the graph
+    # Εισαγωγή των νέων δεδομένων στον γράφο
     with st.spinner("📥 Inserting into graph..."):
         insert_user_case(row, upload_id)
 
-    # Generate embeddings for the new case using Node2Vec
+    # Δημιουργία embeddings για το νέο περιστατικό χρησιμοποιώντας το Node2Vec
     with st.spinner("🔄 Generating embeddings..."):
         run_node2vec()
 
-    # Predict ASD traits for the new case
+    # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
     with st.spinner("🔮 Predicting ASD Traits..."):
         new_embedding = extract_user_embedding(upload_id)
         if new_embedding:
             new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
-            # Use the pre-trained classifier to predict ASD traits
+            # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
             prediction = clf.predict(new_embedding_reshaped)[0]
             label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
             st.success(f"🔍 Prediction: **{label}**")
