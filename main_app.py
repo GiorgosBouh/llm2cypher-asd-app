@@ -10,6 +10,7 @@ from sklearn.metrics import classification_report
 import uuid
 import numpy as np
 from sklearn.metrics.pairwise import euclidean_distances
+import time  # Import the time module
 
 st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
@@ -66,6 +67,13 @@ def insert_user_case(row, upload_id):
 def run_node2vec():
     with driver.session() as session:
         session.run("""
+            CALL gds.graph.project(
+                'asd-graph',
+                'Case',
+                '*'
+            )
+        """)
+        session.run("""
             CALL gds.node2vec.write(
                 'asd-graph',
                 {
@@ -77,6 +85,16 @@ def run_node2vec():
                 }
             )
         """)
+        session.run("CALL gds.graph.drop('asd-graph')") # Clean up the projected graph
+
+# === Check if User Case Exists ===
+def check_user_case_exists(upload_id):
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (c:Case {upload_id: $upload_id})
+            RETURN c
+        """, upload_id=upload_id)
+        return result.peek() is not None
 
 # === Extract User Embedding ===
 def extract_user_embedding(upload_id):
@@ -162,19 +180,19 @@ st.markdown(
 with st.expander("🧠 Graph Schema Help"):
     st.markdown("### 🧩 Node Types")
     st.markdown("""
-    - `Case`: Each screening instance  
-    - `BehaviorQuestion`: Questions A1–A10  
-    - `ASD_Trait`: Classification result (`Yes` / `No`)  
-    - `DemographicAttribute`: Sex, Ethnicity, Jaundice, etc.  
-    - `SubmitterType`: Who completed the test  
+    - `Case`: Each screening instance
+    - `BehaviorQuestion`: Questions A1–A10
+    - `ASD_Trait`: Classification result (`Yes` / `No`)
+    - `DemographicAttribute`: Sex, Ethnicity, Jaundice, etc.
+    - `SubmitterType`: Who completed the test
     """)
 
     st.markdown("### 🔗 Relationships")
     st.markdown("""
-    - `(:Case)-[:HAS_ANSWER]->(:BehaviorQuestion)`  
-    - `(:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)`  
-    - `(:Case)-[:SCREENED_FOR]->(:ASD_Trait)`  
-    - `(:Case)-[:SUBMITTED_BY]->(:SubmitterType)`  
+    - `(:Case)-[:HAS_ANSWER]->(:BehaviorQuestion)`
+    - `(:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)`
+    - `(:Case)-[:SCREENED_FOR]->(:ASD_Trait)`
+    - `(:Case)-[:SUBMITTED_BY]->(:SubmitterType)`
     """)
 
     st.markdown("### 💡 Example Questions")
@@ -247,7 +265,7 @@ if uploaded_file:
         st.stop()
 
     row = df.iloc[0]
-    
+
     # Δημιουργία μοναδικού ID για το νέο περιστατικό
     upload_id = str(uuid.uuid4())  # Δημιουργεί ένα μοναδικό αναγνωριστικό ID για το νέο περιστατικό
 
@@ -259,14 +277,21 @@ if uploaded_file:
     with st.spinner("🔄 Generating embeddings..."):
         run_node2vec()
 
+    # Wait a bit to ensure embeddings are written (you might need to adjust the sleep duration)
+    time.sleep(5)  # Wait for 5 seconds
+
     # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
     with st.spinner("🔮 Predicting ASD Traits..."):
-        new_embedding = extract_user_embedding(upload_id)
-        if new_embedding:
-            new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
-            # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
-            prediction = clf.predict(new_embedding_reshaped)[0]
-            label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
-            st.success(f"🔍 Prediction: **{label}**")
+        # Check if the user case exists
+        if not check_user_case_exists(upload_id):
+            st.error(f"❌ Could not find Case with upload_id: {upload_id} in the graph.")
         else:
-            st.error("❌ No embedding found for the new Case.")
+            new_embedding = extract_user_embedding(upload_id)
+            if new_embedding:
+                new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
+                # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
+                prediction = clf.predict(new_embedding_reshaped)[0]
+                label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
+                st.success(f"🔍 Prediction: **{label}**")
+            else:
+                st.error("❌ No embedding found for the new Case.")
