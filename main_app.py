@@ -250,66 +250,8 @@ clf = train_asd_detection_model()  # Train the model
 st.write("🔍 Model Evaluation Results (Precision, Recall, F1)")
 
 # === Upload CSV for 1 Child ASD Prediction ===
-st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
+t.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
-
-def insert_user_case(row, upload_id):
-    # Insert the new case into the Neo4j graph
-    with driver.session() as session:
-        session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
-        for i in range(1, 11):
-            q = f"A{i}"
-            val = int(row[q])
-            session.run("""
-                MATCH (q:BehaviorQuestion {name: $q})
-                MATCH (c:Case {upload_id: $upload_id})
-                CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
-            """, q=q, val=val, upload_id=upload_id)
-
-        demo = {
-            "Sex": row["Sex"],
-            "Ethnicity": row["Ethnicity"],
-            "Jaundice": row["Jaundice"],
-            "Family_mem_with_ASD": row["Family_mem_with_ASD"]
-        }
-        for k, v in demo.items():
-            session.run("""
-                MATCH (d:DemographicAttribute {type: $k, value: $v})
-                MATCH (c:Case {upload_id: $upload_id})
-                CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
-            """, k=k, v=v, upload_id=upload_id)
-
-        session.run("""
-            MATCH (s:SubmitterType {type: $who})
-            MATCH (c:Case {upload_id: $upload_id})
-            CREATE (c)-[:SUBMITTED_BY]->(s)
-        """, who=row["Who_completed_the_test"], upload_id=upload_id)
-
-def run_node2vec():
-    # Generate embeddings using Node2Vec algorithm
-    with driver.session() as session:
-        session.run("""
-            CALL gds.node2vec.write(
-                'asd-graph',
-                {
-                    nodeLabels: ['Case'],
-                    embeddingDimension: 64,
-                    writeProperty: 'embedding',
-                    iterations: 10,
-                    randomSeed: 42
-                }
-            )
-        """)
-
-def extract_user_embedding(upload_id):
-    # Extract the embedding for the new case
-    with driver.session() as session:
-        res = session.run("""
-            MATCH (c:Case {upload_id: $upload_id})
-            RETURN c.embedding AS embedding
-        """, upload_id=upload_id)
-        record = res.single()
-        return record["embedding"] if record else None
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file, delimiter=";")  # Ensure the correct delimiter is used
@@ -333,7 +275,7 @@ if uploaded_file:
         new_embedding = extract_user_embedding(upload_id)
         if new_embedding:
             new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
-            # Use a pre-trained classifier to predict ASD traits
+            # Use the pre-trained classifier to predict ASD traits
             prediction = clf.predict(new_embedding_reshaped)[0]
             label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
             st.success(f"🔍 Prediction: **{label}**")
