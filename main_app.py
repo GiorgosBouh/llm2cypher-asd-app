@@ -3,20 +3,29 @@ from neo4j import GraphDatabase
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
+import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
-import numpy as np
-import pandas as pd
 import uuid
+
+st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
 # === Load environment variables ===
 load_dotenv()
 
-# === Neo4j credentials from .env ===
+# === Credentials ===
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# === Connect to Neo4j ===
+@st.cache_resource
+def get_driver():
+    return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+
+driver = get_driver()
 
 # === Title, Subtitle & Attribution ===
 st.title("🧠 NeuroCypher ASD")
@@ -58,7 +67,7 @@ Q: Who completed the test most often?
 
 # === 2. Natural Language to Cypher Section ===
 st.header("💬 Natural Language to Cypher")
-question = st.text_input("📝 Ask your question in natural language")
+question = st.text_input("📝 Ask your question in natural language:")
 
 openai_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI(api_key=openai_key)
@@ -83,7 +92,7 @@ Relationships:
 Translate this question to Cypher:
 Q: {question}
 
-Only return the Cypher query, no explanation, no markdown.
+Only return the Cypher query.
 """
 
 if question:
