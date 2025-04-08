@@ -64,6 +64,7 @@ def insert_user_case(row, upload_id):
         """, who=row["Who_completed_the_test"], upload_id=upload_id)
 
 # === Generate Embeddings using Node2Vec ===
+# === Generate Embeddings using Node2Vec ===
 def run_node2vec():
     with driver.session() as session:
         # Check if the graph exists and drop it if it does
@@ -99,10 +100,8 @@ def run_node2vec():
             YIELD nodeCount, writeMillis, embeddingProperty
         """)
         # Clean up the projected graph
-        session.run("""
-            CALL gds.graph.drop('asd-graph')
-            YIELD graphName
-        """)
+        session.run("CALL gds.graph.drop('asd-graph')")
+   
 
 # === Check if User Case Exists ===
 def check_user_case_exists(upload_id):
