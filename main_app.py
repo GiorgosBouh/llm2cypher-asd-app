@@ -130,16 +130,20 @@ def predict_asd_for_new_case(upload_id, clf):
         st.error("❌ No embedding found for the new Case.")
 
 # === Anomaly Detection ===
+# === Anomaly Detection ===
 def detect_anomalies_for_new_case(upload_id):
     new_embedding = extract_user_embedding(upload_id)
     if new_embedding:
-        new_embedding_reshaped = new_embedding[0].reshape(1, -1)
-        distances = euclidean_distances(new_embedding_reshaped, get_existing_embeddings())
-        threshold = 2.0
-        if np.min(distances) > threshold:
-            st.warning("⚠️ This case might be an anomaly!")
+        if isinstance(new_embedding, list):
+            new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)
+            distances = euclidean_distances(new_embedding_reshaped, get_existing_embeddings())
+            threshold = 2.0
+            if np.min(distances) > threshold:
+                st.warning("⚠️ This case might be an anomaly!")
+            else:
+                st.success("✅ This case is similar to existing cases.")
         else:
-            st.success("✅ This case is similar to existing cases.")
+            st.error(f"❌ Expected embedding to be a list, but got: {type(new_embedding)}")
     else:
         st.error("❌ No embedding found for the new Case.")
 
