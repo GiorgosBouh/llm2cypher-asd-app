@@ -305,5 +305,8 @@ if uploaded_file:
                 prediction = clf.predict(new_embedding_reshaped)[0]
                 label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
                 st.success(f"🔍 Prediction: **{label}**")
+                # --- Προσθέστε την κλήση για την ανίχνευση ανωμαλιών εδώ ---
+            with st.spinner("🧐 Detecting Anomalies..."):
+                detect_anomalies_for_new_case(upload_id)
             else:
                 st.error("❌ No embedding found for the new Case.")
