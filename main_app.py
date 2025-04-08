@@ -138,11 +138,19 @@ def extract_user_embedding(upload_id):
             MATCH (c:Case {upload_id: $upload_id})
             RETURN c.embedding AS embedding
         """, upload_id=upload_id)
+        
         record = res.single()
-        if record and record["embedding"]:
-            return [record["embedding"]]
+        
+        # Debugging: Check if we have a valid result
+        if record:
+            if record["embedding"]:
+                st.write(f"Embedding for upload_id {upload_id}: {record['embedding']}")
+                return [record["embedding"]]
+            else:
+                st.error(f"❌ No embedding found for upload_id: {upload_id}")
+                return None
         else:
-            st.error(f"❌ No embedding found for the case with upload_id: {upload_id}")
+            st.error(f"❌ Case with upload_id {upload_id} not found.")
             return None
 
 # === Get Existing Embeddings for Anomaly Detection ===
@@ -241,12 +249,70 @@ st.subheader("📊 Model Evaluation on Existing Graph Data")
 clf = train_asd_detection_model()  # Train the model
 st.write("🔍 Model Evaluation Results (Precision, Recall, F1)")
 
-# === 4. Upload CSV for New Case ===
+# === Upload CSV for 1 Child ASD Prediction ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
+def insert_user_case(row, upload_id):
+    # Insert the new case into the Neo4j graph
+    with driver.session() as session:
+        session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
+        for i in range(1, 11):
+            q = f"A{i}"
+            val = int(row[q])
+            session.run("""
+                MATCH (q:BehaviorQuestion {name: $q})
+                MATCH (c:Case {upload_id: $upload_id})
+                CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
+            """, q=q, val=val, upload_id=upload_id)
+
+        demo = {
+            "Sex": row["Sex"],
+            "Ethnicity": row["Ethnicity"],
+            "Jaundice": row["Jaundice"],
+            "Family_mem_with_ASD": row["Family_mem_with_ASD"]
+        }
+        for k, v in demo.items():
+            session.run("""
+                MATCH (d:DemographicAttribute {type: $k, value: $v})
+                MATCH (c:Case {upload_id: $upload_id})
+                CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
+            """, k=k, v=v, upload_id=upload_id)
+
+        session.run("""
+            MATCH (s:SubmitterType {type: $who})
+            MATCH (c:Case {upload_id: $upload_id})
+            CREATE (c)-[:SUBMITTED_BY]->(s)
+        """, who=row["Who_completed_the_test"], upload_id=upload_id)
+
+def run_node2vec():
+    # Generate embeddings using Node2Vec algorithm
+    with driver.session() as session:
+        session.run("""
+            CALL gds.node2vec.write(
+                'asd-graph',
+                {
+                    nodeLabels: ['Case'],
+                    embeddingDimension: 64,
+                    writeProperty: 'embedding',
+                    iterations: 10,
+                    randomSeed: 42
+                }
+            )
+        """)
+
+def extract_user_embedding(upload_id):
+    # Extract the embedding for the new case
+    with driver.session() as session:
+        res = session.run("""
+            MATCH (c:Case {upload_id: $upload_id})
+            RETURN c.embedding AS embedding
+        """, upload_id=upload_id)
+        record = res.single()
+        return record["embedding"] if record else None
+
 if uploaded_file:
-    df = pd.read_csv(uploaded_file, delimiter=";")
+    df = pd.read_csv(uploaded_file, delimiter=";")  # Ensure the correct delimiter is used
     if len(df) != 1:
         st.error("❌ Please upload exactly one row (one child).")
         st.stop()
@@ -254,16 +320,22 @@ if uploaded_file:
     row = df.iloc[0]
     upload_id = str(uuid.uuid4())
 
+    # Insert the new case data into the graph
     with st.spinner("📥 Inserting into graph..."):
         insert_user_case(row, upload_id)
 
-    with st.spinner("🔄 Generating embedding..."):
-        run_node2vec()  # This will now run after the graph is inserted
+    # Generate embeddings for the new case using Node2Vec
+    with st.spinner("🔄 Generating embeddings..."):
+        run_node2vec()
 
-    # === 5. Predict ASD for New Case ===
+    # Predict ASD traits for the new case
     with st.spinner("🔮 Predicting ASD Traits..."):
-        predict_asd_for_new_case(upload_id, clf)
-
-    # === 6. Anomaly Detection ===
-    with st.spinner("🔍 Detecting Anomalies..."):
-        detect_anomalies_for_new_case(upload_id)
+        new_embedding = extract_user_embedding(upload_id)
+        if new_embedding:
+            new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
+            # Use a pre-trained classifier to predict ASD traits
+            prediction = clf.predict(new_embedding_reshaped)[0]
+            label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
+            st.success(f"🔍 Prediction: **{label}**")
+        else:
+            st.error("❌ No embedding found for the new Case.")
