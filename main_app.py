@@ -250,7 +250,7 @@ clf = train_asd_detection_model()  # Train the model
 st.write("🔍 Model Evaluation Results (Precision, Recall, F1)")
 
 # === Upload CSV for 1 Child ASD Prediction ===
-t.subheader("📄 Upload CSV for 1 Child ASD Prediction")
+st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
 if uploaded_file:
