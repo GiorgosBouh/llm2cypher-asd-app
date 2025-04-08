@@ -279,7 +279,7 @@ if uploaded_file:
     row = df.iloc[0]
 
     # Δημιουργία μοναδικού ID για το νέο περιστατικό
-    upload_id = str(uuid.uuid4())  # Δημιουργεί ένα μοναδικό αναγνωριστικό ID για το νέο περιστατικό
+    upload_id = str(uuid.uuid4())
 
     # Εισαγωγή των νέων δεδομένων στον γράφο
     with st.spinner("📥 Inserting into graph..."):
@@ -288,9 +288,7 @@ if uploaded_file:
     # Δημιουργία embeddings για το νέο περιστατικό χρησιμοποιώντας το Node2Vec
     with st.spinner("🔄 Generating embeddings..."):
         run_node2vec()
-
-    # Wait a bit to ensure embeddings are written (you might need to adjust the sleep duration)
-    time.sleep(5)  # Wait for 5 seconds
+        time.sleep(5)  # Wait for embeddings to be written
 
     # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
     with st.spinner("🔮 Predicting ASD Traits..."):
@@ -305,8 +303,10 @@ if uploaded_file:
                 prediction = clf.predict(new_embedding_reshaped)[0]
                 label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
                 st.success(f"🔍 Prediction: **{label}**")
-                # --- Προσθέστε την κλήση για την ανίχνευση ανωμαλιών εδώ ---
-            with st.spinner("🧐 Detecting Anomalies..."):
-                detect_anomalies_for_new_case(upload_id)
             else:
                 st.error("❌ No embedding found for the new Case.")
+
+    # --- Κλήση για την ανίχνευση ανωμαλιών ---
+    with st.spinner("🧐 Detecting Anomalies..."):
+        detect_anomalies_for_new_case(upload_id)
+    # ----------------------------------------
