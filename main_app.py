@@ -235,7 +235,10 @@ Schema:
 - (:Case {{id: int}})
 - (:BehaviorQuestion {{name: string}})
 - (:ASD_Trait {{value: 'Yes' | 'No'}})
-- (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
+- (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}}.
+  Note:
+    - For the 'Sex' attribute, the possible values are 'm' (male) and 'f' (female) (lowercase).
+    - For the 'Jaundice' attribute, the possible values are 'yes' and 'no' (lowercase).
 - (:SubmitterType {{type: string}})
 
 Relationships:
@@ -244,7 +247,8 @@ Relationships:
 - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
 - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
 
-Translate this question to Cypher:
+Translate the following natural language question to Cypher, ensuring that you use the correct values and capitalization as described in the schema.
+
 Q: {question}
 
 Only return the Cypher query.
