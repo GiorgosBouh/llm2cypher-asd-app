@@ -56,7 +56,6 @@ def insert_user_case(row, upload_id):
                 CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
             """, k=k, v=v, upload_id=upload_id)
 
-        # Insert who completed the test
         session.run("""
             MATCH (s:SubmitterType {type: $who})
             MATCH (c:Case {upload_id: $upload_id})
@@ -79,11 +78,21 @@ def run_node2vec():
             )
         """)
 
+# === Extract User Embedding ===
+def extract_user_embedding(upload_id):
+    with driver.session() as session:
+        res = session.run("""
+            MATCH (c:Case {upload_id: $upload_id})
+            RETURN c.embedding AS embedding
+        """, upload_id=upload_id)
+        record = res.single()
+        return record["embedding"] if record else None
+
 # === Predict ASD for New Case ===
 def predict_asd_for_new_case(upload_id, clf):
     new_embedding = extract_user_embedding(upload_id)
     if new_embedding:
-        new_embedding_reshaped = new_embedding[0].reshape(1, -1)
+        new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)
         prediction = clf.predict(new_embedding_reshaped)[0]
         label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
         st.success(f"🔍 Prediction: **{label}**")
@@ -104,7 +113,7 @@ def detect_anomalies_for_new_case(upload_id):
     else:
         st.error("❌ No embedding found for the new Case.")
 
-# === Extract Embeddings and Labels for Training ===
+# === Extract Training Data for ML Model ===
 def extract_training_data():
     with driver.session() as session:
         result = session.run("""
@@ -130,28 +139,6 @@ def train_asd_detection_model():
     st.write(pd.DataFrame(report).transpose())
 
     return clf
-
-# === Extract User Embedding ===
-def extract_user_embedding(upload_id):
-    with driver.session() as session:
-        res = session.run("""
-            MATCH (c:Case {upload_id: $upload_id})
-            RETURN c.embedding AS embedding
-        """, upload_id=upload_id)
-        
-        record = res.single()
-        
-        # Debugging: Check if we have a valid result
-        if record:
-            if record["embedding"]:
-                st.write(f"Embedding for upload_id {upload_id}: {record['embedding']}")
-                return [record["embedding"]]
-            else:
-                st.error(f"❌ No embedding found for upload_id: {upload_id}")
-                return None
-        else:
-            st.error(f"❌ Case with upload_id {upload_id} not found.")
-            return None
 
 # === Get Existing Embeddings for Anomaly Detection ===
 def get_existing_embeddings():
