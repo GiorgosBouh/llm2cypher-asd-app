@@ -30,6 +30,43 @@ def get_driver():
 
 driver = get_driver()
 
+# === Insert User Case function (Place it here) ===
+def insert_user_case(row, upload_id):
+    with driver.session() as session:
+        # Insert a new Case node
+        session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
+        
+        # Insert BehaviorQuestion answers
+        for i in range(1, 11):  # Assuming you have questions A1 to A10
+            q = f"A{i}"
+            val = int(row[q])  # Get the answer from the CSV file
+            session.run("""
+                MATCH (q:BehaviorQuestion {name: $q})
+                MATCH (c:Case {upload_id: $upload_id})
+                CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
+            """, q=q, val=val, upload_id=upload_id)
+
+        # Insert demographic information
+        demo = {
+            "Sex": row["Sex"],
+            "Ethnicity": row["Ethnicity"],
+            "Jaundice": row["Jaundice"],
+            "Family_mem_with_ASD": row["Family_mem_with_ASD"]
+        }
+        for k, v in demo.items():
+            session.run("""
+                MATCH (d:DemographicAttribute {type: $k, value: $v})
+                MATCH (c:Case {upload_id: $upload_id})
+                CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
+            """, k=k, v=v, upload_id=upload_id)
+
+        # Insert who completed the test
+        session.run("""
+            MATCH (s:SubmitterType {type: $who})
+            MATCH (c:Case {upload_id: $upload_id})
+            CREATE (c)-[:SUBMITTED_BY]->(s)
+        """, who=row["Who_completed_the_test"], upload_id=upload_id)
+
 # Title and Introduction
 st.title("🧠 NeuroCypher ASD")
 st.markdown(
