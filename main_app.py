@@ -73,6 +73,7 @@ def run_node2vec():
             WITH exists
             WHERE exists = true
             CALL gds.graph.drop('asd-graph')
+            YIELD graphName
         """)
         # Create the graph projection
         session.run("""
@@ -81,6 +82,7 @@ def run_node2vec():
                 'Case',
                 '*'
             )
+            YIELD graphName, nodeCount, relationshipCount, createMillis
         """)
         # Run Node2Vec
         session.run("""
@@ -94,8 +96,13 @@ def run_node2vec():
                     randomSeed: 42
                 }
             )
+            YIELD nodeCount, writeMillis, embeddingProperty
         """)
-        session.run("CALL gds.graph.drop('asd-graph')") # Clean up the projected graph
+        # Clean up the projected graph
+        session.run("""
+            CALL gds.graph.drop('asd-graph')
+            YIELD graphName
+        """)
 
 # === Check if User Case Exists ===
 def check_user_case_exists(upload_id):
