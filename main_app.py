@@ -197,6 +197,7 @@ clf = train_asd_detection_model()  # Train the model
 st.write("🔍 Model Evaluation Results (Precision, Recall, F1)")
 
 # === 4. Upload CSV for New Case ===
+# === 4. Upload CSV for New Case ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
@@ -213,7 +214,15 @@ if uploaded_file:
         insert_user_case(row, upload_id)
 
     with st.spinner("🔄 Generating embedding..."):
-        run_node2vec()
+        run_node2vec()  # This will now run after the graph is inserted
+
+    # === 5. Predict ASD for New Case ===
+    with st.spinner("🔮 Predicting ASD Traits..."):
+        predict_asd_for_new_case(upload_id, clf)
+
+    # === 6. Anomaly Detection ===
+    with st.spinner("🔍 Detecting Anomalies..."):
+        detect_anomalies_for_new_case(upload_id)
 
     # === 5. Predict ASD for New Case ===
     with st.spinner("🔮 Predicting ASD Traits..."):
