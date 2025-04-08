@@ -220,6 +220,7 @@ Q: Who completed the test most often?
     """)
 
 # === 2. Natural Language to Cypher Section ===
+# === 2. Natural Language to Cypher Section ===
 st.header("💬 Natural Language to Cypher")
 question = st.text_input("📝 Ask your question in natural language:")
 
@@ -260,6 +261,20 @@ if question:
             )
             cypher_query = response.choices[0].message.content.strip()
             st.code(cypher_query, language="cypher")
+
+            # === Execute Cypher Query and Display Results ===
+            if st.button("▶️ Run Query"):
+                with driver.session() as session:
+                    try:
+                        results = session.run(cypher_query).data()
+                        if results:
+                            st.subheader("📊 Query Results:")
+                            st.write(pd.DataFrame(results))
+                        else:
+                            st.info("No results found.")
+                    except Exception as e:
+                        st.error(f"Neo4j error: {e}")
+
         except Exception as e:
             st.error(f"OpenAI error: {e}")
             st.stop()
