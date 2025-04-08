@@ -8,6 +8,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import numpy as np
 import pandas as pd
+import uuid
 
 # === Load environment variables ===
 load_dotenv()
@@ -28,185 +29,96 @@ st.markdown("""
 **Made in the Intelligent Systems Laboratory of the University of the Aegean by Bouchouras G., Doumanas D., Kotis K. (2025)**  
 """)
 
-# === App UI ===
-st.markdown("Ask a question in natural language and get answers from Neo4j using OpenAI.")
-
-# === Optional: Prompt Schema Visualizer ===
-with st.expander("🧠 Graph Schema Help"):
-    st.markdown("### 🧩 Node Types")
-    st.markdown("""
-    - `Case`: Each screening instance  
-    - `BehaviorQuestion`: Questions A1–A10  
-    - `ASD_Trait`: Classification result (`Yes` / `No`)  
-    - `DemographicAttribute`: Sex, Ethnicity, Jaundice, etc.  
-    - `SubmitterType`: Who completed the test  
-    """)
-
-    st.markdown("### 🔗 Relationships")
-    st.markdown("""
-    - `(:Case)-[:HAS_ANSWER]->(:BehaviorQuestion)`  
-    - `(:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)`  
-    - `(:Case)-[:SCREENED_FOR]->(:ASD_Trait)`  
-    - `(:Case)-[:SUBMITTED_BY]->(:SubmitterType)`  
-    """)
-
-    st.markdown("### 💡 Example Questions")
-    st.code("""
-Q: How many toddlers have ASD traits?
-Q: How many answered 1 to question A3?
-Q: How many male toddlers with jaundice?
-Q: Who completed the test most often?
-    """)
-
-# === Input fields ===
-openai_key = os.getenv("OPENAI_API_KEY")
-question = st.text_input("📝 Ask your question in natural language")
-
-if not question:
-    st.stop()
-
-# === Initialize OpenAI client ===
-client = OpenAI(api_key=openai_key)
-
-# === Prompt engineering with schema ===
-prompt = f"""
-You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
-
-Schema:
-- (:Case {{id: int}})
-- (:BehaviorQuestion {{name: string}})
-- (:ASD_Trait {{value: 'Yes' | 'No'}})
-- (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
-- (:SubmitterType {{type: string}})
-
-Relationships:
-- (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
-- (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
-- (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
-- (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
-
-Examples:
-Q: How many toddlers have ASD traits?
-A: MATCH (c:Case)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'Yes'}}) RETURN count(DISTINCT c) AS total
-
-Q: How many male toddlers?
-A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}) RETURN count(DISTINCT c) AS male_cases
-
-Q: How many female toddlers with family history of ASD?
-A: MATCH (c:Case)
-      -[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'f'}}),
-      (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Family_mem_with_ASD', value: 'yes'}})
-   RETURN count(DISTINCT c) AS total
-
-Now, translate this user question into Cypher:
-Q: {question}
-
-Only return the Cypher query, no explanation, no markdown.
-"""
-
-# === Generate Cypher query ===
-with st.spinner("💬 Thinking..."):
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-2024-08-06",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        cypher_query = response.choices[0].message.content.strip()
-        st.code(cypher_query, language="cypher")
-
-    except Exception as e:
-        st.error(f"OpenAI error: {e}")
-        st.stop()
-
-# === Run query on Neo4j ===
-with st.spinner("📡 Querying Neo4j..."):
-    try:
-        driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-        with driver.session() as session:
-            result = session.run(cypher_query)
-            records = [record.data() for record in result]
-
-        if records:
-            st.success("✅ Results:")
-            st.json(records)
-        else:
-            st.warning("No results found.")
-
-    except Exception as e:
-        st.error(f"Neo4j error: {e}")
 # === ML Functions ===
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
-import numpy as np
-import pandas as pd
-
-# === Train ML model using existing graph embeddings ===
 def train_asd_detection_model():
-    # Extract embeddings and labels (1 for ASD, 0 for Control)
+    """Train the model on the graph data embeddings and ASD labels"""
     X, y = extract_training_data()
-
-    # Train the Random Forest Classifier
     X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
     clf = RandomForestClassifier(n_estimators=100, random_state=42)
     clf.fit(X_train, y_train)
 
-    # Evaluate the model
     y_pred = clf.predict(X_test)
     report = classification_report(y_test, y_pred, output_dict=True)
 
-    # Display the results
-    st.write(pd.DataFrame(report).transpose())
-
+    st.write(pd.DataFrame(report).transpose())  # Show classification report in Streamlit
     return clf
 
-# === Use embeddings from Neo4j to predict ASD for new file ===
-def predict_asd_for_new_case(upload_id, clf):
-    # Get the embedding for the new case
-    new_embedding = extract_user_embedding(upload_id)
+def extract_training_data():
+    """Extract embeddings and corresponding ASD labels from the Neo4j database"""
+    # Get embeddings and labels (1 for ASD, 0 for Control)
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (c:Case)-[:SCREENED_FOR]->(t:ASD_Trait)
+            WHERE c.embedding IS NOT NULL
+            RETURN c.embedding AS embedding, t.value AS label
+        """)
+        records = result.data()
 
-    if new_embedding:
-        # Check if the embedding is valid
-        if any(pd.isna(val) for val in new_embedding[0]):
-            st.error("❌ The embedding contains NaN values. Please check the input data.")
-        else:
-            # Reshape the embedding into 2D if necessary
-            new_embedding_reshaped = new_embedding[0].reshape(1, -1)
+    X = [r["embedding"] for r in records]
+    y = [1 if r["label"] == "Yes" else 0 for r in records]
+    return pd.DataFrame(X), pd.Series(y)
 
-            # Perform the prediction
-            prediction = clf.predict(new_embedding_reshaped)[0]
-            label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
-            st.success(f"🔍 Prediction: **{label}**")
-    else:
-        st.error("❌ No embedding found for the new Case.")
+def insert_user_case(row, upload_id):
+    """Insert the uploaded case into Neo4j"""
+    with driver.session() as session:
+        session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
+        # Insert answers to behavior questions
+        for i in range(1, 11):
+            q = f"A{i}"
+            val = int(row[q])
+            session.run("""
+                MATCH (q:BehaviorQuestion {name: $q})
+                MATCH (c:Case {upload_id: $upload_id})
+                CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
+            """, q=q, val=val, upload_id=upload_id)
+
+        demo = {
+            "Sex": row["Sex"],
+            "Ethnicity": row["Ethnicity"],
+            "Jaundice": row["Jaundice"],
+            "Family_mem_with_ASD": row["Family_mem_with_ASD"]
+        }
+        for k, v in demo.items():
+            session.run("""
+                MATCH (d:DemographicAttribute {type: $k, value: $v})
+                MATCH (c:Case {upload_id: $upload_id})
+                CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
+            """, k=k, v=v, upload_id=upload_id)
+
+        session.run("""
+            MATCH (s:SubmitterType {type: $who})
+            MATCH (c:Case {upload_id: $upload_id})
+            CREATE (c)-[:SUBMITTED_BY]->(s)
+        """, who=row["Who_completed_the_test"], upload_id=upload_id)
+
+def extract_user_embedding(upload_id):
+    """Extract embedding for the uploaded case"""
+    with driver.session() as session:
+        res = session.run("""
+            MATCH (c:Case {upload_id: $upload_id})
+            RETURN c.embedding AS embedding
+        """, upload_id=upload_id)
+        record = res.single()
+        return [record["embedding"]] if record else None
 
 # === Anomaly Detection ===
 def detect_anomalies_for_new_case(upload_id):
-    # Get the embedding for the new case
+    """Detect if the new uploaded case is an anomaly in relation to existing cases"""
     new_embedding = extract_user_embedding(upload_id)
 
     if new_embedding:
-        # Check if embedding contains NaN values
         if any(pd.isna(val) for val in new_embedding[0]):
             st.error("❌ The embedding contains NaN values. Please check the input data.")
         else:
-            # Reshape into 2D array for anomaly detection
             new_embedding_reshaped = new_embedding[0].reshape(1, -1)
 
-            # Calculate the distance between the new case and other cases (can use cosine similarity, Euclidean distance, etc.)
-            # For simplicity, use Euclidean distance
+            # Calculate distances (Euclidean or cosine similarity)
             from sklearn.metrics.pairwise import euclidean_distances
-
-            # Get the embeddings of the existing data (use embeddings stored in the Neo4j graph)
-            existing_embeddings = get_existing_embeddings()  # This function needs to be defined to get existing embeddings
-
-            # Compute the distance
+            existing_embeddings = get_existing_embeddings()  # Function to retrieve existing embeddings
             distances = euclidean_distances(new_embedding_reshaped, existing_embeddings)
             st.write(f"Distances to existing cases: {distances}")
 
-            # Check if the new case is significantly different (define a threshold for anomaly detection)
-            threshold = 2.0  # Example threshold; this can be adjusted
+            threshold = 2.0  # Can adjust the threshold for anomaly detection
             if np.min(distances) > threshold:
                 st.warning("⚠️ This case might be an anomaly!")
             else:
@@ -214,7 +126,15 @@ def detect_anomalies_for_new_case(upload_id):
     else:
         st.error("❌ No embedding found for the new Case.")
 
-# === Process for handling uploaded file ===
+# === Get Existing Embeddings ===
+def get_existing_embeddings():
+    """Retrieve existing embeddings from the Neo4j database for anomaly detection"""
+    with driver.session() as session:
+        result = session.run("MATCH (c:Case) WHERE c.embedding IS NOT NULL RETURN c.embedding AS embedding")
+        embeddings = [record["embedding"] for record in result]
+    return np.array(embeddings)
+
+# === Main Process for Handling Uploaded File ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
@@ -227,6 +147,7 @@ if uploaded_file:
     row = df.iloc[0]
     upload_id = str(uuid.uuid4())
 
+    # Insert new case into the graph and generate its embedding
     with st.spinner("📥 Inserting into graph..."):
         insert_user_case(row, upload_id)
 
