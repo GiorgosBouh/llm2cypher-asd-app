@@ -3,6 +3,11 @@ from neo4j import GraphDatabase
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+import numpy as np
+import pandas as pd
 
 # === Load environment variables ===
 load_dotenv()
@@ -130,3 +135,109 @@ with st.spinner("📡 Querying Neo4j..."):
 
     except Exception as e:
         st.error(f"Neo4j error: {e}")
+# === ML Functions ===
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+import numpy as np
+import pandas as pd
+
+# === Train ML model using existing graph embeddings ===
+def train_asd_detection_model():
+    # Extract embeddings and labels (1 for ASD, 0 for Control)
+    X, y = extract_training_data()
+
+    # Train the Random Forest Classifier
+    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
+    clf = RandomForestClassifier(n_estimators=100, random_state=42)
+    clf.fit(X_train, y_train)
+
+    # Evaluate the model
+    y_pred = clf.predict(X_test)
+    report = classification_report(y_test, y_pred, output_dict=True)
+
+    # Display the results
+    st.write(pd.DataFrame(report).transpose())
+
+    return clf
+
+# === Use embeddings from Neo4j to predict ASD for new file ===
+def predict_asd_for_new_case(upload_id, clf):
+    # Get the embedding for the new case
+    new_embedding = extract_user_embedding(upload_id)
+
+    if new_embedding:
+        # Check if the embedding is valid
+        if any(pd.isna(val) for val in new_embedding[0]):
+            st.error("❌ The embedding contains NaN values. Please check the input data.")
+        else:
+            # Reshape the embedding into 2D if necessary
+            new_embedding_reshaped = new_embedding[0].reshape(1, -1)
+
+            # Perform the prediction
+            prediction = clf.predict(new_embedding_reshaped)[0]
+            label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
+            st.success(f"🔍 Prediction: **{label}**")
+    else:
+        st.error("❌ No embedding found for the new Case.")
+
+# === Anomaly Detection ===
+def detect_anomalies_for_new_case(upload_id):
+    # Get the embedding for the new case
+    new_embedding = extract_user_embedding(upload_id)
+
+    if new_embedding:
+        # Check if embedding contains NaN values
+        if any(pd.isna(val) for val in new_embedding[0]):
+            st.error("❌ The embedding contains NaN values. Please check the input data.")
+        else:
+            # Reshape into 2D array for anomaly detection
+            new_embedding_reshaped = new_embedding[0].reshape(1, -1)
+
+            # Calculate the distance between the new case and other cases (can use cosine similarity, Euclidean distance, etc.)
+            # For simplicity, use Euclidean distance
+            from sklearn.metrics.pairwise import euclidean_distances
+
+            # Get the embeddings of the existing data (use embeddings stored in the Neo4j graph)
+            existing_embeddings = get_existing_embeddings()  # This function needs to be defined to get existing embeddings
+
+            # Compute the distance
+            distances = euclidean_distances(new_embedding_reshaped, existing_embeddings)
+            st.write(f"Distances to existing cases: {distances}")
+
+            # Check if the new case is significantly different (define a threshold for anomaly detection)
+            threshold = 2.0  # Example threshold; this can be adjusted
+            if np.min(distances) > threshold:
+                st.warning("⚠️ This case might be an anomaly!")
+            else:
+                st.success("✅ This case is similar to existing cases.")
+    else:
+        st.error("❌ No embedding found for the new Case.")
+
+# === Process for handling uploaded file ===
+st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
+uploaded_file = st.file_uploader("Upload CSV", type="csv")
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file, delimiter=";")  # Ensure correct delimiter is used
+    if len(df) != 1:
+        st.error("❌ Please upload exactly one row (one child).")
+        st.stop()
+
+    row = df.iloc[0]
+    upload_id = str(uuid.uuid4())
+
+    with st.spinner("📥 Inserting into graph..."):
+        insert_user_case(row, upload_id)
+
+    with st.spinner("🔄 Generating embedding..."):
+        run_node2vec()
+
+    # === Predict ASD for the new uploaded case ===
+    with st.spinner("🔮 Predicting ASD Traits..."):
+        clf = train_asd_detection_model()  # Train the model on the existing data first
+        predict_asd_for_new_case(upload_id, clf)
+
+    # === Anomaly Detection for the new uploaded case ===
+    with st.spinner("🔍 Detecting Anomalies..."):
+        detect_anomalies_for_new_case(upload_id)
