@@ -259,7 +259,9 @@ if question:
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0
             )
-            cypher_query = response.choices[0].message.content.strip()
+            llm_response = response.choices[0].message.content.strip()
+            # Αφαιρούμε τις ενδείξεις format code από την απάντηση του LLM
+            cypher_query = llm_response.replace("```cypher", "").replace("```", "").strip()
             st.code(cypher_query, language="cypher")
 
             # === Execute Cypher Query and Display Results ===
