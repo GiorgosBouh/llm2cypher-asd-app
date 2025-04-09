@@ -96,9 +96,9 @@ def run_node2vec():
                 'asd-graph',
                 {
                     nodeLabels: ['Case'],
-                    embeddingDimension: 32,
+                    embeddingDimension: 128,
                     writeProperty: 'embedding',
-                    iterations: 20,
+                    iterations: 50,
                     randomSeed: 42
                 }
             )
