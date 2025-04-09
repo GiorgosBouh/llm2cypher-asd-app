@@ -10,7 +10,9 @@ from sklearn.metrics import classification_report
 from imblearn.over_sampling import SMOTE  # Import SMOTE for balancing classes
 import uuid
 import numpy as np
-import time
+import time  # Import the time module
+
+st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
 # === Load environment variables ===
 load_dotenv()
@@ -29,7 +31,6 @@ def get_driver():
 driver = get_driver()
 
 # === Define Helper Functions ===
-
 def insert_user_case(row, upload_id):
     with driver.session() as session:
         st.info(f"Inserting case with upload_id: {upload_id}")
@@ -210,10 +211,10 @@ def get_existing_embeddings():
             RETURN c.embedding AS embedding
         """)
         embeddings = [record["embedding"] for record in result]
-        
+
         if not embeddings:  # Αν δεν υπάρχουν embeddings
             st.warning("⚠️ No embeddings found for anomaly detection.")
-        
+
         return np.array(embeddings) if embeddings else None
 
 # === Anomaly Detection with Isolation Forest ===
@@ -222,10 +223,10 @@ def detect_anomalies_with_isolation_forest(upload_id, iso_forest_model):
     new_embedding = extract_user_embedding(upload_id)
     if new_embedding:
         new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
-        
+
         # Predict whether the new case is an anomaly
         anomaly_prediction = iso_forest_model.predict(new_embedding_reshaped)[0]
-        
+
         if anomaly_prediction == -1:
             st.warning(f"⚠️ This case might be an anomaly!")
         else:
@@ -272,6 +273,9 @@ st.markdown(
 st.header("💬 Natural Language to Cypher")
 question = st.text_input("📝 Ask your question in natural language:")
 
+openai_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=openai_key)
+
 if question:
     # Transform natural language to Cypher
     cypher_query = nl_to_cypher(question)
@@ -317,7 +321,7 @@ if uploaded_file:
     # Εισαγωγή των νέων δεδομένων στον γράφο
     with st.spinner("📥 Inserting into graph..."):
         insert_user_case(row, upload_id)
-        
+
     # Δημιουργία embeddings για το νέο περιστατικό χρησιμοποιώντας το Node2Vec
     with st.spinner("🔄 Generating embeddings..."):
         run_node2vec()
@@ -330,6 +334,8 @@ if uploaded_file:
             st.error(f"❌ Could not find Case with upload_id: {upload_id} in the graph.")
         else:
             new_embedding = extract_user_embedding(upload_id)
+            **st.write(f"**Embedding του νέου περιστατικού (upload_id: {upload_id}):**")**
+            **st.write(new_embedding)** # <--- Η προσθήκη για εμφάνιση του embedding
             if new_embedding and clf:
                 new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
                 # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
