@@ -108,8 +108,9 @@ def run_node2vec():
         st.info("Node2Vec embedding generation finished.")
         
 # === Train Isolation Forest on Existing Embeddings ===
+# === Train Isolation Forest on Specific Label Embeddings ===
 def train_isolation_forest(embeddings):
-    if embeddings.shape[0] > 0:
+    if embeddings is not None and embeddings.shape[0] > 0:
         iso_forest = IsolationForest(random_state=42)
         iso_forest.fit(embeddings)
         st.info(f"Isolation Forest model trained on {embeddings.shape[0]} embeddings.")
@@ -230,11 +231,11 @@ def get_existing_embeddings():
             RETURN c.embedding AS embedding
         """)
         embeddings = [record["embedding"] for record in result]
-    if embeddings:
-        st.info(f"Retrieved {len(embeddings)} existing embeddings for anomaly detection.")
-    else:
-        st.warning("⚠️ No existing embeddings found for anomaly detection.")
-        return np.array(embeddings)
+        
+        if not embeddings:  # Αν δεν υπάρχουν embeddings
+            st.warning("⚠️ No embeddings found for anomaly detection.")
+        
+        return np.array(embeddings) if embeddings else None
 
 # === Main Streamlit Logic ===
 st.title("🧠 NeuroCypher ASD")
@@ -380,10 +381,14 @@ if uploaded_file:
                 st.warning("⚠️ ASD prediction model not trained yet.")
 
     # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
-    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
-        existing_embeddings = get_existing_embeddings()
+with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
+    existing_embeddings = get_existing_embeddings()
+    
+    if existing_embeddings is not None and existing_embeddings.shape[0] > 0:
         iso_forest_model = train_isolation_forest(existing_embeddings)
         if iso_forest_model:
             detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
         else:
             st.warning("❌ Could not detect anomalies as the Isolation Forest model could not be trained.")
+    else:
+        st.warning("❌ No embeddings found to detect anomalies.")
