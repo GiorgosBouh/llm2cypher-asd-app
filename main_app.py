@@ -180,6 +180,46 @@ def detect_anomalies_with_isolation_forest(upload_id, iso_forest_model):
     else:
         st.error(f"❌ No embedding found for the new case with upload_id: {upload_id}")
 
+# === Natural Language to Cypher Transformation ===
+def translate_nl_to_cypher(question):
+    openai_key = os.getenv("OPENAI_API_KEY")
+    client = OpenAI(api_key=openai_key)
+
+    prompt = f"""
+    You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
+
+    Schema:
+    - (:Case {{id: int}})
+    - (:BehaviorQuestion {{name: string}})
+    - (:ASD_Trait {{value: 'Yes' | 'No'}})
+    - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
+    - (:SubmitterType {{type: string}})
+
+    Relationships:
+    - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
+    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
+    - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
+    - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
+
+    Translate the following natural language question to Cypher, ensuring that you use the correct values and capitalization as described in the schema.
+
+    Q: {question}
+
+    Only return the Cypher query.
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-2024-08-06",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        llm_response = response.choices[0].message.content.strip()
+        return llm_response.replace("```cypher", "").replace("```", "").strip()
+    except Exception as e:
+        st.error(f"OpenAI error: {e}")
+        return None
+
 # === Main Streamlit Logic ===
 st.title("🧠 NeuroCypher ASD")
 st.markdown(
@@ -238,3 +278,25 @@ if uploaded_file:
             detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
         else:
             st.warning("❌ Could not detect anomalies as the Isolation Forest model could not be trained.")
+
+# === 2. Natural Language to Cypher Section ===
+st.header("💬 Natural Language to Cypher")
+question = st.text_input("📝 Ask your question in natural language:")
+
+if question:
+    cypher_query = translate_nl_to_cypher(question)
+    if cypher_query:
+        st.code(cypher_query, language="cypher")
+
+        # === Execute Cypher Query and Display Results ===
+        if st.button("▶️ Run Query"):
+            with driver.session() as session:
+                try:
+                    results = session.run(cypher_query).data()
+                    if results:
+                        st.subheader("📊 Query Results:")
+                        st.write(pd.DataFrame(results))
+                    else:
+                        st.info("No results found.")
+                except Exception as e:
+                    st.error(f"Neo4j error: {e}")
