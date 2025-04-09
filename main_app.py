@@ -239,6 +239,8 @@ st.markdown(
     "<i>The graph is based on Q-Chat-10 plus survey and other individuals characteristics that have proved to be effective in detecting the ASD cases from controls in behaviour science.</i>",
     unsafe_allow_html=True,
 )
+# === Full Code Update ===
+
 # === Check if User Case Exists ===
 def check_user_case_exists(upload_id):
     with driver.session() as session:
@@ -248,12 +250,24 @@ def check_user_case_exists(upload_id):
         """, upload_id=upload_id)
         return result.peek() is not None
 
+# === Train Isolation Forest on Existing Embeddings ===
+def train_isolation_forest(embeddings):
+    if embeddings is not None and embeddings.shape[0] > 0:
+        iso_forest = IsolationForest(random_state=42)
+        iso_forest.fit(embeddings)
+        st.info(f"Isolation Forest model trained on {embeddings.shape[0]} embeddings.")
+        return iso_forest
+    else:
+        st.warning("⚠️ No embeddings available for training Isolation Forest.")
+        return None
+
 # === Main Streamlit Logic ===
 st.title("🧠 NeuroCypher ASD")
 st.markdown(
     "<i>The graph is based on Q-Chat-10 plus survey and other individuals characteristics that have proved to be effective in detecting the ASD cases from controls in behaviour science.</i>",
     unsafe_allow_html=True,
 )
+
 # === 2. Natural Language to Cypher Section ===
 st.header("💬 Natural Language to Cypher")
 question = st.text_input("📝 Ask your question in natural language:")
