@@ -108,7 +108,6 @@ def run_node2vec():
         st.info("Node2Vec embedding generation finished.")
         
 # === Train Isolation Forest on Existing Embeddings ===
-# === Train Isolation Forest on Specific Label Embeddings ===
 def train_isolation_forest(embeddings):
     if embeddings is not None and embeddings.shape[0] > 0:
         iso_forest = IsolationForest(random_state=42)
@@ -316,7 +315,7 @@ if question:
             cypher_query = llm_response.replace("```cypher", "").replace("```", "").strip()
             st.code(cypher_query, language="cypher")
 
-            # === Execute Cypher Query and Display Results ===
+            # === Εκτέλεση Cypher Query και εμφάνιση αποτελεσμάτων ===
             if st.button("▶️ Run Query"):
                 with driver.session() as session:
                     try:
@@ -333,61 +332,59 @@ if question:
             st.error(f"OpenAI error: {e}")
             st.stop()
 
-# === 3. ML Model Evaluation (Precision, Recall, F1) ===
-st.subheader("📊 Model Evaluation on Existing Graph Data")
+# === 3. Εκπαίδευση Μοντέλου για Πρόβλεψη ASD (Precision, Recall, F1) ===
+st.subheader("📊 Εκτίμηση Μοντέλου για Υπάρχοντα Δεδομένα στον Γράφο")
 
-clf = train_asd_detection_model()  # Train the model
+clf = train_asd_detection_model()  # Εκπαίδευση του μοντέλου
 
-# === Upload CSV for 1 Child ASD Prediction ===
-st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
-uploaded_file = st.file_uploader("Upload CSV", type="csv")
+# === Ανέβασμα CSV για Πρόβλεψη ASD για 1 Παιδί ===
+st.subheader("📄 Ανέβασμα CSV για Πρόβλεψη ASD για 1 Παιδί")
+uploaded_file = st.file_uploader("Ανέβασε CSV", type="csv")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file, delimiter=";")
     if len(df) != 1:
-        st.error("❌ Please upload exactly one row (one child).")
+        st.error("❌ Παρακαλώ ανέβασε ακριβώς μία γραμμή (ένα παιδί).")
         st.stop()
 
     row = df.iloc[0]
 
     # Δημιουργία μοναδικού ID για το νέο περιστατικό
     upload_id = str(uuid.uuid4())
-    st.info(f"Generated upload_id: {upload_id}")  # Add this line
+    st.info(f"Generated upload_id: {upload_id}")  # Προσθήκη αυτού του μηνύματος
 
     # Εισαγωγή των νέων δεδομένων στον γράφο
-    with st.spinner("📥 Inserting into graph..."):
+    with st.spinner("📥 Εισαγωγή στον γράφο..."):
         insert_user_case(row, upload_id)
         
     # Δημιουργία embeddings για το νέο περιστατικό χρησιμοποιώντας το Node2Vec
-    with st.spinner("🔄 Generating embeddings..."):
+    with st.spinner("🔄 Δημιουργία embeddings..."):
         run_node2vec()
-        time.sleep(5)  # Wait for embeddings to be written
+        time.sleep(5)  # Περιμένουμε για να ολοκληρωθεί η διαδικασία εγγραφής των embeddings
 
     # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
-    with st.spinner("🔮 Predicting ASD Traits..."):
-        # Check if the user case exists
+    with st.spinner("🔮 Πρόβλεψη Χαρακτηριστικών ASD..."):
+        # Έλεγχος αν υπάρχει το νέο περιστατικό στον γράφο
         if not check_user_case_exists(upload_id):
-            st.error(f"❌ Could not find Case with upload_id: {upload_id} in the graph.")
+            st.error(f"❌ Δεν βρέθηκε το περιστατικό με upload_id: {upload_id} στον γράφο.")
         else:
             new_embedding = extract_user_embedding(upload_id)
             if new_embedding and clf:
-                new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
-                # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
+                new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape για πρόβλεψη
+                # Χρησιμοποιούμε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
                 prediction = clf.predict(new_embedding_reshaped)[0]
                 label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
-                st.success(f"🔍 Prediction: **{label}**")
+                st.success(f"🔍 Πρόβλεψη: **{label}**")
             elif not new_embedding:
-                st.error("❌ No embedding found for the new Case.")
+                st.error("❌ Δεν βρέθηκε embedding για το νέο περιστατικό.")
             else:
-                st.warning("⚠️ ASD prediction model not trained yet.")
-
-    from sklearn.ensemble import IsolationForest
+                st.warning("⚠️ Το μοντέλο πρόβλεψης ASD δεν έχει εκπαιδευτεί ακόμα.")
 
     # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
-    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
+    with st.spinner("🧐 Ανίχνευση Ανωμαλιών (Isolation Forest)..."):
         existing_embeddings = get_existing_embeddings()
         iso_forest_model = train_isolation_forest(existing_embeddings)
         if iso_forest_model:
             detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
         else:
-            st.warning("❌ Could not detect anomalies as the Isolation Forest model could not be trained.")
+            st.warning("❌ Δεν ήταν δυνατό να ανιχνευτούν ανωμαλίες καθώς το μοντέλο Isolation Forest δεν μπόρεσε να εκπαιδευτεί.")
