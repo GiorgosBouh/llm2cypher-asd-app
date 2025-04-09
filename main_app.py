@@ -106,6 +106,17 @@ def run_node2vec():
         st.info("  - Dropping graph projection 'asd-graph'.")
         session.run("CALL gds.graph.drop('asd-graph')")
         st.info("Node2Vec embedding generation finished.")
+        # === Train Isolation Forest on Existing Embeddings ===
+def train_isolation_forest(embeddings):
+    if embeddings.shape[0] > 0:
+        iso_forest = IsolationForest(random_state=42)
+        iso_forest.fit(embeddings)
+        st.info(f"Isolation Forest model trained on {embeddings.shape[0]} embeddings.")
+        return iso_forest
+    else:
+        st.warning("⚠️ No embeddings available for training Isolation Forest.")
+        return None
+
 
 # === Check if User Case Exists ===
 def check_user_case_exists(upload_id):
@@ -387,6 +398,8 @@ if uploaded_file:
                 st.error("❌ No embedding found for the new Case.")
             else:
                 st.warning("⚠️ ASD prediction model not trained yet.")
+    from sklearn.ensemble import IsolationForest
+
 
     # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
 with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
