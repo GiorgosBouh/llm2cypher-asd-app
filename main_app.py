@@ -357,6 +357,7 @@ if uploaded_file:
     # Εισαγωγή των νέων δεδομένων στον γράφο
     with st.spinner("📥 Inserting into graph..."):
         insert_user_case(row, upload_id)
+        
     # Δημιουργία embeddings για το νέο περιστατικό χρησιμοποιώντας το Node2Vec
     with st.spinner("🔄 Generating embeddings..."):
         run_node2vec()
@@ -380,15 +381,13 @@ if uploaded_file:
             else:
                 st.warning("⚠️ ASD prediction model not trained yet.")
 
+    from sklearn.ensemble import IsolationForest
+
     # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
-with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
-    existing_embeddings = get_existing_embeddings()
-    
-    if existing_embeddings is not None and existing_embeddings.shape[0] > 0:
+    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
+        existing_embeddings = get_existing_embeddings()
         iso_forest_model = train_isolation_forest(existing_embeddings)
         if iso_forest_model:
             detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
         else:
             st.warning("❌ Could not detect anomalies as the Isolation Forest model could not be trained.")
-    else:
-        st.warning("❌ No embeddings found to detect anomalies.")
