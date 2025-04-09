@@ -389,8 +389,10 @@ if uploaded_file:
                 st.warning("⚠️ ASD prediction model not trained yet.")
 
     # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
-    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
-        existing_embeddings = get_existing_embeddings()
-        iso_forest_model = train_isolation_forest(existing_embeddings)
+with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
+    existing_embeddings = get_existing_embeddings()
+    iso_forest_model = train_isolation_forest(existing_embeddings)
+    if iso_forest_model:
         detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
-    # -------------------------------------------------
+    else:
+        st.warning("❌ Could not detect anomalies as the Isolation Forest model could not be trained.")
