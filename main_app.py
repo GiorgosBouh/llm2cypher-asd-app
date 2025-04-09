@@ -334,8 +334,8 @@ if uploaded_file:
             st.error(f"❌ Could not find Case with upload_id: {upload_id} in the graph.")
         else:
             new_embedding = extract_user_embedding(upload_id)
-            **st.write(f"**Embedding του νέου περιστατικού (upload_id: {upload_id}):**")**
-            **st.write(new_embedding)** # <--- Η προσθήκη για εμφάνιση του embedding
+            st.write(f"**Embedding του νέου περιστατικού (upload_id: {upload_id}):**")
+            st.write(new_embedding) # <--- Η προσθήκη για εμφάνιση του embedding
             if new_embedding and clf:
                 new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
                 # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
