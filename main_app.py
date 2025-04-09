@@ -4,12 +4,11 @@ from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import uuid
 import numpy as np
-from sklearn.metrics.pairwise import euclidean_distances
 import time  # Import the time module
 
 st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
@@ -63,7 +62,6 @@ def insert_user_case(row, upload_id):
             CREATE (c)-[:SUBMITTED_BY]->(s)
         """, who=row["Who_completed_the_test"], upload_id=upload_id)
 
-# === Generate Embeddings using Node2Vec ===
 # === Generate Embeddings using Node2Vec ===
 def run_node2vec():
     with driver.session() as session:
@@ -129,23 +127,27 @@ def predict_asd_for_new_case(upload_id, clf):
     else:
         st.error("❌ No embedding found for the new Case.")
 
-# === Anomaly Detection ===
-# === Anomaly Detection ===
-def detect_anomalies_for_new_case(upload_id):
+# === Anomaly Detection with Isolation Forest ===
+def train_isolation_forest(embeddings):
+    if embeddings.shape[0] > 0:
+        iso_forest = IsolationForest(random_state=42)
+        iso_forest.fit(embeddings)
+        return iso_forest
+    return None
+
+def detect_anomalies_with_isolation_forest(upload_id, iso_forest):
     new_embedding = extract_user_embedding(upload_id)
-    if new_embedding:
-        if isinstance(new_embedding, list):
-            new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)
-            distances = euclidean_distances(new_embedding_reshaped, get_existing_embeddings())
-            threshold = 2.0
-            if np.min(distances) > threshold:
-                st.warning("⚠️ This case might be an anomaly!")
-            else:
-                st.success("✅ This case is similar to existing cases.")
+    if new_embedding and iso_forest:
+        new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)
+        anomaly_prediction = iso_forest.predict(new_embedding_reshaped)[0]
+        if anomaly_prediction == -1:
+            st.warning("⚠️ This case might be an anomaly (detected by Isolation Forest)!")
         else:
-            st.error(f"❌ Expected embedding to be a list, but got: {type(new_embedding)}")
-    else:
+            st.success("✅ This case is likely normal (according to Isolation Forest).")
+    elif not new_embedding:
         st.error("❌ No embedding found for the new Case.")
+    else:
+        st.info("ℹ️ Isolation Forest model not trained yet.")
 
 # === Extract Training Data for ML Model ===
 def extract_training_data():
@@ -164,15 +166,19 @@ def extract_training_data():
 # === Train ML Model for ASD Detection ===
 def train_asd_detection_model():
     X, y = extract_training_data()
-    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
-    clf = RandomForestClassifier(n_estimators=100, random_state=42)
-    clf.fit(X_train, y_train)
+    if not X.empty:
+        X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=0.2, random_state=42)
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train, y_train)
 
-    y_pred = clf.predict(X_test)
-    report = classification_report(y_test, y_pred, output_dict=True)
-    st.write(pd.DataFrame(report).transpose())
+        y_pred = clf.predict(X_test)
+        report = classification_report(y_test, y_pred, output_dict=True)
+        st.write(pd.DataFrame(report).transpose())
 
-    return clf
+        return clf
+    else:
+        st.warning("⚠️ No training data available to train the ASD detection model.")
+        return None
 
 # === Get Existing Embeddings for Anomaly Detection ===
 def get_existing_embeddings():
@@ -219,7 +225,6 @@ Q: How many male toddlers with jaundice?
 Q: Who completed the test most often?
     """)
 
-# === 2. Natural Language to Cypher Section ===
 # === 2. Natural Language to Cypher Section ===
 st.header("💬 Natural Language to Cypher")
 question = st.text_input("📝 Ask your question in natural language:")
@@ -292,7 +297,6 @@ clf = train_asd_detection_model()  # Train the model
 st.write("🔍 Model Evaluation Results (Precision, Recall, F1)")
 
 # === Upload CSV for 1 Child ASD Prediction ===
-# === Upload CSV for 1 Child ASD Prediction ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
@@ -324,16 +328,20 @@ if uploaded_file:
             st.error(f"❌ Could not find Case with upload_id: {upload_id} in the graph.")
         else:
             new_embedding = extract_user_embedding(upload_id)
-            if new_embedding:
+            if new_embedding and clf:
                 new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
                 # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
                 prediction = clf.predict(new_embedding_reshaped)[0]
                 label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
                 st.success(f"🔍 Prediction: **{label}**")
-            else:
+            elif not new_embedding:
                 st.error("❌ No embedding found for the new Case.")
+            else:
+                st.warning("⚠️ ASD prediction model not trained yet.")
 
-    # --- Κλήση για την ανίχνευση ανωμαλιών ---
-    with st.spinner("🧐 Detecting Anomalies..."):
-        detect_anomalies_for_new_case(upload_id)
-    # ----------------------------------------
+    # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
+    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
+        existing_embeddings = get_existing_embeddings()
+        iso_forest_model = train_isolation_forest(existing_embeddings)
+        detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
+    # -------------------------------------------------
