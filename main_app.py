@@ -32,6 +32,7 @@ driver = get_driver()
 # === Define Helper Functions ===
 def insert_user_case(row, upload_id):
     with driver.session() as session:
+        st.info(f"Inserting case with upload_id: {upload_id}")
         session.run("CREATE (c:Case {upload_id: $upload_id})", upload_id=upload_id)
         for i in range(1, 11):  # Assuming you have questions A1 to A10
             q = f"A{i}"
@@ -41,6 +42,7 @@ def insert_user_case(row, upload_id):
                 MATCH (c:Case {upload_id: $upload_id})
                 CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
             """, q=q, val=val, upload_id=upload_id)
+            st.info(f"  - Answer {q}: {val}")
 
         # Insert demographic information
         demo = {
@@ -55,23 +57,28 @@ def insert_user_case(row, upload_id):
                 MATCH (c:Case {upload_id: $upload_id})
                 CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
             """, k=k, v=v, upload_id=upload_id)
+            st.info(f"  - Demographic {k}: {v}")
 
         session.run("""
             MATCH (s:SubmitterType {type: $who})
             MATCH (c:Case {upload_id: $upload_id})
             CREATE (c)-[:SUBMITTED_BY]->(s)
         """, who=row["Who_completed_the_test"], upload_id=upload_id)
+        st.info(f"  - Submitter: {row['Who_completed_the_test']}")
 
 # === Generate Embeddings using Node2Vec ===
 def run_node2vec():
     with driver.session() as session:
+        st.info("Starting Node2Vec embedding generation...")
         # Check if the graph exists
         result = session.run("CALL gds.graph.exists('asd-graph') YIELD exists").single()
         if result and result['exists']:
             # Drop the graph if it exists
+            st.info("  - Existing 'asd-graph' found, dropping it.")
             session.run("CALL gds.graph.drop('asd-graph') YIELD graphName")
 
         # Create the graph projection
+        st.info("  - Creating graph projection 'asd-graph'.")
         session.run("""
             CALL gds.graph.project(
                 'asd-graph',
@@ -80,7 +87,15 @@ def run_node2vec():
             )
             YIELD graphName, nodeCount, relationshipCount
         """)
+        projection_result = session.run("CALL gds.graph.exists('asd-graph') YIELD exists, nodeCount, relationshipCount").single()
+        if projection_result and projection_result['exists']:
+            st.info(f"  - Graph projection created with {projection_result['nodeCount']} nodes and {projection_result['relationshipCount']} relationships.")
+        else:
+            st.error("  - Error creating graph projection.")
+            return
+
         # Run Node2Vec
+        st.info("  - Running Node2Vec algorithm.")
         session.run("""
             CALL gds.node2vec.write(
                 'asd-graph',
@@ -94,8 +109,20 @@ def run_node2vec():
             )
             YIELD nodeCount, writeMillis
         """)
+        embedding_result = session.run("""
+            MATCH (c:Case)
+            WHERE c.embedding IS NOT NULL
+            RETURN count(c) AS nodes_with_embedding
+        """).single()
+        if embedding_result and embedding_result['nodes_with_embedding'] > 0:
+            st.info(f"  - Node2Vec completed. Embeddings written to {embedding_result['nodes_with_embedding']} nodes.")
+        else:
+            st.error("  - Node2Vec did not write any embeddings.")
+
         # Clean up the projected graph
+        st.info("  - Dropping graph projection 'asd-graph'.")
         session.run("CALL gds.graph.drop('asd-graph')")
+        st.info("Node2Vec embedding generation finished.")
 
 # === Check if User Case Exists ===
 def check_user_case_exists(upload_id):
@@ -114,26 +141,36 @@ def extract_user_embedding(upload_id):
             RETURN c.embedding AS embedding
         """, upload_id=upload_id)
         record = res.single()
-        return record["embedding"] if record else None
+        if record and record["embedding"] is not None:
+            st.info(f"Embedding extracted for upload_id: {upload_id} - First 5 values: {record['embedding'][:5]}")
+            return record["embedding"]
+        else:
+            st.warning(f"No embedding found for upload_id: {upload_id}")
+            return None
 
 # === Predict ASD for New Case ===
 def predict_asd_for_new_case(upload_id, clf):
     new_embedding = extract_user_embedding(upload_id)
-    if new_embedding:
+    if new_embedding and clf:
         new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)
         prediction = clf.predict(new_embedding_reshaped)[0]
         label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
         st.success(f"🔍 Prediction: **{label}**")
-    else:
+    elif not new_embedding:
         st.error("❌ No embedding found for the new Case.")
+    else:
+        st.warning("⚠️ ASD prediction model not trained yet.")
 
 # === Anomaly Detection with Isolation Forest ===
 def train_isolation_forest(embeddings):
     if embeddings.shape[0] > 0:
         iso_forest = IsolationForest(random_state=42)
         iso_forest.fit(embeddings)
+        st.info("Isolation Forest model trained.")
         return iso_forest
-    return None
+    else:
+        st.warning("⚠️ No existing embeddings to train Isolation Forest.")
+        return None
 
 def detect_anomalies_with_isolation_forest(upload_id, iso_forest):
     new_embedding = extract_user_embedding(upload_id)
@@ -145,9 +182,9 @@ def detect_anomalies_with_isolation_forest(upload_id, iso_forest):
         else:
             st.success("✅ This case is likely normal (according to Isolation Forest).")
     elif not new_embedding:
-        st.error("❌ No embedding found for the new Case.")
+        st.error("❌ No embedding found for the new Case for anomaly detection.")
     else:
-        st.info("ℹ️ Isolation Forest model not trained yet.")
+        st.info("ℹ️ Isolation Forest model not trained yet for anomaly detection.")
 
 # === Extract Training Data for ML Model ===
 def extract_training_data():
@@ -161,6 +198,10 @@ def extract_training_data():
 
     X = [r["embedding"] for r in records]
     y = [1 if r["label"] == "Yes" else 0 for r in records]
+    if X:
+        st.info(f"Extracted {len(X)} data points for training the ASD detection model.")
+    else:
+        st.warning("⚠️ No data points with embeddings found for training the ASD detection model.")
     return pd.DataFrame(X), pd.Series(y)
 
 # === Train ML Model for ASD Detection ===
@@ -173,11 +214,13 @@ def train_asd_detection_model():
 
         y_pred = clf.predict(X_test)
         report = classification_report(y_test, y_pred, output_dict=True)
+        st.subheader("📊 Model Evaluation Results (Precision, Recall, F1)")
         st.write(pd.DataFrame(report).transpose())
 
+        st.info("ASD detection model trained.")
         return clf
     else:
-        st.warning("⚠️ No training data available to train the ASD detection model.")
+        st.warning("⚠️ Not enough data to train the ASD detection model.")
         return None
 
 # === Get Existing Embeddings for Anomaly Detection ===
@@ -189,6 +232,10 @@ def get_existing_embeddings():
             RETURN c.embedding AS embedding
         """)
         embeddings = [record["embedding"] for record in result]
+    if embeddings:
+        st.info(f"Retrieved {len(embeddings)} existing embeddings for anomaly detection.")
+    else:
+        st.warning("⚠️ No existing embeddings found for anomaly detection.")
     return np.array(embeddings)
 
 # === Main Streamlit Logic ===
@@ -294,7 +341,6 @@ if question:
 st.subheader("📊 Model Evaluation on Existing Graph Data")
 
 clf = train_asd_detection_model()  # Train the model
-st.write("🔍 Model Evaluation Results (Precision, Recall, F1)")
 
 # === Upload CSV for 1 Child ASD Prediction ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
@@ -324,24 +370,3 @@ if uploaded_file:
     # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
     with st.spinner("🔮 Predicting ASD Traits..."):
         # Check if the user case exists
-        if not check_user_case_exists(upload_id):
-            st.error(f"❌ Could not find Case with upload_id: {upload_id} in the graph.")
-        else:
-            new_embedding = extract_user_embedding(upload_id)
-            if new_embedding and clf:
-                new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
-                # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
-                prediction = clf.predict(new_embedding_reshaped)[0]
-                label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
-                st.success(f"🔍 Prediction: **{label}**")
-            elif not new_embedding:
-                st.error("❌ No embedding found for the new Case.")
-            else:
-                st.warning("⚠️ ASD prediction model not trained yet.")
-
-    # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
-    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
-        existing_embeddings = get_existing_embeddings()
-        iso_forest_model = train_isolation_forest(existing_embeddings)
-        detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
-    # -------------------------------------------------
