@@ -294,16 +294,13 @@ Schema:
 - (:Case {{id: int}})
 - (:BehaviorQuestion {{name: string}})
 - (:ASD_Trait {{value: 'Yes' | 'No'}})
-- (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}}.
-  Note:
-    - For the 'Sex' attribute, the possible values are 'm' (male) and 'f' (female) (lowercase).
-    - For the 'Jaundice' attribute, the possible values are 'yes' and 'no' (lowercase).
+- (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
 - (:SubmitterType {{type: string}})
 
 Relationships:
 - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
 - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
-- (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
+- (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
 - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
 
 Translate the following natural language question to Cypher, ensuring that you use the correct values and capitalization as described in the schema.
@@ -365,16 +362,15 @@ if uploaded_file:
     upload_id = str(uuid.uuid4())
     st.info(f"Generated upload_id: {upload_id}")  # Add this line
 
-   # Εισαγωγή των νέων δεδομένων στον γράφο
+    # Εισαγωγή των νέων δεδομένων στον γράφο
     with st.spinner("📥 Inserting into graph..."):
-    # Βεβαιώσου ότι έχεις ορίσει τη συνάρτηση insert_user_case πριν
-    insert_user_case(row, upload_id)
+        insert_user_case(row, upload_id)
     # Δημιουργία embeddings για το νέο περιστατικό χρησιμοποιώντας το Node2Vec
     with st.spinner("🔄 Generating embeddings..."):
         run_node2vec()
         time.sleep(5)  # Wait for embeddings to be written
 
-   # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
+    # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
     with st.spinner("🔮 Predicting ASD Traits..."):
         # Check if the user case exists
         if not check_user_case_exists(upload_id):
