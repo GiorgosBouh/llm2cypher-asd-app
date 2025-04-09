@@ -239,7 +239,21 @@ st.markdown(
     "<i>The graph is based on Q-Chat-10 plus survey and other individuals characteristics that have proved to be effective in detecting the ASD cases from controls in behaviour science.</i>",
     unsafe_allow_html=True,
 )
+# === Check if User Case Exists ===
+def check_user_case_exists(upload_id):
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (c:Case {upload_id: $upload_id})
+            RETURN c
+        """, upload_id=upload_id)
+        return result.peek() is not None
 
+# === Main Streamlit Logic ===
+st.title("🧠 NeuroCypher ASD")
+st.markdown(
+    "<i>The graph is based on Q-Chat-10 plus survey and other individuals characteristics that have proved to be effective in detecting the ASD cases from controls in behaviour science.</i>",
+    unsafe_allow_html=True,
+)
 # === 2. Natural Language to Cypher Section ===
 st.header("💬 Natural Language to Cypher")
 question = st.text_input("📝 Ask your question in natural language:")
