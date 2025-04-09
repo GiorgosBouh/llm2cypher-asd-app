@@ -87,28 +87,6 @@ def run_node2vec():
             )
             YIELD graphName, nodeCount, relationshipCount
         """)
-        result = session.run("CALL gds.graph.exists('asd-graph') YIELD exists").single()
-if result and result['exists']:
-    st.info("  - Existing 'asd-graph' found, dropping it.")
-    session.run("CALL gds.graph.drop('asd-graph') YIELD graphName")
-
-# Create the graph projection
-st.info("  - Creating graph projection 'asd-graph'.")
-session.run("""
-    CALL gds.graph.project(
-        'asd-graph',
-        'Case',
-        '*'
-    )
-    YIELD graphName, nodeCount, relationshipCount
-""")
-projection_info = session.run("CALL gds.graph.get('asd-graph') YIELD nodeCount, relationshipCount").single()
-if projection_info:
-    st.info(f"  - Graph projection created with {projection_info['nodeCount']} nodes and {projection_info['relationshipCount']} relationships.")
-else:
-    st.error("  - Error creating graph projection or retrieving its information.")
-    return
-
         # Run Node2Vec
         st.info("  - Running Node2Vec algorithm.")
         session.run("""
@@ -124,16 +102,6 @@ else:
             )
             YIELD nodeCount, writeMillis
         """)
-        embedding_result = session.run("""
-            MATCH (c:Case)
-            WHERE c.embedding IS NOT NULL
-            RETURN count(c) AS nodes_with_embedding
-        """).single()
-        if embedding_result and embedding_result['nodes_with_embedding'] > 0:
-            st.info(f"  - Node2Vec completed. Embeddings written to {embedding_result['nodes_with_embedding']} nodes.")
-        else:
-            st.error("  - Node2Vec did not write any embeddings.")
-
         # Clean up the projected graph
         st.info("  - Dropping graph projection 'asd-graph'.")
         session.run("CALL gds.graph.drop('asd-graph')")
