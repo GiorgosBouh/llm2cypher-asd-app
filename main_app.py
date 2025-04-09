@@ -106,7 +106,8 @@ def run_node2vec():
         st.info("  - Dropping graph projection 'asd-graph'.")
         session.run("CALL gds.graph.drop('asd-graph')")
         st.info("Node2Vec embedding generation finished.")
-        # === Train Isolation Forest on Existing Embeddings ===
+        
+# === Train Isolation Forest on Existing Embeddings ===
 def train_isolation_forest(embeddings):
     if embeddings.shape[0] > 0:
         iso_forest = IsolationForest(random_state=42)
@@ -116,7 +117,6 @@ def train_isolation_forest(embeddings):
     else:
         st.warning("⚠️ No embeddings available for training Isolation Forest.")
         return None
-
 
 # === Check if User Case Exists ===
 def check_user_case_exists(upload_id):
@@ -167,42 +167,22 @@ def get_embeddings_by_asd_label(label):
         embeddings = [record["embedding"] for record in result]
     return np.array(embeddings) if embeddings else np.array([])
 
-# === Train Isolation Forest on Specific Label Embeddings ===
-def train_isolation_forest_by_label(embeddings):
-    if embeddings.shape[0] > 0:
-        iso_forest = IsolationForest(random_state=42)
-        iso_forest.fit(embeddings)
-        st.info(f"Isolation Forest model trained on {embeddings.shape[0]} embeddings.")
-        return iso_forest
-    else:
-        st.warning("⚠️ No embeddings available for this label to train Isolation Forest.")
-        return None
-
-# === Detect Anomaly within Predicted ASD Label ===
-def detect_anomalies_by_predicted_label(upload_id, clf):
+# === Detect Anomalies with Isolation Forest ===
+def detect_anomalies_with_isolation_forest(upload_id, iso_forest_model):
+    # Extract the embedding for the new case
     new_embedding = extract_user_embedding(upload_id)
-    if new_embedding and clf:
-        new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)
-        prediction = clf.predict(new_embedding_reshaped)[0]
-        predicted_label = "Yes" if prediction == 1 else "No"
-        st.info(f"Predicted ASD Label for anomaly detection: {predicted_label}")
-
-        relevant_embeddings = get_embeddings_by_asd_label(predicted_label)
-        iso_forest_model = train_isolation_forest_by_label(relevant_embeddings)
-
-        if iso_forest_model:
-            anomaly_prediction = iso_forest_model.predict(new_embedding_reshaped)[0]
-            if anomaly_prediction == -1:
-                st.warning(f"⚠️ This case might be an anomaly WITHIN the '{predicted_label}' category!")
-            else:
-                st.success(f"✅ This case is likely normal WITHIN the '{predicted_label}' category.")
+    if new_embedding:
+        new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
+        
+        # Predict whether the new case is an anomaly
+        anomaly_prediction = iso_forest_model.predict(new_embedding_reshaped)[0]
+        
+        if anomaly_prediction == -1:
+            st.warning(f"⚠️ This case might be an anomaly!")
         else:
-            st.info(f"ℹ️ No Isolation Forest model trained for the '{predicted_label}' category yet.")
-
-    elif not new_embedding:
-        st.error("❌ No embedding found for the new Case for anomaly detection.")
+            st.success(f"✅ This case is likely normal.")
     else:
-        st.warning("⚠️ ASD prediction model not trained yet for anomaly detection.")
+        st.error(f"❌ No embedding found for the new case with upload_id: {upload_id}")
 
 # === Extract Training Data for ML Model ===
 def extract_training_data():
@@ -254,7 +234,7 @@ def get_existing_embeddings():
         st.info(f"Retrieved {len(embeddings)} existing embeddings for anomaly detection.")
     else:
         st.warning("⚠️ No existing embeddings found for anomaly detection.")
-    return np.array(embeddings)
+        return np.array(embeddings)
 
 # === Main Streamlit Logic ===
 st.title("🧠 NeuroCypher ASD")
@@ -398,14 +378,12 @@ if uploaded_file:
                 st.error("❌ No embedding found for the new Case.")
             else:
                 st.warning("⚠️ ASD prediction model not trained yet.")
-    from sklearn.ensemble import IsolationForest
-
 
     # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
-with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
-    existing_embeddings = get_existing_embeddings()
-    iso_forest_model = train_isolation_forest(existing_embeddings)
-    if iso_forest_model:
-        detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
-    else:
-        st.warning("❌ Could not detect anomalies as the Isolation Forest model could not be trained.")
+    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
+        existing_embeddings = get_existing_embeddings()
+        iso_forest_model = train_isolation_forest(existing_embeddings)
+        if iso_forest_model:
+            detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
+        else:
+            st.warning("❌ Could not detect anomalies as the Isolation Forest model could not be trained.")
