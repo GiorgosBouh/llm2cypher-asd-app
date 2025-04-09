@@ -29,6 +29,7 @@ def get_driver():
 driver = get_driver()
 
 # === Define Helper Functions ===
+
 def insert_user_case(row, upload_id):
     with driver.session() as session:
         st.info(f"Inserting case with upload_id: {upload_id}")
@@ -106,6 +107,43 @@ def run_node2vec():
         session.run("CALL gds.graph.drop('asd-graph')")
         st.info("Node2Vec embedding generation finished.")
 
+# === NL to Cypher Transformation ===
+def nl_to_cypher(question):
+    prompt = f"""
+    You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
+
+    Schema:
+    - (:Case {{id: int}})
+    - (:BehaviorQuestion {{name: string}})
+    - (:ASD_Trait {{value: 'Yes' | 'No'}})
+    - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
+    - (:SubmitterType {{type: string}})
+
+    Relationships:
+    - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
+    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
+    - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
+    - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
+
+    Translate the following natural language question to Cypher, ensuring that you use the correct values and capitalization as described in the schema.
+
+    Q: {question}
+
+    Only return the Cypher query.
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-2024-08-06",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        llm_response = response.choices[0].message.content.strip()
+        cypher_query = llm_response.replace("```cypher", "").replace("```", "").strip()
+        return cypher_query
+    except Exception as e:
+        st.error(f"Error with OpenAI API: {e}")
+        return None
+
 # === Extract User Embedding ===
 def extract_user_embedding(upload_id):
     with driver.session() as session:
@@ -163,6 +201,38 @@ def train_asd_detection_model():
         st.warning("⚠️ Not enough data to train the ASD detection model.")
         return None
 
+# === Get Existing Embeddings for Anomaly Detection ===
+def get_existing_embeddings():
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (c:Case)
+            WHERE c.embedding IS NOT NULL
+            RETURN c.embedding AS embedding
+        """)
+        embeddings = [record["embedding"] for record in result]
+        
+        if not embeddings:  # Αν δεν υπάρχουν embeddings
+            st.warning("⚠️ No embeddings found for anomaly detection.")
+        
+        return np.array(embeddings) if embeddings else None
+
+# === Anomaly Detection with Isolation Forest ===
+def detect_anomalies_with_isolation_forest(upload_id, iso_forest_model):
+    # Extract the embedding for the new case
+    new_embedding = extract_user_embedding(upload_id)
+    if new_embedding:
+        new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
+        
+        # Predict whether the new case is an anomaly
+        anomaly_prediction = iso_forest_model.predict(new_embedding_reshaped)[0]
+        
+        if anomaly_prediction == -1:
+            st.warning(f"⚠️ This case might be an anomaly!")
+        else:
+            st.success(f"✅ This case is likely normal.")
+    else:
+        st.error(f"❌ No embedding found for the new case with upload_id: {upload_id}")
+
 # === Main Streamlit Logic ===
 st.title("🧠 NeuroCypher ASD")
 st.markdown(
@@ -170,7 +240,37 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# === 1. Upload CSV for 1 Child ASD Prediction ===
+# === 2. Natural Language to Cypher Section ===
+st.header("💬 Natural Language to Cypher")
+question = st.text_input("📝 Ask your question in natural language:")
+
+if question:
+    # Transform natural language to Cypher
+    cypher_query = nl_to_cypher(question)
+    if cypher_query:
+        st.code(cypher_query, language="cypher")
+
+        # === Execute Cypher Query and Display Results ===
+        if st.button("▶️ Run Query"):
+            with driver.session() as session:
+                try:
+                    results = session.run(cypher_query).data()
+                    if results:
+                        st.subheader("📊 Query Results:")
+                        st.write(pd.DataFrame(results))
+                    else:
+                        st.info("No results found.")
+                except Exception as e:
+                    st.error(f"Neo4j error: {e}")
+    else:
+        st.error("❌ Failed to generate Cypher query.")
+
+# === 3. ML Model Evaluation (Precision, Recall, F1) ===
+st.subheader("📊 Model Evaluation on Existing Graph Data")
+
+clf = train_asd_detection_model()  # Train the model
+
+# === Upload CSV for 1 Child ASD Prediction ===
 st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
@@ -212,28 +312,12 @@ if uploaded_file:
                 st.error("❌ No embedding found for the new Case.")
             else:
                 st.warning("⚠️ ASD prediction model not trained yet.")
-        # === Detect Anomalies with Isolation Forest ===
-def detect_anomalies_with_isolation_forest(upload_id, iso_forest_model):
-    # Extract the embedding for the new case
-    new_embedding = extract_user_embedding(upload_id)
-    if new_embedding:
-        new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
-        
-        # Predict whether the new case is an anomaly
-        anomaly_prediction = iso_forest_model.predict(new_embedding_reshaped)[0]
-        
-        if anomaly_prediction == -1:
-            st.warning(f"⚠️ This case might be an anomaly!")
-        else:
-            st.success(f"✅ This case is likely normal.")
-    else:
-        st.error(f"❌ No embedding found for the new case with upload_id: {upload_id}")
 
-# --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
-with st.spinner("🧐 Ανίχνευση Ανωμαλιών (Isolation Forest)..."):
-    existing_embeddings = get_existing_embeddings()  # Extract existing embeddings for anomaly detection
-    iso_forest_model = train_isolation_forest(existing_embeddings)  # Train Isolation Forest model
-    if iso_forest_model:
-        detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)  # Detect anomalies
-    else:
-        st.warning("❌ Δεν ήταν δυνατό να ανιχνευτούν ανωμαλίες καθώς το μοντέλο Isolation Forest δεν μπόρεσε να εκπαιδευτεί.")
+    # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
+    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
+        existing_embeddings = get_existing_embeddings()
+        iso_forest_model = train_isolation_forest(existing_embeddings)
+        if iso_forest_model:
+            detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
+        else:
+            st.warning("❌ Could not detect anomalies as the Isolation Forest model could not be trained.")
