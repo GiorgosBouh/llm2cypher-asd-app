@@ -320,7 +320,7 @@ st.subheader("📊 Model Evaluation on Existing Graph Data")
 clf = train_asd_detection_model()  # Train the model
 
 # === Upload CSV for 1 Child ASD Prediction ===
-st.subheader("📄 Upload CSV for 1 Child ASD Prediction")
+st.subheader("📄 Upload CSV for 1 Child ASD Prediction1")
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
 if uploaded_file:
