@@ -367,6 +367,27 @@ if uploaded_file:
         run_node2vec()
         time.sleep(5)  # Wait for embeddings to be written
 
-    # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
+   # Πρόβλεψη των χαρακτηριστικών ASD για το νέο περιστατικό
     with st.spinner("🔮 Predicting ASD Traits..."):
         # Check if the user case exists
+        if not check_user_case_exists(upload_id):
+            st.error(f"❌ Could not find Case with upload_id: {upload_id} in the graph.")
+        else:
+            new_embedding = extract_user_embedding(upload_id)
+            if new_embedding and clf:
+                new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)  # Reshape for prediction
+                # Χρησιμοποιήστε έναν προεκπαιδευμένο ταξινομητή για την πρόβλεψη των χαρακτηριστικών ASD
+                prediction = clf.predict(new_embedding_reshaped)[0]
+                label = "YES (ASD Traits Detected)" if prediction == 1 else "NO (Control Case)"
+                st.success(f"🔍 Prediction: **{label}**")
+            elif not new_embedding:
+                st.error("❌ No embedding found for the new Case.")
+            else:
+                st.warning("⚠️ ASD prediction model not trained yet.")
+
+    # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
+    with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
+        existing_embeddings = get_existing_embeddings()
+        iso_forest_model = train_isolation_forest(existing_embeddings)
+        detect_anomalies_with_isolation_forest(upload_id, iso_forest_model)
+    # -------------------------------------------------
