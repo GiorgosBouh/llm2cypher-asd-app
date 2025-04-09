@@ -365,9 +365,10 @@ if uploaded_file:
     upload_id = str(uuid.uuid4())
     st.info(f"Generated upload_id: {upload_id}")  # Add this line
 
-    # Εισαγωγή των νέων δεδομένων στον γράφο
+   # Εισαγωγή των νέων δεδομένων στον γράφο
     with st.spinner("📥 Inserting into graph..."):
-        insert_user_case(row, upload_id
+    # Βεβαιώσου ότι έχεις ορίσει τη συνάρτηση insert_user_case πριν
+    insert_user_case(row, upload_id)
     # Δημιουργία embeddings για το νέο περιστατικό χρησιμοποιώντας το Node2Vec
     with st.spinner("🔄 Generating embeddings..."):
         run_node2vec()
