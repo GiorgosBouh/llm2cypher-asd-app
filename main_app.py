@@ -6,11 +6,12 @@ import os
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, roc_auc_score, roc_curve
 from imblearn.over_sampling import SMOTE  # Import SMOTE for balancing classes
 import uuid
 import numpy as np
 import time  # Import the time module
+import matplotlib.pyplot as plt # Import matplotlib for plotting
 
 st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
@@ -191,12 +192,28 @@ def train_asd_detection_model():
         clf = RandomForestClassifier(n_estimators=100, random_state=42)
         clf.fit(X_train, y_train)
 
+        y_pred_proba = clf.predict_proba(X_test)[:, 1]
+        auc_roc = roc_auc_score(y_test, y_pred_proba)
+        st.subheader("📊 Model Evaluation Results")
+        st.write(f"AUC-ROC: **{auc_roc:.4f}**")
+
         y_pred = clf.predict(X_test)
         report = classification_report(y_test, y_pred, output_dict=True)
-        st.subheader("📊 Model Evaluation Results (Precision, Recall, F1)")
+        st.subheader("📊 Classification Report (Precision, Recall, F1)")
         st.write(pd.DataFrame(report).transpose())
 
-        st.info("ASD detection model trained.")
+        # Plot ROC Curve
+        fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba)
+        fig, ax = plt.subplots()
+        ax.plot(fpr, tpr, label=f'AUC = {auc_roc:.2f}')
+        ax.plot([0, 1], [0, 1], linestyle='--')
+        ax.set_xlabel('False Positive Rate')
+        ax.set_ylabel('True Positive Rate')
+        ax.set_title('ROC Curve')
+        ax.legend(loc='lower right')
+        st.pyplot(fig)
+
+        st.info("ASD detection model trained and evaluated with AUC-ROC.")
         return clf
     else:
         st.warning("⚠️ Not enough data to train the ASD detection model.")
@@ -297,7 +314,7 @@ if question:
     else:
         st.error("❌ Failed to generate Cypher query.")
 
-# === 3. ML Model Evaluation (Precision, Recall, F1) ===
+# === 3. ML Model Evaluation (Precision, Recall, F1, AUC-ROC) ===
 st.subheader("📊 Model Evaluation on Existing Graph Data")
 
 clf = train_asd_detection_model()  # Train the model
@@ -344,8 +361,7 @@ if uploaded_file:
                 st.success(f"🔍 Prediction: **{label}**")
             elif not new_embedding:
                 st.error("❌ No embedding found for the new Case.")
-            else:
-                st.warning("⚠️ ASD prediction model not trained yet.")
+            else:st.warning("⚠️ ASD prediction model not trained yet.")
 
     # --- Ανίχνευση Ανωμαλιών με Isolation Forest ---
     with st.spinner("🧐 Detecting Anomalies (Isolation Forest)..."):
