@@ -184,18 +184,22 @@ def detect_anomalies_with_isolation_forest(upload_id, iso_forest_model):
     else:
         st.error(f"❌ No embedding found for the new case with upload_id: {upload_id}")
 
-# === Extract Training Data for ML Model ===
+# === Update Extract Training Data to Use Q-Chat-10 Score ===
 def extract_training_data():
     with driver.session() as session:
         result = session.run("""
             MATCH (c:Case)-[:SCREENED_FOR]->(t:ASD_Trait)
             WHERE c.embedding IS NOT NULL
-            RETURN c.embedding AS embedding, t.value AS label
+            RETURN c.embedding AS embedding, t.value AS label, 
+                   (CASE 
+                        WHEN c.A1 + c.A2 + c.A3 + c.A4 + c.A5 + c.A6 + c.A7 + c.A8 + c.A9 + c.A10 > 3 THEN 'Yes'
+                        ELSE 'No'
+                    END) AS calculated_score
         """)
         records = result.data()
 
     X = [r["embedding"] for r in records]
-    y = [1 if r["label"] == "Yes" else 0 for r in records]
+    y = [1 if r["label"] == "Yes" or r["calculated_score"] == "Yes" else 0 for r in records]
     if X:
         st.info(f"Extracted {len(X)} data points for training the ASD detection model.")
     else:
@@ -220,7 +224,6 @@ def train_asd_detection_model():
     else:
         st.warning("⚠️ Not enough data to train the ASD detection model.")
         return None
-
 # === Get Existing Embeddings for Anomaly Detection ===
 def get_existing_embeddings():
     with driver.session() as session:
