@@ -144,30 +144,54 @@ def predict_asd_for_new_case(upload_id, clf):
     else:
         st.warning("⚠️ ASD prediction model not trained yet.")
 
-# === Anomaly Detection with Isolation Forest ===
-def train_isolation_forest(embeddings):
+# === Extract Embeddings by ASD Label ===
+def get_embeddings_by_asd_label(label):
+    with driver.session() as session:
+        query = """
+            MATCH (c:Case)-[:SCREENED_FOR]->(t:ASD_Trait)
+            WHERE c.embedding IS NOT NULL AND t.value = $label
+            RETURN c.embedding AS embedding
+        """
+        result = session.run(query, label=label)
+        embeddings = [record["embedding"] for record in result]
+    return np.array(embeddings) if embeddings else np.array([])
+
+# === Train Isolation Forest on Specific Label Embeddings ===
+def train_isolation_forest_by_label(embeddings):
     if embeddings.shape[0] > 0:
         iso_forest = IsolationForest(random_state=42)
         iso_forest.fit(embeddings)
-        st.info("Isolation Forest model trained.")
+        st.info(f"Isolation Forest model trained on {embeddings.shape[0]} embeddings.")
         return iso_forest
     else:
-        st.warning("⚠️ No existing embeddings to train Isolation Forest.")
+        st.warning("⚠️ No embeddings available for this label to train Isolation Forest.")
         return None
 
-def detect_anomalies_with_isolation_forest(upload_id, iso_forest):
+# === Detect Anomaly within Predicted ASD Label ===
+def detect_anomalies_by_predicted_label(upload_id, clf):
     new_embedding = extract_user_embedding(upload_id)
-    if new_embedding and iso_forest:
+    if new_embedding and clf:
         new_embedding_reshaped = np.array(new_embedding).reshape(1, -1)
-        anomaly_prediction = iso_forest.predict(new_embedding_reshaped)[0]
-        if anomaly_prediction == -1:
-            st.warning("⚠️ This case might be an anomaly (detected by Isolation Forest)!")
+        prediction = clf.predict(new_embedding_reshaped)[0]
+        predicted_label = "Yes" if prediction == 1 else "No"
+        st.info(f"Predicted ASD Label for anomaly detection: {predicted_label}")
+
+        relevant_embeddings = get_embeddings_by_asd_label(predicted_label)
+        iso_forest_model = train_isolation_forest_by_label(relevant_embeddings)
+
+        if iso_forest_model:
+            anomaly_prediction = iso_forest_model.predict(new_embedding_reshaped)[0]
+            if anomaly_prediction == -1:
+                st.warning(f"⚠️ This case might be an anomaly WITHIN the '{predicted_label}' category!")
+            else:
+                st.success(f"✅ This case is likely normal WITHIN the '{predicted_label}' category.")
         else:
-            st.success("✅ This case is likely normal (according to Isolation Forest).")
+            st.info(f"ℹ️ No Isolation Forest model trained for the '{predicted_label}' category yet.")
+
     elif not new_embedding:
         st.error("❌ No embedding found for the new Case for anomaly detection.")
     else:
-        st.info("ℹ️ Isolation Forest model not trained yet for anomaly detection.")
+        st.warning("⚠️ ASD prediction model not trained yet for anomaly detection.")
 
 # === Extract Training Data for ML Model ===
 def extract_training_data():
@@ -279,7 +303,7 @@ Schema:
 Relationships:
 - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
 - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
-- (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
+- (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
 - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
 
 Translate the following natural language question to Cypher, ensuring that you use the correct values and capitalization as described in the schema.
@@ -343,8 +367,7 @@ if uploaded_file:
 
     # Εισαγωγή των νέων δεδομένων στον γράφο
     with st.spinner("📥 Inserting into graph..."):
-        insert_user_case(row, upload_id)
-
+        insert_user_case(row, upload_id
     # Δημιουργία embeddings για το νέο περιστατικό χρησιμοποιώντας το Node2Vec
     with st.spinner("🔄 Generating embeddings..."):
         run_node2vec()
