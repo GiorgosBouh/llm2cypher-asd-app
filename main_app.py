@@ -26,6 +26,8 @@ from contextlib import contextmanager
 import logging
 from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler  # Added missing import
+from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
 
 # === Configuration ===
 class Config:
