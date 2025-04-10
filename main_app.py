@@ -11,7 +11,7 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import (classification_report, roc_auc_score, 
                            roc_curve, precision_recall_curve, 
-                           average_precision_score)
+                           average_precision_score, confusion_matrix)
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
 from collections import Counter
@@ -358,7 +358,7 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
         embeddings = [record["embedding"] for record in result]
         return np.array(embeddings) if embeddings else None
 
-@st.cache_resource(show_spinner="Training ASD detection model...")
+st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     X, y = extract_training_data()
     if X.empty:
@@ -414,6 +414,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
 
     # Store the model
     return pipeline.named_steps['classifier']
+
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
 st.markdown("""
@@ -455,7 +456,7 @@ if st.button("🔄 Train/Refresh Model"):
             st.session_state['asd_model'] = model
 
 # === File Upload Section ===
-st.header("📄 Upload New Case3")
+st.header("📄 Upload New Case4")
 uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
 
 if uploaded_file:
