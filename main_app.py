@@ -250,33 +250,52 @@ def run_node2vec() -> None:
         logger.info("Node2Vec embedding generation completed")
 
 def nl_to_cypher(question: str) -> Optional[str]:
-    """Enhanced translator with examples for demographic queries"""
+    """Enhanced translator with exact schema matching"""
     prompt = f"""
-    You are a Cypher expert for an ASD screening database. Translate questions to Cypher.
-    
-    Schema:
+    You are a Cypher expert for an ASD screening database. Translate questions to exact Cypher queries matching this schema:
+
+    NODES:
+    - Case (represents individual cases)
+    - BehaviorQuestion (labels: A1, A2, ..., A10)
+    - DemographicAttribute (types: Sex, Ethnicity, Jaundice, Family_mem_with_ASD)
+    - SubmitterType (type: Who_completed_the_test)
+    - ASD_Trait (value: 'Yes' or 'No')
+
+    RELATIONSHIPS:
+    - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
     - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
-      - Types: 'Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD'
-      - Values:
-        * Sex: 'm' (male) or 'f' (female)
-        * Others: lowercase (e.g., 'yes', 'no')
+    - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
     - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
-      - Values: 'Yes' or 'No' (capitalized)
-    
+
+    VALUE FORMATS:
+    - BehaviorQuestions: A1-A10 (exact)
+    - Sex: 'm' or 'f' (lowercase)
+    - Jaundice: 'yes' or 'no' (lowercase)
+    - Family_mem_with_ASD: 'yes' or 'no' (lowercase)
+    - ASD_Trait: 'Yes' or 'No' (capitalized)
+    - Ethnicity: exact string values from data
+    - Who_completed_the_test: exact string values from data
+
     Examples:
-    Q: Count male ASD cases with jaundice
+    Q: Count male cases with ASD and family history
     A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}),
-              (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Jaundice', value: 'yes'}}),
+              (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Family_mem_with_ASD', value: 'yes'}}),
               (c)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'Yes'}})
        RETURN count(c)
 
-    Q: Show female non-ASD cases
-    A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'f'}}),
-              (c)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'No'}})
+    Q: Show cases where A1 score > 3
+    A: MATCH (c:Case)-[r:HAS_ANSWER]->(:BehaviorQuestion {{name: 'A1'}})
+       WHERE r.value > 3
+       RETURN c
+
+    Q: Find cases submitted by parents with jaundice
+    A: MATCH (c:Case)-[:SUBMITTED_BY]->(:SubmitterType {{type: 'Parent'}}),
+              (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Jaundice', value: 'yes'}})
        RETURN c
 
     Q: {question}
     A:"""
+    
     try:
         response = client.chat.completions.create(
             model="gpt-4",
@@ -284,15 +303,17 @@ def nl_to_cypher(question: str) -> Optional[str]:
             temperature=0
         )
         cypher = response.choices[0].message.content.strip()
-        # Enforce case requirements
+        # Enforce exact schema requirements
         cypher = (cypher
             .replace("'male'", "'m'").replace("'female'", "'f'")
             .replace("ASD_Trait {value: 'yes'}", "ASD_Trait {value: 'Yes'}")
             .replace("ASD_Trait {value: 'no'}", "ASD_Trait {value: 'No'}")
+            .replace("BehaviorQuestion {id:", "BehaviorQuestion {name:")  # Ensure correct property name
         )
         return cypher.replace("```cypher", "").replace("```", "").strip()
     except Exception as e:
         st.error(f"Translation error: {e}")
+        logger.error(f"Failed to translate: {question}\nError: {e}")
         return None
 
 
