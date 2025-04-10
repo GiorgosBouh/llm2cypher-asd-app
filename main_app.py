@@ -386,7 +386,6 @@ def validate_csv(df: pd.DataFrame) -> bool:
     return True
 
 # === Streamlit UI ===
-st.set_page_config(layout="wide")
 st.title("🧠 NeuroCypher ASD")
 st.markdown("""
     <i>The graph is based on Q-Chat-10 plus survey and other individual characteristics 
