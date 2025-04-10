@@ -199,6 +199,8 @@ def nl_to_cypher(question: str) -> Optional[str]:
     prompt = f"""
     You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
 
+
+
     Schema:
     - (:Case {{id: int}})
     - (:BehaviorQuestion {{name: string}})
@@ -211,6 +213,11 @@ def nl_to_cypher(question: str) -> Optional[str]:
     - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
     - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
     - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
+    Please make sure:
+- All value matching (e.g., 'Yes', 'No', 'Female', etc.) is case-insensitive using `toLower()`
+- Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex)
+    Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex).
+Always use `toLower()` for case-insensitive value matching (e.g., toLower(d.value) = 'yes')
 
     Translate the following natural language question to Cypher:
 
