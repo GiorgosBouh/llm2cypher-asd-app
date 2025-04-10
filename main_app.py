@@ -220,7 +220,7 @@ def nl_to_cypher(question: str) -> Optional[str]:
     """
     try:
         response = client.chat.completions.create(
-            model="ft:gpt-4o-mini-2024-07-18:bouchouras:my-5-3-experiment:BHDlqQLO",
+            model="gpt-4o-2024-08-06",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
