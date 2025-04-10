@@ -156,6 +156,61 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
             session.run(query, **params)
         logger.info(f"Successfully inserted case {upload_id}")
 
+# ===== ADD THE NEW FUNCTION HERE =====
+@safe_neo4j_operation
+def get_asd_with_jaundice_count() -> Optional[int]:
+    """Returns count of toddlers with ASD and Jaundice (case-insensitive)."""
+    query = """
+    MATCH (c:Case)-[:SCREENED_FOR]->(a:ASD_Trait),
+          (c)-[:HAS_DEMOGRAPHIC]->(d:DemographicAttribute {type: 'Jaundice'})
+    WHERE a.value = 'Yes' AND toLower(d.value) = 'yes'
+    RETURN count(c) AS count
+    """
+    with neo4j_service.session() as session:
+        result = session.run(query)
+        record = result.single()
+        return record["count"] if record else None
+# =====================================
+
+@safe_neo4j_operation
+def run_node2vec() -> None:
+    """Generates Node2Vec embeddings for all cases."""
+    with neo4j_service.session() as session:
+        # Rest of the existing function continues...
+    
+    # Add demographic information
+        demo = {
+        "Sex": row["Sex"],
+        "Ethnicity": row["Ethnicity"],
+        "Jaundice": row["Jaundice"],
+        "Family_mem_with_ASD": row["Family_mem_with_ASD"]
+    }
+    for k, v in demo.items():
+        queries.append((
+            """
+            MATCH (d:DemographicAttribute {type: $k, value: $v})
+            MATCH (c:Case {upload_id: $upload_id})
+            CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
+            """,
+            {"k": k, "v": v, "upload_id": upload_id}
+        ))
+    
+    # Add submitter information
+    queries.append((
+        """
+        MATCH (s:SubmitterType {type: $who})
+        MATCH (c:Case {upload_id: $upload_id})
+        CREATE (c)-[:SUBMITTED_BY]->(s)
+        """,
+        {"who": row["Who_completed_the_test"], "upload_id": upload_id}
+    ))
+    
+    # Execute all queries in a single transaction
+    with neo4j_service.session() as session:
+        for query, params in queries:
+            session.run(query, **params)
+        logger.info(f"Successfully inserted case {upload_id}")
+
 @safe_neo4j_operation
 def run_node2vec() -> None:
     """Generates Node2Vec embeddings for all cases."""
