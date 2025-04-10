@@ -28,6 +28,14 @@ from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler  # Added missing import
 from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import SMOTE
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, roc_auc_score, average_precision_score, precision_recall_curve, roc_curve
+from imblearn.over_sampling import SMOTE
+import matplotlib.pyplot as plt
+import numpy as np
+from collections import Counter
 
 # === Configuration ===
 class Config:
@@ -300,14 +308,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     
     st.pyplot(fig)
 
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
-from sklearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, roc_auc_score, average_precision_score, precision_recall_curve, roc_curve
-from imblearn.over_sampling import SMOTE
-import matplotlib.pyplot as plt
-import numpy as np
-from collections import Counter
+
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
