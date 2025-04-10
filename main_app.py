@@ -29,7 +29,7 @@ from sklearn.preprocessing import StandardScaler  # Added missing import
 from imblearn.pipeline import Pipeline
 from imblearn.over_sampling import SMOTE
 from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
-from sklearn.pipeline import Pipeline
+from imblearn.pipeline import Pipeline
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, roc_auc_score, average_precision_score, precision_recall_curve, roc_curve
 from imblearn.over_sampling import SMOTE
