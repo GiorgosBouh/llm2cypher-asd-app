@@ -358,33 +358,62 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
         embeddings = [record["embedding"] for record in result]
         return np.array(embeddings) if embeddings else None
 
-@st.cache_resource(show_spinner="Training Isolation Forest...")
-def train_isolation_forest() -> Optional[IsolationForest]:
-    """Trains an Isolation Forest model on existing embeddings."""
-    embeddings = get_existing_embeddings()
-    if embeddings is None or len(embeddings) < 10:  # Minimum samples
-        st.warning("Not enough embeddings for anomaly detection")
+@st.cache_resource(show_spinner="Training ASD detection model...")
+def train_asd_detection_model() -> Optional[RandomForestClassifier]:
+    X, y = extract_training_data()
+    if X.empty:
+        st.warning("No training data available")
         return None
     
-    iso_forest = IsolationForest(
-        random_state=Config.RANDOM_STATE,
-        contamination='auto'
+    st.subheader("📊 Class Distribution")
+    st.write(Counter(y))
+
+    # Stratified split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=Config.TEST_SIZE, stratify=y, random_state=Config.RANDOM_STATE
     )
-    iso_forest.fit(embeddings)
-    return iso_forest
 
-def validate_csv(df: pd.DataFrame) -> bool:
-    """Validates the uploaded CSV structure."""
-    required_columns = [f"A{i}" for i in range(1, 11)] + [
-        "Sex", "Ethnicity", "Jaundice", 
-        "Family_mem_with_ASD", "Who_completed_the_test"
-    ]
-    missing_cols = [col for col in required_columns if col not in df.columns]
-    if missing_cols:
-        st.error(f"Missing required columns: {', '.join(missing_cols)}")
-        return False
-    return True
+    # Adjust SMOTE only if class imbalance exists
+    smote_strategy = "auto"
+    if Counter(y)[0] / Counter(y)[1] > 1.5:
+        smote_strategy = 0.6  # Make it closer to 50/50 but not perfect
 
+    pipeline = Pipeline([
+        ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy=smote_strategy)),
+        ('classifier', RandomForestClassifier(
+            n_estimators=Config.N_ESTIMATORS,
+            random_state=Config.RANDOM_STATE
+        ))
+    ])
+
+    pipeline.fit(X_train, y_train)
+
+    # Evaluation
+    y_pred = pipeline.predict(X_test)
+    y_proba = pipeline.predict_proba(X_test)[:, 1]
+
+    st.subheader("Model Evaluation")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("ROC AUC", f"{roc_auc_score(y_test, y_proba):.3f}")
+        st.metric("Average Precision", f"{average_precision_score(y_test, y_proba):.3f}")
+    with col2:
+        st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
+        st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
+
+    # Confusion matrix
+    st.subheader("🔍 Confusion Matrix")
+    cm = confusion_matrix(y_test, y_pred)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    fig, ax = plt.subplots()
+    disp.plot(ax=ax)
+    st.pyplot(fig)
+
+    # Threshold note
+    st.caption("Default threshold: 0.50. For fewer false positives, consider adjusting this value.")
+
+    # Store the model
+    return pipeline.named_steps['classifier']
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
 st.markdown("""
