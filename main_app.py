@@ -298,62 +298,78 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     
     st.pyplot(fig)
 
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, roc_auc_score, average_precision_score, precision_recall_curve, roc_curve
+from imblearn.over_sampling import SMOTE
+import matplotlib.pyplot as plt
+import numpy as np
+from collections import Counter
+
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
-    """Trains and evaluates the ASD detection model with proper SMOTE usage."""
     X, y = extract_training_data()
     if X.empty:
         st.warning("No training data available")
         return None
-    
-    # Initial split (stratified)
+
+    st.subheader("📊 Class Distribution")
+    st.write(Counter(y))
+
+    # ✅ Σωστό train/test split πριν το SMOTE
     X_train, X_test, y_train, y_test = train_test_split(
         X, y,
         test_size=Config.TEST_SIZE,
         stratify=y,
         random_state=Config.RANDOM_STATE
     )
-    
-    # Create pipeline with SMOTE only applied during training
+
+    # ✅ Pipeline: εφαρμόζει SMOTE μόνο στο training set
     pipeline = Pipeline([
-        ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy=Config.SMOTE_RATIO)),
+        ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy='auto')),
         ('classifier', RandomForestClassifier(
             n_estimators=Config.N_ESTIMATORS,
             random_state=Config.RANDOM_STATE
         ))
     ])
-    
-    # Train model
+
     pipeline.fit(X_train, y_train)
-    
-    # Evaluate
     y_pred = pipeline.predict(X_test)
     y_proba = pipeline.predict_proba(X_test)[:, 1]
-    
-    # Display metrics
-    st.subheader("Model Evaluation")
+
+    # === Μετρικές ===
+    st.subheader("📈 Model Evaluation")
     col1, col2 = st.columns(2)
-    
     with col1:
         st.metric("ROC AUC", f"{roc_auc_score(y_test, y_proba):.3f}")
         st.metric("Average Precision", f"{average_precision_score(y_test, y_proba):.3f}")
-    
     with col2:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
-        st.metric("Balanced Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
-    
-    # Show curves
-    plot_combined_curves(y_test, y_proba)
-    
-    # Cross-validation results
-    cv_scores = cross_val_score(
-        pipeline, X, y, 
-        cv=5, 
-        scoring='roc_auc',
-        n_jobs=-1
-    )
-    st.write(f"Cross-validated ROC AUC: {np.mean(cv_scores):.3f} (±{np.std(cv_scores):.3f})")
-    
+        st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
+
+    # === Καμπύλες ===
+    fpr, tpr, _ = roc_curve(y_test, y_proba)
+    precision, recall, _ = precision_recall_curve(y_test, y_proba)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+    ax1.plot(fpr, tpr, label=f"AUC = {roc_auc_score(y_test, y_proba):.2f}")
+    ax1.plot([0, 1], [0, 1], 'k--')
+    ax1.set_title("ROC Curve")
+    ax1.set_xlabel("False Positive Rate")
+    ax1.set_ylabel("True Positive Rate")
+    ax1.legend()
+
+    ax2.plot(recall, precision, label="PR Curve")
+    ax2.set_title("Precision-Recall Curve")
+    ax2.set_xlabel("Recall")
+    ax2.set_ylabel("Precision")
+    ax2.legend()
+
+    st.pyplot(fig)
+
+    # ✅ Επιστροφή του μοντέλου
     return pipeline.named_steps['classifier']
 
 @safe_neo4j_operation
