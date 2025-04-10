@@ -416,6 +416,30 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
 
     # Store the model
     return pipeline.named_steps['classifier']
+@st.cache_resource(show_spinner="Training Isolation Forest...")
+def train_isolation_forest() -> Optional[IsolationForest]:
+    embeddings = get_existing_embeddings()
+    if embeddings is None or len(embeddings) < 10:
+        st.warning("Not enough embeddings for anomaly detection")
+        return None
+
+    # 📏 Κάνε scaling στα embeddings
+    scaler = StandardScaler()
+    embeddings_scaled = scaler.fit_transform(embeddings)
+
+    # 📊 Contamination (ποσοστό "ανωμαλιών")
+    contamination_rate = 0.05 if len(embeddings) < 50 else 0.1
+
+    iso_forest = IsolationForest(
+        random_state=Config.RANDOM_STATE,
+        contamination=contamination_rate
+    )
+    iso_forest.fit(embeddings_scaled)
+
+    # Αποθηκεύουμε τον scaler για μελλοντική χρήση
+    st.session_state["iso_scaler"] = scaler
+
+    return iso_forest
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
@@ -524,33 +548,36 @@ if uploaded_file:
                 )
                 st.plotly_chart(fig)
         
-        # Anomaly Detection
-        with st.spinner("Checking for anomalies..."):
-            iso_forest = train_isolation_forest()
-            if iso_forest:
-                anomaly_score = iso_forest.decision_function([embedding])[0]
-                is_anomaly = iso_forest.predict([embedding])[0] == -1
-                
-                st.subheader("🕵️ Anomaly Detection")
-                if is_anomaly:
-                    st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
-                else:
-                    st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
-                
-                # Show anomaly score distribution
-                scores = iso_forest.decision_function(get_existing_embeddings())
-                fig = px.histogram(
-                    x=scores,
-                    nbins=20,
-                    labels={'x': 'Anomaly Score'},
-                    title="Anomaly Score Distribution"
-                )
-                fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                st.plotly_chart(fig)
-                
-    except Exception as e:
-        st.error(f"Processing failed: {str(e)}")
-        logger.error(f"Processing failed: {str(e)}")
+      # === Anomaly Detection ===
+with st.spinner("Checking for anomalies..."):
+    iso_forest = train_isolation_forest()
+    if iso_forest and "iso_scaler" in st.session_state:
+        embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
+        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+
+        st.subheader("🕵️ Anomaly Detection")
+        if is_anomaly:
+            st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+        else:
+            st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+
+        # === Anomaly score distribution visualization ===
+        all_embeddings = get_existing_embeddings()
+        if all_embeddings is not None:
+            all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
+            scores = iso_forest.decision_function(all_embeddings_scaled)
+
+            fig = px.histogram(
+                x=scores,
+                nbins=20,
+                labels={'x': 'Anomaly Score'},
+                title="Anomaly Score Distribution"
+            )
+            fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
+            st.plotly_chart(fig)
+    else:
+        st.error("Anomaly detection model or scaler not available.")
 
 # Clean up when done
 def cleanup():
