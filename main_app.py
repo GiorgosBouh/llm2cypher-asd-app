@@ -397,7 +397,7 @@ st.markdown("""
 st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
 # === Natural Language to Cypher Section ===
-st.header("💬 Natural Language to Cypher")
+st.header("💬 Natural Language to Cypher1")
 question = st.text_input("📝 Ask your question in natural language:")
 
 if question:
