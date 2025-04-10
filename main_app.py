@@ -25,6 +25,7 @@ import plotly.express as px
 from contextlib import contextmanager
 import logging
 from typing import Optional, Tuple
+from sklearn.preprocessing import StandardScaler  # Added missing import
 
 # === Configuration ===
 class Config:
@@ -360,62 +361,6 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
         embeddings = [record["embedding"] for record in result]
         return np.array(embeddings) if embeddings else None
 
-st.cache_resource(show_spinner="Training ASD detection model...")
-def train_asd_detection_model() -> Optional[RandomForestClassifier]:
-    X, y = extract_training_data()
-    if X.empty:
-        st.warning("No training data available")
-        return None
-    
-    st.subheader("📊 Class Distribution")
-    st.write(Counter(y))
-
-    # Stratified split
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=Config.TEST_SIZE, stratify=y, random_state=Config.RANDOM_STATE
-    )
-
-    # Adjust SMOTE only if class imbalance exists
-    smote_strategy = "auto"
-    if Counter(y)[0] / Counter(y)[1] > 1.5:
-        smote_strategy = 0.6  # Make it closer to 50/50 but not perfect
-
-    pipeline = Pipeline([
-        ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy=smote_strategy)),
-        ('classifier', RandomForestClassifier(
-            n_estimators=Config.N_ESTIMATORS,
-            random_state=Config.RANDOM_STATE
-        ))
-    ])
-
-    pipeline.fit(X_train, y_train)
-
-    # Evaluation
-    y_pred = pipeline.predict(X_test)
-    y_proba = pipeline.predict_proba(X_test)[:, 1]
-
-    st.subheader("Model Evaluation")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("ROC AUC", f"{roc_auc_score(y_test, y_proba):.3f}")
-        st.metric("Average Precision", f"{average_precision_score(y_test, y_proba):.3f}")
-    with col2:
-        st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
-        st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
-
-    # Confusion matrix
-    st.subheader("🔍 Confusion Matrix")
-    cm = confusion_matrix(y_test, y_pred)
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-    fig, ax = plt.subplots()
-    disp.plot(ax=ax)
-    st.pyplot(fig)
-
-    # Threshold note
-    st.caption("Default threshold: 0.50. For fewer false positives, consider adjusting this value.")
-
-    # Store the model
-    return pipeline.named_steps['classifier']
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 def train_isolation_forest() -> Optional[IsolationForest]:
     embeddings = get_existing_embeddings()
@@ -423,11 +368,11 @@ def train_isolation_forest() -> Optional[IsolationForest]:
         st.warning("Not enough embeddings for anomaly detection")
         return None
 
-    # 📏 Κάνε scaling στα embeddings
+    # Scale the embeddings
     scaler = StandardScaler()
     embeddings_scaled = scaler.fit_transform(embeddings)
 
-    # 📊 Contamination (ποσοστό "ανωμαλιών")
+    # Contamination (percentage of "anomalies")
     contamination_rate = 0.05 if len(embeddings) < 50 else 0.1
 
     iso_forest = IsolationForest(
@@ -436,7 +381,7 @@ def train_isolation_forest() -> Optional[IsolationForest]:
     )
     iso_forest.fit(embeddings_scaled)
 
-    # Αποθηκεύουμε τον scaler για μελλοντική χρήση
+    # Store the scaler for future use
     st.session_state["iso_scaler"] = scaler
 
     return iso_forest
@@ -482,7 +427,7 @@ if st.button("🔄 Train/Refresh Model"):
             st.session_state['asd_model'] = model
 
 # === File Upload Section ===
-st.header("📄 Upload New Case4")
+st.header("📄 Upload New Case")
 uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
 
 def validate_csv(df: pd.DataFrame) -> bool:
@@ -495,6 +440,7 @@ def validate_csv(df: pd.DataFrame) -> bool:
         st.error(f"Missing required columns: {', '.join(missing_cols)}")
         return False
     return True
+
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file, delimiter=";")
@@ -548,36 +494,40 @@ if uploaded_file:
                 )
                 st.plotly_chart(fig)
         
-      # === Anomaly Detection ===
-with st.spinner("Checking for anomalies..."):
-    iso_forest = train_isolation_forest()
-    if iso_forest and "iso_scaler" in st.session_state:
-        embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
-        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+        # === Anomaly Detection ===
+        with st.spinner("Checking for anomalies..."):
+            iso_forest = train_isolation_forest()
+            if iso_forest and "iso_scaler" in st.session_state:
+                embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
+                anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
-        st.subheader("🕵️ Anomaly Detection")
-        if is_anomaly:
-            st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
-        else:
-            st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+                st.subheader("🕵️ Anomaly Detection")
+                if is_anomaly:
+                    st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+                else:
+                    st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
 
-        # === Anomaly score distribution visualization ===
-        all_embeddings = get_existing_embeddings()
-        if all_embeddings is not None:
-            all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
-            scores = iso_forest.decision_function(all_embeddings_scaled)
+                # === Anomaly score distribution visualization ===
+                all_embeddings = get_existing_embeddings()
+                if all_embeddings is not None:
+                    all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
+                    scores = iso_forest.decision_function(all_embeddings_scaled)
 
-            fig = px.histogram(
-                x=scores,
-                nbins=20,
-                labels={'x': 'Anomaly Score'},
-                title="Anomaly Score Distribution"
-            )
-            fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-            st.plotly_chart(fig)
-    else:
-        st.error("Anomaly detection model or scaler not available.")
+                    fig = px.histogram(
+                        x=scores,
+                        nbins=20,
+                        labels={'x': 'Anomaly Score'},
+                        title="Anomaly Score Distribution"
+                    )
+                    fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
+                    st.plotly_chart(fig)
+            else:
+                st.error("Anomaly detection model or scaler not available.")
+
+    except Exception as e:
+        st.error(f"Error processing file: {e}")
+        logger.error(f"Error processing file: {e}")
 
 # Clean up when done
 def cleanup():
