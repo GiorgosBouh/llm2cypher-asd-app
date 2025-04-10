@@ -322,8 +322,11 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     st.pyplot(fig)
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
-def train_asd_detection_model() -> Optional[RandomForestClassifier]:
-    """Trains and evaluates the ASD detection model with proper SMOTE usage."""
+def train_asd_detection_model():
+    with st.spinner("Generating embeddings..."):
+        run_node2vec()
+        time.sleep(3) # Allow time for embeddings to be written
+
     X, y = extract_training_data()
     if X.empty:
         st.warning("No training data available")
