@@ -255,14 +255,25 @@ def nl_to_cypher(question: str) -> Optional[str]:
     You are a Cypher expert for an ASD screening database. Translate questions to Cypher.
     
     Schema:
-    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex'|'Ethnicity'|'Jaundice'|'Family_mem_with_ASD', value: string}})
-    - Values are typically lowercase (e.g., 'yes', 'no', 'male', 'female')
+    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
+      - Types: 'Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD'
+      - Values:
+        * Sex: 'm' (male) or 'f' (female)
+        * Others: lowercase (e.g., 'yes', 'no')
+    - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
+      - Values: 'Yes' or 'No' (capitalized)
     
     Examples:
-    Q: Count male cases with jaundice
-    A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'male'}}),
-              (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Jaundice', value: 'yes'}})
+    Q: Count male ASD cases with jaundice
+    A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'm'}}),
+              (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Jaundice', value: 'yes'}}),
+              (c)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'Yes'}})
        RETURN count(c)
+
+    Q: Show female non-ASD cases
+    A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'f'}}),
+              (c)-[:SCREENED_FOR]->(:ASD_Trait {{value: 'No'}})
+       RETURN c
 
     Q: {question}
     A:"""
@@ -272,25 +283,22 @@ def nl_to_cypher(question: str) -> Optional[str]:
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        return response.choices[0].message.content.strip()
+        cypher = response.choices[0].message.content.strip()
+        # Enforce case requirements
+        cypher = (cypher
+            .replace("'male'", "'m'").replace("'female'", "'f'")
+            .replace("ASD_Trait {value: 'yes'}", "ASD_Trait {value: 'Yes'}")
+            .replace("ASD_Trait {value: 'no'}", "ASD_Trait {value: 'No'}")
+        )
+        return cypher.replace("```cypher", "").replace("```", "").strip()
     except Exception as e:
         st.error(f"Translation error: {e}")
         return None
 
-@safe_neo4j_operation
-def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
-    """Extracts the embedding for a specific case."""
-    with neo4j_service.session() as session:
-        result = session.run(
-            "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
-            upload_id=upload_id
-        )
-        record = result.single()
-        return np.array(record["embedding"]) if record and record["embedding"] else None
 
 @safe_neo4j_operation
 def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
-    """Extracts training data from Neo4j."""
+    """Extracts training data with proper case handling"""
     with neo4j_service.session() as session:
         result = session.run("""
             MATCH (c:Case)-[:SCREENED_FOR]->(t:ASD_Trait)
@@ -303,7 +311,7 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
         return pd.DataFrame(), pd.Series()
     
     X = [r["embedding"] for r in records]
-    y = [1 if r["label"] == "Yes" else 0 for r in records]
+    y = [1 if str(r["label"]).lower() == "yes" else 0 for r in records]  # Case-insensitive check
     logger.info(f"Extracted {len(X)} training samples")
     return pd.DataFrame(X), pd.Series(y)
 
