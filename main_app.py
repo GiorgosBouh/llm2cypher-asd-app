@@ -250,40 +250,31 @@ def run_node2vec() -> None:
         logger.info("Node2Vec embedding generation completed")
 
 def nl_to_cypher(question: str) -> Optional[str]:
-    """Translates natural language to Cypher using OpenAI."""
+    """Enhanced translator with examples for demographic queries"""
     prompt = f"""
-    You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
-
+    You are a Cypher expert for an ASD screening database. Translate questions to Cypher.
+    
     Schema:
-    - (:Case {{id: int}})
-    - (:BehaviorQuestion {{name: string}})
-    - (:ASD_Trait {{value: 'Yes' | 'No'}})
-    - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
-    - (:SubmitterType {{type: string}})
-
-    Relationships:
-    - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
-    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
-    - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
-    - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
-
-    Translate the following natural language question to Cypher:
+    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex'|'Ethnicity'|'Jaundice'|'Family_mem_with_ASD', value: string}})
+    - Values are typically lowercase (e.g., 'yes', 'no', 'male', 'female')
+    
+    Examples:
+    Q: Count male cases with jaundice
+    A: MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Sex', value: 'male'}}),
+              (c)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {{type: 'Jaundice', value: 'yes'}})
+       RETURN count(c)
 
     Q: {question}
-
-    Only return the Cypher query.
-    """
+    A:"""
     try:
         response = client.chat.completions.create(
-            model="gpt-4o-2024-08-06",
+            model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        cypher_query = response.choices[0].message.content.strip()
-        return cypher_query.replace("```cypher", "").replace("```", "").strip()
+        return response.choices[0].message.content.strip()
     except Exception as e:
-        st.error(f"OpenAI API error: {e}")
-        logger.error(f"OpenAI API error: {e}")
+        st.error(f"Translation error: {e}")
         return None
 
 @safe_neo4j_operation
