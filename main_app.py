@@ -9,9 +9,11 @@ import os
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import (classification_report, roc_auc_score, 
-                           roc_curve, precision_recall_curve, 
-                           average_precision_score, confusion_matrix)
+from sklearn.metrics import (
+    classification_report, roc_auc_score, 
+    roc_curve, precision_recall_curve, 
+    average_precision_score, confusion_matrix, ConfusionMatrixDisplay
+)
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
 from collections import Counter
