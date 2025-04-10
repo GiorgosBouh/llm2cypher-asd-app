@@ -1,4 +1,7 @@
 import streamlit as st
+
+# MUST be the first Streamlit command
+st.set_page_config(layout="wide")
 from neo4j import GraphDatabase
 from openai import OpenAI
 from dotenv import load_dotenv
