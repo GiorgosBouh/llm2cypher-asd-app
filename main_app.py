@@ -424,7 +424,7 @@ if st.button("🔄 Train/Refresh Model"):
             st.session_state['asd_model'] = model
 
 # === File Upload Section ===
-st.header("📄 Upload New Case")
+st.header("📄 Upload New Case3")
 uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
 
 if uploaded_file:
