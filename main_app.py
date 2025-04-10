@@ -461,6 +461,16 @@ if st.button("🔄 Train/Refresh Model"):
 st.header("📄 Upload New Case4")
 uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
 
+def validate_csv(df: pd.DataFrame) -> bool:
+    required_columns = [f"A{i}" for i in range(1, 11)] + [
+        "Sex", "Ethnicity", "Jaundice", 
+        "Family_mem_with_ASD", "Who_completed_the_test"
+    ]
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        st.error(f"Missing required columns: {', '.join(missing_cols)}")
+        return False
+    return True
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file, delimiter=";")
