@@ -287,7 +287,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
-    # SHAP explainability - FIXED VERSION
+    # SHAP explainability - REVISED FIX
     st.subheader("🧠 Feature Importance (SHAP Values)")
     try:
         # Prepare data for SHAP
@@ -296,8 +296,15 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         # Use TreeExplainer for Random Forest
         explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
 
-        # Calculate SHAP values - for the positive class (1)
-        shap_values = explainer.shap_values(X_train_array)[1]
+        # Calculate SHAP values for all classes
+        shap_values_all = explainer.shap_values(X_train_array)
+
+        # For binary classification, shap_values_all will be a list of two arrays.
+        # We'll take the values for the positive class (index 1).
+        if isinstance(shap_values_all, list):
+            shap_values = shap_values_all[1]
+        else:
+            shap_values = shap_values_all
 
         # Plot SHAP values
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -307,7 +314,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
 
     except Exception as e:
         st.error(f"❌ SHAP analysis failed: {str(e)}")
-        logger.exception("SHAP analysis error")
+        logger.exception(f"SHAP analysis error: {e}")
 
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
