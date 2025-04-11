@@ -304,8 +304,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     ax2.legend(loc='lower left')
 
     st.pyplot(fig)
-
-@s@st.cache_resource(show_spinner="Training ASD detection model...")
+@st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     X, y = extract_training_data()
     if X.empty:
