@@ -529,13 +529,13 @@ try:
 
             qchat_score = record.get("score") if record else None
             # Fallback: Αν δεν υπάρχει score στον γράφο, το υπολογίζουμε από το CSV
-if qchat_score is None:
-    try:
-        qchat_score = sum(int(row[f"A{i}"]) for i in range(1, 11))
-        st.info("ℹ️ Q-chat score was missing from the graph. Calculated from uploaded data.")
-    except Exception as e:
-        st.error("❌ Failed to calculate Q-chat score from data.")
-        logger.error(f"Fallback qchat_score calculation failed: {e}")
+            if qchat_score is None:
+                try:
+                    qchat_score = sum(int(row[f"A{i}"]) for i in range(1, 11))
+                    st.info("ℹ️ Q-chat score was missing from the graph. Calculated from uploaded data.")
+                except Exception as e:
+                    st.error("❌ Failed to calculate Q-chat score from data.")
+                    logger.error(f"Fallback qchat_score calculation failed: {e}")
 
         # === Display the score ===
         if qchat_score is not None:
