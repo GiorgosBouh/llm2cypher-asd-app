@@ -526,15 +526,15 @@ if uploaded_file:
             record = result.single()
             qchat_score = record["score"] if record else None
 
-# Display the score
-if qchat_score is not None:
-    st.subheader("🧮 Q-Chat-10 Score")
-    st.write(f"Score: **{qchat_score} / 10**")
+            # Display the score
+            if qchat_score is not None:
+                st.subheader("🧮 Q-Chat-10 Score")
+                st.write(f"Score: **{qchat_score} / 10**")
 
-    if qchat_score <= 3:
-        st.success("✅ Based on Q-Chat-10, this child is not expected to show ASD traits (Score ≤ 3).")
-    else:
-        st.warning("⚠️ Based on Q-Chat-10, this child may present ASD traits (Score > 3).")
+            if qchat_score <= 3:
+                st.success("✅ Based on Q-Chat-10, this child is not expected to show ASD traits (Score ≤ 3).")
+            else:
+                st.warning("⚠️ Based on Q-Chat-10, this child may present ASD traits (Score > 3).")
         
         # ASD Prediction
         if 'asd_model' in st.session_state:
