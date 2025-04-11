@@ -522,7 +522,7 @@ if uploaded_file:
                     labels={'x': 'Class', 'y': 'Probability'},
                     title="Prediction Probabilities"
                 )
-                st.plotly_chart(fig)
+                st.plotly_chart(fig, use_container_width=True, key=f"prediction_plot_{upload_id}")
 # Use threshold to make the prediction
                 prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"                
                 st.subheader("🔍 Prediction Result")
@@ -537,7 +537,7 @@ if uploaded_file:
                     labels={'x': 'Class', 'y': 'Probability'},
                     title="Prediction Probabilities"
                 )
-                st.plotly_chart(fig)
+                st.plotly_chart(fig, use_container_width=True, key=f"prediction_plot_{upload_id}")
         
         # === Anomaly Detection ===
         with st.spinner("Checking for anomalies..."):
@@ -566,7 +566,7 @@ if uploaded_file:
                         title="Anomaly Score Distribution"
                     )
                     fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                    st.plotly_chart(fig)
+                    st.plotly_chart(fig, use_container_width=True, key=f"prediction_plot_{upload_id}")
             else:
                 st.error("Anomaly detection model or scaler not available.")
 
