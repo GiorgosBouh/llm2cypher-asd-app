@@ -25,17 +25,8 @@ import plotly.express as px
 from contextlib import contextmanager
 import logging
 from typing import Optional, Tuple
-from sklearn.preprocessing import StandardScaler  # Added missing import
-from imblearn.pipeline import Pipeline
-from imblearn.over_sampling import SMOTE
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
-from imblearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, roc_auc_score, average_precision_score, precision_recall_curve, roc_curve
-from imblearn.over_sampling import SMOTE
-import matplotlib.pyplot as plt
-import numpy as np
-from collections import Counter
+from sklearn.preprocessing import StandardScaler
+import shap  # Moved to top with other imports
 
 # === Configuration ===
 class Config:
@@ -108,12 +99,7 @@ def safe_neo4j_operation(func):
 
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> None:
-    """Inserts a user case into the Neo4j graph database.
-    
-    Args:
-        row: A pandas Series containing all case data
-        upload_id: Unique identifier for the case
-    """
+    """Inserts a user case into the Neo4j graph database."""
     queries = []
     params = {"upload_id": upload_id}
     
@@ -209,8 +195,6 @@ def nl_to_cypher(question: str) -> Optional[str]:
     prompt = f"""
     You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
 
-
-
     Schema:
     - (:Case {{id: int}})
     - (:BehaviorQuestion {{name: string}})
@@ -224,16 +208,8 @@ def nl_to_cypher(question: str) -> Optional[str]:
     - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
     - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
     Please make sure:
-- All value matching (e.g., 'Yes', 'No', 'Female', etc.) is case-insensitive using `toLower()`
-- Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex)
-    Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex).
-Always use `toLower()` for case-insensitive value matching (e.g., toLower(d.value) = 'yes')
-
-    Translate the following natural language question to Cypher:
-
-    Q: {question}
-
-    Only return the Cypher query.
+    - All value matching (e.g., 'Yes', 'No', 'Female', etc.) is case-insensitive using `toLower()`
+    - Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex)
     """
     try:
         response = client.chat.completions.create(
@@ -280,18 +256,11 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     """Plots ROC and Precision-Recall curves side by side."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+    
     # ROC Curve
     fpr, tpr, _ = roc_curve(y_true, y_proba)
     roc_auc = roc_auc_score(y_true, y_proba)
-    
-    # Precision-Recall Curve
-    precision, recall, _ = precision_recall_curve(y_true, y_proba)
-    avg_precision = average_precision_score(y_true, y_proba)
-    
-    # Create subplots
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-    
-    # Plot ROC
     ax1.plot(fpr, tpr, label=f'ROC (AUC = {roc_auc:.2f})')
     ax1.plot([0, 1], [0, 1], 'k--')
     ax1.set_xlabel('False Positive Rate')
@@ -299,7 +268,9 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     ax1.set_title('ROC Curve')
     ax1.legend(loc='lower right')
     
-    # Plot Precision-Recall
+    # Precision-Recall Curve
+    precision, recall, _ = precision_recall_curve(y_true, y_proba)
+    avg_precision = average_precision_score(y_true, y_proba)
     ax2.plot(recall, precision, label=f'PR (AP = {avg_precision:.2f})')
     ax2.set_xlabel('Recall')
     ax2.set_ylabel('Precision')
@@ -307,8 +278,6 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     ax2.legend(loc='lower left')
     
     st.pyplot(fig)
-
-import shap  # Added for explainability
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
@@ -352,52 +321,21 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
-# === SHAP explainability ===
-st.subheader("🧠 Feature Importance (SHAP Values)")
-try:
-    if isinstance(X_train, pd.DataFrame):
-        X_array = X_train.values
-    else:
-        X_array = np.array(X_train)
+    # SHAP explainability
+    st.subheader("🧠 Feature Importance (SHAP Values)")
+    try:
+        explainer = shap.Explainer(pipeline.named_steps['classifier'])
+        shap_values = explainer(X_train)
+        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+        st.pyplot(bbox_inches='tight')
+    except Exception as e:
+        st.error(f"❌ SHAP analysis failed: {e}")
+        logger.error(f"SHAP error: {e}")
 
-    if len(X_array.shape) != 2:
-        raise ValueError("Input to SHAP must be a 2D array (n_samples, n_features)")
+    # Evaluation curves
+    plot_combined_curves(y_test, y_proba)
 
-    explainer = shap.Explainer(pipeline.named_steps['classifier'], X_array)
-    shap_values = explainer(X_array)
-    shap.summary_plot(shap_values, X_array, plot_type="bar", show=False)
-    st.pyplot(bbox_inches='tight')
-
-except Exception as e:
-    st.error(f"❌ SHAP analysis failed: {e}")
-    logger.error(f"SHAP error: {e}")
-
-# === Evaluation Curves ===
-try:
-    fpr, tpr, _ = roc_curve(y_test, y_proba)
-    precision, recall, _ = precision_recall_curve(y_test, y_proba)
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-    # ROC Curve
-    ax1.plot(fpr, tpr, label=f"AUC = {roc_auc_score(y_test, y_proba):.2f}")
-    ax1.plot([0, 1], [0, 1], 'k--')
-    ax1.set_title("ROC Curve")
-    ax1.set_xlabel("False Positive Rate")
-    ax1.set_ylabel("True Positive Rate")
-    ax1.legend()
-
-    # Precision-Recall Curve
-    ax2.plot(recall, precision, label="PR Curve")
-    ax2.set_title("Precision-Recall Curve")
-    ax2.set_xlabel("Recall")
-    ax2.set_ylabel("Precision")
-    ax2.legend()
-
-    st.pyplot(fig)
-
-except Exception as e:
-    st.warning(f"⚠️ Could not generate evaluation plots: {e}")
+    return pipeline.named_steps['classifier']
 
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
@@ -418,11 +356,8 @@ def train_isolation_forest() -> Optional[IsolationForest]:
         st.warning("Not enough embeddings for anomaly detection")
         return None
 
-    # Scale the embeddings
     scaler = StandardScaler()
     embeddings_scaled = scaler.fit_transform(embeddings)
-
-    # Contamination (percentage of "anomalies")
     contamination_rate = 0.05 if len(embeddings) < 50 else 0.1
 
     iso_forest = IsolationForest(
@@ -430,11 +365,20 @@ def train_isolation_forest() -> Optional[IsolationForest]:
         contamination=contamination_rate
     )
     iso_forest.fit(embeddings_scaled)
-
-    # Store the scaler for future use
     st.session_state["iso_scaler"] = scaler
-
     return iso_forest
+
+def validate_csv(df: pd.DataFrame) -> bool:
+    """Validates uploaded CSV file structure."""
+    required_columns = [f"A{i}" for i in range(1, 11)] + [
+        "Sex", "Ethnicity", "Jaundice", 
+        "Family_mem_with_ASD", "Who_completed_the_test"
+    ]
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        st.error(f"Missing required columns: {', '.join(missing_cols)}")
+        return False
+    return True
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
@@ -465,7 +409,7 @@ with st.expander("ℹ️ Help: KG Schema & Example Questions", expanded=False):
 """)
 
 # === Natural Language to Cypher Section ===
-st.header("💬 Natural Language to Cypher1")
+st.header("💬 Natural Language to Cypher")
 question = st.text_input("📝 Ask your question in natural language:")
 
 if question:
@@ -493,24 +437,13 @@ if st.button("🔄 Train/Refresh Model"):
         if model:
             st.success("Model trained successfully!")
             st.session_state['asd_model'] = model
-# === Validate uploaded CSV ===
-def validate_csv(df: pd.DataFrame) -> bool:
-    required_columns = [f"A{i}" for i in range(1, 11)] + [
-        "Sex", "Ethnicity", "Jaundice", 
-        "Family_mem_with_ASD", "Who_completed_the_test"
-    ]
-    missing_cols = [col for col in required_columns if col not in df.columns]
-    if missing_cols:
-        st.error(f"Missing required columns: {', '.join(missing_cols)}")
-        return False
-    return True
 
-try:
-    # === File Upload Section ===
-    st.header("📄 Upload New Case")
-    uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
+# === File Upload Section ===
+st.header("📄 Upload New Case")
+uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
 
-    if uploaded_file:
+if uploaded_file:
+    try:
         df = pd.read_csv(uploaded_file, delimiter=";")
         if not validate_csv(df):
             st.stop()
@@ -549,7 +482,6 @@ try:
                 """, upload_id=upload_id).single()
 
             qchat_score = record.get("score") if record else None
-            # Fallback: Αν δεν υπάρχει score στον γράφο, το υπολογίζουμε από το CSV
             if qchat_score is None:
                 try:
                     qchat_score = sum(int(row[f"A{i}"]) for i in range(1, 11))
@@ -558,7 +490,7 @@ try:
                     st.error("❌ Failed to calculate Q-chat score from data.")
                     logger.error(f"Fallback qchat_score calculation failed: {e}")
 
-        # === Display the score ===
+        # Display the score
         if qchat_score is not None:
             st.subheader("🧶 Q-Chat-10 Score")
             st.write(f"Score: **{qchat_score} / 10**")
@@ -570,7 +502,7 @@ try:
         else:
             st.error("⚠️ Q-chat score not found for this case.")
 
-        # === ASD Prediction ===
+        # ASD Prediction
         if 'asd_model' in st.session_state:
             with st.spinner("Predicting ASD traits..."):
                 model = st.session_state['asd_model']
@@ -592,10 +524,9 @@ try:
                     labels={'x': 'Class', 'y': 'Probability'},
                     title="Prediction Probabilities"
                 )
-                fig.update_traces(textposition="outside")
-                st.plotly_chart(fig, key=f"evaluation_plot_{upload_id}")
+                st.plotly_chart(fig)
 
-        # === Anomaly Detection ===
+        # Anomaly Detection
         with st.spinner("Checking for anomalies..."):
             iso_forest = train_isolation_forest()
             if iso_forest and "iso_scaler" in st.session_state:
@@ -621,10 +552,10 @@ try:
                         title="Anomaly Score Distribution"
                     )
                     fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                    st.plotly_chart(fig, key=f"anomaly_plot_{upload_id}")
+                    st.plotly_chart(fig)
             else:
                 st.error("Anomaly detection model or scaler not available.")
 
-except Exception as e:
-    st.error(f"Error processing file: {e}")
-    logger.error(f"Error processing file: {e}")
+    except Exception as e:
+        st.error(f"Error processing file: {e}")
+        logger.error(f"Error processing file: {e}")
