@@ -350,14 +350,14 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
   # SHAP explainability
     st.subheader("🧠 Feature Importance (SHAP Values)")
     try:
-        X_train_df = pd.DataFrame(X_train)  # Ensure it's a DataFrame
+        X_train_df = pd.DataFrame(X_train, columns=[f'embedding_{i}' for i in range(Config.NODE2VEC_EMBEDDING_DIM)])
         explainer = shap.Explainer(pipeline.named_steps['classifier'], X_train_df)
         shap_values = explainer(X_train_df)
         shap.summary_plot(shap_values, X_train_df, plot_type="bar", show=False)
         st.pyplot(bbox_inches='tight')
     except Exception as e:
-        st.error(f"❌ SHAP analysis failed (Attempt 2): {e}")
-        logger.error(f"SHAP error (Attempt 2): {e}")
+        st.error(f"❌ SHAP analysis failed (Attempt 3): {e}")
+        logger.error(f"SHAP error (Attempt 3): {e}")
 
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
