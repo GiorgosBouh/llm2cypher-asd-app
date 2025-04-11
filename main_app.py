@@ -305,7 +305,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
 
     st.pyplot(fig)
 
-@st.cache_resource(show_spinner="Training ASD detection model...")
+@s@st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     X, y = extract_training_data()
     if X.empty:
@@ -350,13 +350,13 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     # SHAP explainability
     st.subheader("🧠 Feature Importance (SHAP Values)")
     try:
-        explainer = shap.Explainer(pipeline.named_steps['classifier'])
+        explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])  # Explicitly use TreeExplainer
         shap_values = explainer(X_train)
         shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
         st.pyplot(bbox_inches='tight')
     except Exception as e:
-        st.error(f"❌ SHAP analysis failed: {e}")
-        logger.error(f"SHAP error: {e}")
+        st.error(f"❌ SHAP analysis failed (Attempt 1): {e}")
+        logger.error(f"SHAP error (Attempt 1): {e}")
 
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
