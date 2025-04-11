@@ -347,15 +347,17 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
     # SHAP explainability
+  # SHAP explainability
     st.subheader("🧠 Feature Importance (SHAP Values)")
     try:
-        explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])  # Explicitly use TreeExplainer
-        shap_values = explainer(X_train)
-        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+        X_train_df = pd.DataFrame(X_train)  # Ensure it's a DataFrame
+        explainer = shap.Explainer(pipeline.named_steps['classifier'], X_train_df)
+        shap_values = explainer(X_train_df)
+        shap.summary_plot(shap_values, X_train_df, plot_type="bar", show=False)
         st.pyplot(bbox_inches='tight')
     except Exception as e:
-        st.error(f"❌ SHAP analysis failed (Attempt 1): {e}")
-        logger.error(f"SHAP error (Attempt 1): {e}")
+        st.error(f"❌ SHAP analysis failed (Attempt 2): {e}")
+        logger.error(f"SHAP error (Attempt 2): {e}")
 
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
