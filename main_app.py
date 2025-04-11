@@ -519,12 +519,12 @@ if uploaded_file:
             
             # Retrieve qchat_score from graph
             with neo4j_service.session() as session:
-                result = session.run("""
+                record = session.run("""
                     MATCH (c:Case {upload_id: $upload_id})
                     RETURN c.qchat_score AS score
-            """, upload_id=upload_id)
-            record = result.single()
-            qchat_score = record["score"] if record else None
+                """, upload_id=upload_id).single()
+
+            qchat_score = record.get("score") if record else None
 
             # Display the score
             if qchat_score is not None:
