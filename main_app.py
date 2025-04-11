@@ -391,7 +391,7 @@ def train_isolation_forest() -> Optional[IsolationForest]:
         contamination=contamination_rate
     )
     iso_forest.fit(embeddings_scaled)
-    .state["iso_scaler"] = scaler
+    st.session_state["iso_scaler"] = scaler
     return iso_forest
 
 def validate_csv(df: pd.DataFrame) -> bool:
