@@ -319,7 +319,10 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
 
     st.subheader("📊 Class Distribution")
     st.write(Counter(y))
-
+    st.markdown("""
+    - **`0`** 🟢 → No ASD Traits  
+    - **`1`** 🔴 → ASD Traits
+    """)
     # ✅ Σωστό train/test split πριν το SMOTE
     X_train, X_test, y_train, y_test = train_test_split(
         X, y,
