@@ -247,7 +247,6 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
-    # All code inside the function should be indented like this
     X, y = extract_training_data()
     if X.empty:
         st.warning("No training data available")
@@ -287,42 +286,40 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     with col2:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
-    return pipeline.named_steps['classifier']
-  # SHAP explainability
-st.subheader("🧠 Feature Importance (SHAP Values)")
-try:
-    # Προετοιμασία δεδομένων για SHAP
-    X_train_array = np.array(X_train)
-    logger.info(f"Shape of X_train_array for SHAP: {X_train_array.shape}")
 
-    # Χρήση TreeExplainer για Random Forest
-    explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
-    logger.info(f"Type of SHAP explainer: {type(explainer)}")
-
-    # Υπολογισμός SHAP values
-    shap_values_all = explainer.shap_values(X_train_array)
-    logger.info(f"Shape of shap_values_all: {len(shap_values_all)} and {[sv.shape for sv in shap_values_all] if isinstance(shap_values_all, list) else shap_values_all.shape}")
-
-    # Επιλογή SHAP values για τη θετική κλάση (αν είναι λίστα)
-    if isinstance(shap_values_all, list):
-        shap_values = shap_values_all[1]
-    else:
-        shap_values = shap_values_all
-    logger.info(f"Shape of shap_values (for plotting): {shap_values.shape}")
-
-    # Δημιουργία του plot
-    fig, ax = plt.subplots(figsize=(10, 6))
-    shap.summary_plot(shap_values, X_train_array, feature_names=[f'embedding_{i}' for i in range(Config.NODE2VEC_EMBEDDING_DIM)], plot_type="bar", show=False)
-    st.pyplot(fig, bbox_inches='tight')
-    plt.close(fig)
-
-except Exception as e:
-    st.error(f"❌ SHAP analysis failed: {str(e)}")
-    logger.exception("Σφάλμα κατά την ανάλυση SHAP")
+    # SHAP explainability
+    st.subheader("🧠 Feature Importance (SHAP Values)")
+    try:
+        # Prepare data for SHAP
+        X_train_array = np.array(X_train)
+        feature_names = [f"embedding_{i}" for i in range(X_train_array.shape[1])]
+        
+        # Create explainer
+        explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
+        
+        # Calculate SHAP values
+        shap_values = explainer.shap_values(X_train_array)
+        
+        # Create figure explicitly
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        # Plot SHAP values (use index 1 for ASD class if it's a list)
+        if isinstance(shap_values, list):
+            shap.summary_plot(shap_values[1], X_train_array, feature_names=feature_names, plot_type="bar", show=False)
+        else:
+            shap.summary_plot(shap_values, X_train_array, feature_names=feature_names, plot_type="bar", show=False)
+        
+        st.pyplot(fig)
+        plt.close(fig)
+        
+    except Exception as e:
+        st.error(f"❌ SHAP analysis failed: {e}")
+        logger.error(f"SHAP error: {e}")
 
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
 
+    return pipeline.named_steps['classifier']
 
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
@@ -366,6 +363,40 @@ def validate_csv(df: pd.DataFrame) -> bool:
         st.error(f"Missing required columns: {', '.join(missing_cols)}")
         return False
     return True
+
+def nl_to_cypher(question: str) -> Optional[str]:
+    """Translates natural language to Cypher using OpenAI."""
+    prompt = f"""
+    You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
+
+    Schema:
+    - (:Case {{id: int}})
+    - (:BehaviorQuestion {{name: string}})
+    - (:ASD_Trait {{value: 'Yes' | 'No'}})
+    - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
+    - (:SubmitterType {{type: string}})
+
+    Relationships:
+    - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
+    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
+    - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
+    - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
+    Please make sure:
+    - All value matching (e.g., 'Yes', 'No', 'Female', etc.) is case-insensitive using `toLower()`
+    - Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex)
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        cypher_query = response.choices[0].message.content.strip()
+        return cypher_query.replace("```cypher", "").replace("```", "").strip()
+    except Exception as e:
+        st.error(f"OpenAI API error: {e}")
+        logger.error(f"OpenAI API error: {e}")
+        return None
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
