@@ -355,8 +355,9 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     # SHAP explainability
     st.subheader("🧠 Feature Importance (SHAP Values)")
     try:
-        explainer = shap.Explainer(pipeline.named_steps['classifier'], X_train)
-        shap_values = explainer(X_train)
+        X_array = X_train.values if isinstance(X_train, pd.DataFrame) else X_train
+        explainer = shap.Explainer(pipeline.named_steps['classifier'], X_array)
+        shap_values = explainer(X_array)
         shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
         st.pyplot(bbox_inches='tight')
     except Exception as e:
