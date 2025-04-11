@@ -247,6 +247,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
+    # All code inside the function should be indented like this
     X, y = extract_training_data()
     if X.empty:
         st.warning("No training data available")
@@ -286,7 +287,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     with col2:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
-
+    return pipeline.named_steps['classifier']
   # SHAP explainability
 st.subheader("🧠 Feature Importance (SHAP Values)")
 try:
