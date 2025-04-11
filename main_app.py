@@ -287,34 +287,37 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
-    # SHAP explainability - REVISED FIX
-    st.subheader("🧠 Feature Importance (SHAP Values)")
-    try:
-        # Prepare data for SHAP
-        X_train_array = np.array(X_train)
+  # SHAP explainability
+st.subheader("🧠 Feature Importance (SHAP Values)")
+try:
+    # Προετοιμασία δεδομένων για SHAP
+    X_train_array = np.array(X_train)
+    logger.info(f"Shape of X_train_array for SHAP: {X_train_array.shape}")
 
-        # Use TreeExplainer for Random Forest
-        explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
+    # Χρήση TreeExplainer για Random Forest
+    explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
+    logger.info(f"Type of SHAP explainer: {type(explainer)}")
 
-        # Calculate SHAP values for all classes
-        shap_values_all = explainer.shap_values(X_train_array)
+    # Υπολογισμός SHAP values
+    shap_values_all = explainer.shap_values(X_train_array)
+    logger.info(f"Shape of shap_values_all: {len(shap_values_all)} and {[sv.shape for sv in shap_values_all] if isinstance(shap_values_all, list) else shap_values_all.shape}")
 
-        # For binary classification, shap_values_all will be a list of two arrays.
-        # We'll take the values for the positive class (index 1).
-        if isinstance(shap_values_all, list):
-            shap_values = shap_values_all[1]
-        else:
-            shap_values = shap_values_all
+    # Επιλογή SHAP values για τη θετική κλάση (αν είναι λίστα)
+    if isinstance(shap_values_all, list):
+        shap_values = shap_values_all[1]
+    else:
+        shap_values = shap_values_all
+    logger.info(f"Shape of shap_values (for plotting): {shap_values.shape}")
 
-        # Plot SHAP values
-        fig, ax = plt.subplots(figsize=(10, 6))
-        shap.summary_plot(shap_values, X_train_array, feature_names=[f'embedding_{i}' for i in range(Config.NODE2VEC_EMBEDDING_DIM)], plot_type="bar", show=False)
-        st.pyplot(fig, bbox_inches='tight')
-        plt.close(fig)
+    # Δημιουργία του plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    shap.summary_plot(shap_values, X_train_array, feature_names=[f'embedding_{i}' for i in range(Config.NODE2VEC_EMBEDDING_DIM)], plot_type="bar", show=False)
+    st.pyplot(fig, bbox_inches='tight')
+    plt.close(fig)
 
-    except Exception as e:
-        st.error(f"❌ SHAP analysis failed: {str(e)}")
-        logger.exception(f"SHAP analysis error: {e}")
+except Exception as e:
+    st.error(f"❌ SHAP analysis failed: {str(e)}")
+    logger.exception("Σφάλμα κατά την ανάλυση SHAP")
 
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
