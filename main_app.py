@@ -473,127 +473,115 @@ if st.button("🔄 Train/Refresh Model"):
             st.success("Model trained successfully!")
             st.session_state['asd_model'] = model
 
-# === File Upload Section ===
-st.header("📄 Upload New Case")
-uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
+try:
+    # === File Upload Section ===
+    st.header("📄 Upload New Case")
+    uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
 
-def validate_csv(df: pd.DataFrame) -> bool:
-    required_columns = [f"A{i}" for i in range(1, 11)] + [
-        "Sex", "Ethnicity", "Jaundice", 
-        "Family_mem_with_ASD", "Who_completed_the_test"
-    ]
-    missing_cols = [col for col in required_columns if col not in df.columns]
-    if missing_cols:
-        st.error(f"Missing required columns: {', '.join(missing_cols)}")
-        return False
-    return True
-
-if uploaded_file:
-    try:
+    if uploaded_file:
         df = pd.read_csv(uploaded_file, delimiter=";")
         if not validate_csv(df):
             st.stop()
-            
+
         if len(df) != 1:
             st.error("Please upload exactly one row (one child)")
             st.stop()
-            
+
         row = df.iloc[0]
         upload_id = str(uuid.uuid4())
-        
+
         # Insert case
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
-        
+
         # Generate embeddings
         with st.spinner("Generating embeddings..."):
             run_node2vec()
-            time.sleep(3)  # Allow time for embeddings to be written
-        
-    # Check if case exists and get embedding
-    with st.spinner("Verifying data..."):
-        embedding = extract_user_embedding(upload_id)
-        if embedding is None:
-            st.error("Failed to generate embedding")
-            st.stop()
-        
-        # Retrieve qchat_score from graph
-        with neo4j_service.session() as session:
-            record = session.run("""
-                MATCH (c:Case {upload_id: $upload_id})
-                RETURN c.qchat_score AS score
-            """, upload_id=upload_id).single()
+            time.sleep(3)
 
-        qchat_score = record.get("score") if record else None
+        # Check if case exists and get embedding
+        with st.spinner("Verifying data..."):
+            embedding = extract_user_embedding(upload_id)
+            if embedding is None:
+                st.error("Failed to generate embedding")
+                st.stop()
 
-# === Display the score ===
-if qchat_score is not None:
-    st.subheader("🧮 Q-Chat-10 Score")
-    st.write(f"Score: **{qchat_score} / 10**")
+            # Retrieve qchat_score from graph
+            with neo4j_service.session() as session:
+                record = session.run("""
+                    MATCH (c:Case {upload_id: $upload_id})
+                    RETURN c.qchat_score AS score
+                """, upload_id=upload_id).single()
 
-    if qchat_score <= 3:
-        st.success("✅ Based on Q-Chat-10, this child is not expected to show ASD traits (Score ≤ 3).")
-    else:
-        st.warning("⚠️ Based on Q-Chat-10, this child may present ASD traits (Score > 3).")
-else:
-    st.error("⚠️ Q-chat score not found for this case.")
+            qchat_score = record.get("score") if record else None
 
-# === ASD Prediction ===
-if 'asd_model' in st.session_state:
-    with st.spinner("Predicting ASD traits..."):
-        model = st.session_state['asd_model']
-        proba = model.predict_proba([embedding])[0][1]
+        # === Display the score ===
+        if qchat_score is not None:
+            st.subheader("🧶 Q-Chat-10 Score")
+            st.write(f"Score: **{qchat_score} / 10**")
 
-        # Threshold slider
-        st.subheader("🛠️ Prediction Threshold")
-        threshold = st.slider("Select prediction threshold", min_value=0.3, max_value=0.9, value=0.5, step=0.01)
-
-        # Final prediction
-        prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"
-
-        # Display result
-        st.subheader("🔍 Prediction Result")
-        col1, col2 = st.columns(2)
-        col1.metric("Prediction", prediction)
-        col2.metric("Confidence", f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}")
-
-        # Bar chart
-        fig = px.bar(
-            x=["Control", "ASD Traits"],
-            y=[1 - proba, proba],
-            labels={'x': 'Class', 'y': 'Probability'},
-            title="Prediction Probabilities"
-        )
-        fig.update_traces(textposition="outside")
-        st.plotly_chart(fig, key=f"evaluation_plot_{upload_id}")
-
-# === Anomaly Detection ===
-with st.spinner("Checking for anomalies..."):
-    iso_forest = train_isolation_forest()
-    if iso_forest and "iso_scaler" in st.session_state:
-        embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
-        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
-
-        st.subheader("🕵️ Anomaly Detection")
-        if is_anomaly:
-            st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+            if qchat_score <= 3:
+                st.success("✅ Based on Q-Chat-10, this child is not expected to show ASD traits (Score ≤ 3).")
+            else:
+                st.warning("⚠️ Based on Q-Chat-10, this child may present ASD traits (Score > 3).")
         else:
-            st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+            st.error("⚠️ Q-chat score not found for this case.")
 
-        # Histogram
-        all_embeddings = get_existing_embeddings()
-        if all_embeddings is not None:
-            all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
-            scores = iso_forest.decision_function(all_embeddings_scaled)
+        # === ASD Prediction ===
+        if 'asd_model' in st.session_state:
+            with st.spinner("Predicting ASD traits..."):
+                model = st.session_state['asd_model']
+                proba = model.predict_proba([embedding])[0][1]
 
-            fig = px.histogram(
-                x=scores,
-                nbins=20,
-                labels={'x': 'Anomaly Score'},
-                title="Anomaly Score Distribution"
-            )
-            fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-            st.plotly_chart(fig, key=f"anomaly_plot_{upload_id}")
-    else:
-        st.error("Anomaly detection model or scaler not available.")
+                st.subheader("🛠️ Prediction Threshold")
+                threshold = st.slider("Select prediction threshold", min_value=0.3, max_value=0.9, value=0.5, step=0.01)
+
+                prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"
+
+                st.subheader("🔍 Prediction Result")
+                col1, col2 = st.columns(2)
+                col1.metric("Prediction", prediction)
+                col2.metric("Confidence", f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}")
+
+                fig = px.bar(
+                    x=["Control", "ASD Traits"],
+                    y=[1 - proba, proba],
+                    labels={'x': 'Class', 'y': 'Probability'},
+                    title="Prediction Probabilities"
+                )
+                fig.update_traces(textposition="outside")
+                st.plotly_chart(fig, key=f"evaluation_plot_{upload_id}")
+
+        # === Anomaly Detection ===
+        with st.spinner("Checking for anomalies..."):
+            iso_forest = train_isolation_forest()
+            if iso_forest and "iso_scaler" in st.session_state:
+                embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
+                anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+
+                st.subheader("🕵️ Anomaly Detection")
+                if is_anomaly:
+                    st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+                else:
+                    st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+
+                all_embeddings = get_existing_embeddings()
+                if all_embeddings is not None:
+                    all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
+                    scores = iso_forest.decision_function(all_embeddings_scaled)
+
+                    fig = px.histogram(
+                        x=scores,
+                        nbins=20,
+                        labels={'x': 'Anomaly Score'},
+                        title="Anomaly Score Distribution"
+                    )
+                    fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
+                    st.plotly_chart(fig, key=f"anomaly_plot_{upload_id}")
+            else:
+                st.error("Anomaly detection model or scaler not available.")
+
+except Exception as e:
+    st.error(f"Error processing file: {e}")
+    logger.error(f"Error processing file: {e}")
