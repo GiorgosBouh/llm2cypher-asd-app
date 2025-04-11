@@ -308,7 +308,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     
     st.pyplot(fig)
 
-
+import shap  # Added for explainability
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
@@ -323,7 +323,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     - **`0`** 🟢 → No ASD Traits  
     - **`1`** 🔴 → ASD Traits
     """)
-    # ✅ Σωστό train/test split πριν το SMOTE
+
     X_train, X_test, y_train, y_test = train_test_split(
         X, y,
         test_size=Config.TEST_SIZE,
@@ -331,7 +331,6 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         random_state=Config.RANDOM_STATE
     )
 
-    # ✅ Pipeline: εφαρμόζει SMOTE μόνο στο training set
     pipeline = Pipeline([
         ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy='auto')),
         ('classifier', RandomForestClassifier(
@@ -344,7 +343,6 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     y_pred = pipeline.predict(X_test)
     y_proba = pipeline.predict_proba(X_test)[:, 1]
 
-    # === Μετρικές ===
     st.subheader("📈 Model Evaluation")
     col1, col2 = st.columns(2)
     with col1:
@@ -353,6 +351,20 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     with col2:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
+
+    # SHAP explainability
+    st.subheader("🧠 Feature Importance (SHAP Values)")
+    try:
+        explainer = shap.Explainer(pipeline.named_steps['classifier'], X_train)
+        shap_values = explainer(X_train)
+        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+        st.pyplot(bbox_inches='tight')
+    except Exception as e:
+        st.error(f"SHAP analysis failed: {e}")
+
+    return pipeline.named_steps['classifier']
+
+
 
     # === Καμπύλες ===
     fpr, tpr, _ = roc_curve(y_test, y_proba)
