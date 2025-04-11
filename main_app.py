@@ -472,6 +472,7 @@ if st.button("🔄 Train/Refresh Model"):
         if model:
             st.success("Model trained successfully!")
             st.session_state['asd_model'] = model
+# === Validate uploaded CSV ===
 def validate_csv(df: pd.DataFrame) -> bool:
     required_columns = [f"A{i}" for i in range(1, 11)] + [
         "Sex", "Ethnicity", "Jaundice", 
@@ -482,6 +483,7 @@ def validate_csv(df: pd.DataFrame) -> bool:
         st.error(f"Missing required columns: {', '.join(missing_cols)}")
         return False
     return True
+
 try:
     # === File Upload Section ===
     st.header("📄 Upload New Case")
@@ -495,6 +497,9 @@ try:
         if len(df) != 1:
             st.error("Please upload exactly one row (one child)")
             st.stop()
+
+        st.subheader("👀 CSV Preview")
+        st.dataframe(df.T)
 
         row = df.iloc[0]
         upload_id = str(uuid.uuid4())
