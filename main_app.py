@@ -510,10 +510,10 @@ if uploaded_file:
                 # Apply the user-defined threshold to make the prediction
                 prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"
 
-                st.subheader("🔍 Prediction Result")
-                col1, col2 = st.columns(2)
-                col1.metric("Prediction", prediction)
-                col2.metric("Confidence", f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}")
+                #st.subheader("🔍 Prediction Result")
+                #col1, col2 = st.columns(2)
+                #col1.metric("Prediction", prediction)
+                #col2.metric("Confidence", f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}")
 
                 # Optional: show class probabilities as bar chart
                 #fig = px.bar(
