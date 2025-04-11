@@ -516,13 +516,13 @@ if uploaded_file:
                 col2.metric("Confidence", f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}")
 
                 # Optional: show class probabilities as bar chart
-                fig = px.bar(
-                    x=["Control", "ASD Traits"],
-                    y=[1 - proba, proba],
-                    labels={'x': 'Class', 'y': 'Probability'},
-                    title="Prediction Probabilities"
-                )
-                st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
+                #fig = px.bar(
+                 #   x=["Control", "ASD Traits"],
+                  #  y=[1 - proba, proba],
+                   # labels={'x': 'Class', 'y': 'Probability'},
+                    #title="Prediction Probabilities"
+                #)
+                #st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
 # Use threshold to make the prediction
                 prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"                
                 st.subheader("🔍 Prediction Result")
@@ -535,7 +535,9 @@ if uploaded_file:
                     x=["Control", "ASD Traits"],
                     y=[1-proba, proba],
                     labels={'x': 'Class', 'y': 'Probability'},
-                
+                    title="Prediction Probabilities"
+                )
+                st.plotly_chart(fig, key=f"evaluation_plot_{upload_id}")
         
         # === Anomaly Detection ===
         with st.spinner("Checking for anomalies..."):
