@@ -472,7 +472,16 @@ if st.button("🔄 Train/Refresh Model"):
         if model:
             st.success("Model trained successfully!")
             st.session_state['asd_model'] = model
-
+def validate_csv(df: pd.DataFrame) -> bool:
+    required_columns = [f"A{i}" for i in range(1, 11)] + [
+        "Sex", "Ethnicity", "Jaundice", 
+        "Family_mem_with_ASD", "Who_completed_the_test"
+    ]
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        st.error(f"Missing required columns: {', '.join(missing_cols)}")
+        return False
+    return True
 try:
     # === File Upload Section ===
     st.header("📄 Upload New Case")
