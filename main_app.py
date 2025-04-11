@@ -510,21 +510,21 @@ if uploaded_file:
             run_node2vec()
             time.sleep(3)  # Allow time for embeddings to be written
         
-        # Check if case exists and get embedding
-        with st.spinner("Verifying data..."):
-            embedding = extract_user_embedding(upload_id)
-            if embedding is None:
-                st.error("Failed to generate embedding")
-                st.stop()
-            
-            # Retrieve qchat_score from graph
-            with neo4j_service.session() as session:
-                record = session.run("""
-                    MATCH (c:Case {upload_id: $upload_id})
-                    RETURN c.qchat_score AS score
-                """, upload_id=upload_id).single()
+    # Check if case exists and get embedding
+    with st.spinner("Verifying data..."):
+        embedding = extract_user_embedding(upload_id)
+        if embedding is None:
+            st.error("Failed to generate embedding")
+            st.stop()
+        
+        # Retrieve qchat_score from graph
+        with neo4j_service.session() as session:
+            record = session.run("""
+                MATCH (c:Case {upload_id: $upload_id})
+                RETURN c.qchat_score AS score
+            """, upload_id=upload_id).single()
 
-            qchat_score = record.get("score") if record else None
+        qchat_score = record.get("score") if record else None
 
 # === Display the score ===
 if qchat_score is not None:
