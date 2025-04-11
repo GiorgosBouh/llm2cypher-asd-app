@@ -290,25 +290,21 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     # SHAP explainability - FIXED VERSION
     st.subheader("🧠 Feature Importance (SHAP Values)")
     try:
-        # Create a figure explicitly
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
         # Prepare data for SHAP
         X_train_array = np.array(X_train)
-        
+
         # Use TreeExplainer for Random Forest
         explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
-        
-        # Calculate SHAP values - using the class index for the positive class (1)
-        shap_values = explainer.shap_values(X_train_array)[1]  # Using index 1 for ASD class
-        
+
+        # Calculate SHAP values - for the positive class (1)
+        shap_values = explainer.shap_values(X_train_array)[1]
+
         # Plot SHAP values
-        shap.summary_plot(shap_values, X_train_array, plot_type="bar", show=False)
-        
-        # Display in Streamlit
+        fig, ax = plt.subplots(figsize=(10, 6))
+        shap.summary_plot(shap_values, X_train_array, feature_names=[f'embedding_{i}' for i in range(Config.NODE2VEC_EMBEDDING_DIM)], plot_type="bar", show=False)
         st.pyplot(fig, bbox_inches='tight')
-        plt.close(fig)  # Close the figure to prevent memory leaks
-        
+        plt.close(fig)
+
     except Exception as e:
         st.error(f"❌ SHAP analysis failed: {str(e)}")
         logger.exception("SHAP analysis error")
