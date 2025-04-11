@@ -352,27 +352,34 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
-    # SHAP explainability
-    st.subheader("🧠 Feature Importance (SHAP Values)")
-    try:
-        X_array = X_train.values if isinstance(X_train, pd.DataFrame) else X_train
-        explainer = shap.Explainer(pipeline.named_steps['classifier'], X_array)
-        shap_values = explainer(X_array)
-        shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
-        st.pyplot(bbox_inches='tight')
-    except Exception as e:
-        st.error(f"SHAP analysis failed: {e}")
+# === SHAP explainability ===
+st.subheader("🧠 Feature Importance (SHAP Values)")
+try:
+    if isinstance(X_train, pd.DataFrame):
+        X_array = X_train.values
+    else:
+        X_array = np.array(X_train)
 
-    return pipeline.named_steps['classifier']
+    if len(X_array.shape) != 2:
+        raise ValueError("Input to SHAP must be a 2D array (n_samples, n_features)")
 
+    explainer = shap.Explainer(pipeline.named_steps['classifier'], X_array)
+    shap_values = explainer(X_array)
+    shap.summary_plot(shap_values, X_array, plot_type="bar", show=False)
+    st.pyplot(bbox_inches='tight')
 
+except Exception as e:
+    st.error(f"❌ SHAP analysis failed: {e}")
+    logger.error(f"SHAP error: {e}")
 
-    # === Καμπύλες ===
+# === Evaluation Curves ===
+try:
     fpr, tpr, _ = roc_curve(y_test, y_proba)
     precision, recall, _ = precision_recall_curve(y_test, y_proba)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
 
+    # ROC Curve
     ax1.plot(fpr, tpr, label=f"AUC = {roc_auc_score(y_test, y_proba):.2f}")
     ax1.plot([0, 1], [0, 1], 'k--')
     ax1.set_title("ROC Curve")
@@ -380,6 +387,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     ax1.set_ylabel("True Positive Rate")
     ax1.legend()
 
+    # Precision-Recall Curve
     ax2.plot(recall, precision, label="PR Curve")
     ax2.set_title("Precision-Recall Curve")
     ax2.set_xlabel("Recall")
@@ -388,8 +396,8 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
 
     st.pyplot(fig)
 
-    # ✅ Επιστροφή του μοντέλου
-    return pipeline.named_steps['classifier']
+except Exception as e:
+    st.warning(f"⚠️ Could not generate evaluation plots: {e}")
 
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
