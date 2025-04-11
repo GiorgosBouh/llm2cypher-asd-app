@@ -10,8 +10,8 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import (
-    classification_report, roc_auc_score, 
-    roc_curve, precision_recall_curve, 
+    classification_report, roc_auc_score,
+    roc_curve, precision_recall_curve,
     average_precision_score, confusion_matrix, ConfusionMatrixDisplay
 )
 from imblearn.over_sampling import SMOTE
@@ -64,12 +64,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 class Neo4jService:
     def __init__(self, uri: str, user: str, password: str):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
-        
+
     @contextmanager
     def session(self):
         with self.driver.session() as session:
             yield session
-            
+
     def close(self):
         self.driver.close()
 
@@ -102,10 +102,10 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
     """Inserts a user case into the Neo4j graph database."""
     queries = []
     params = {"upload_id": upload_id}
-    
+
     # Base case creation
     queries.append(("CREATE (c:Case {upload_id: $upload_id})", params))
-    
+
     # Add behavior questions
     for i in range(1, 11):
         q = f"A{i}"
@@ -118,7 +118,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
             """,
             {"q": q, "val": val, "upload_id": upload_id}
         ))
-    
+
     # Add demographic information
     demo = {
         "Sex": row["Sex"],
@@ -135,7 +135,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
             """,
             {"k": k, "v": v, "upload_id": upload_id}
         ))
-    
+
     # Add submitter information
     queries.append((
         """
@@ -145,7 +145,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
         """,
         {"who": row["Who_completed_the_test"], "upload_id": upload_id}
     ))
-    
+
     # Execute all queries in a single transaction
     with neo4j_service.session() as session:
         for query, params in queries:
@@ -159,36 +159,62 @@ def run_node2vec() -> None:
         # Check and drop existing graph projection if needed
         if session.run("CALL gds.graph.exists('asd-graph') YIELD exists").single()["exists"]:
             session.run("CALL gds.graph.drop('asd-graph')")
-        
-        # Create new graph projection
-        session.run(f"""
-            CALL gds.graph.project(
-                'asd-graph',
-                'Case',
-                '*',
-                {{
-                    nodeProperties: ['embedding'],
-                    relationshipProperties: ['value']
-                }}
-            )
-        """)
-        
-        # Run Node2Vec
-        session.run(f"""
-            CALL gds.node2vec.write(
-                'asd-graph',
-                {{
-                    embeddingDimension: {Config.NODE2VEC_EMBEDDING_DIM},
-                    writeProperty: 'embedding',
-                    iterations: {Config.NODE2VEC_ITERATIONS},
-                    randomSeed: {Config.RANDOM_STATE}
-                }}
-            )
-        """)
-        
-        # Clean up
-        session.run("CALL gds.graph.drop('asd-graph')")
-        logger.info("Node2Vec embedding generation completed")
+
+        # Create new graph projection with explicit property types
+        try:
+            session.run(f"""
+                CALL gds.graph.project(
+                    'asd-graph',
+                    'Case',
+                    '*',
+                    {{
+                        nodeProperties: [
+                            'embedding', // Existing embedding
+                            {{ property: 'A1', type: 'float' }},
+                            {{ property: 'A2', type: 'float' }},
+                            {{ property: 'A3', type: 'float' }},
+                            {{ property: 'A4', type: 'float' }},
+                            {{ property: 'A5', type: 'float' }},
+                            {{ property: 'A6', type: 'float' }},
+                            {{ property: 'A7', type: 'float' }},
+                            {{ property: 'A8', type: 'float' }},
+                            {{ property: 'A9', type: 'float' }},
+                            {{ property: 'A10', type: 'float' }},
+                            {{ property: 'Age_Mons', type: 'float' }},
+                            {{ property: 'Qchat-10-Score', type: 'float' }},
+                            {{ property: 'Sex', type: 'string' }},
+                            {{ property: 'Ethnicity', type: 'string' }},
+                            {{ property: 'Jaundice', type: 'string' }},
+                            {{ property: 'Family_mem_with_ASD', type: 'string' }},
+                            {{ property: 'Who_completed_the_test', type: 'string' }}
+                            // Add 'upload_id' if it's consistently a string
+                        ],
+                        relationshipProperties: ['value']
+                    }}
+                )
+            """)
+
+            # Run Node2Vec
+            session.run(f"""
+                CALL gds.node2vec.write(
+                    'asd-graph',
+                    {{
+                        embeddingDimension: {Config.NODE2VEC_EMBEDDING_DIM},
+                        writeProperty: 'embedding',
+                        iterations: {Config.NODE2VEC_ITERATIONS},
+                        randomSeed: {Config.RANDOM_STATE}
+                    }}
+                )
+            """)
+
+            # Clean up
+            session.run("CALL gds.graph.drop('asd-graph')")
+            logger.info("Node2Vec embedding generation completed")
+
+        except Exception as e:
+            st.error(f"Error during Node2Vec embedding generation: {e}")
+            logger.error(f"Error during Node2Vec embedding generation: {e}")
+            raise
 
 def nl_to_cypher(question: str) -> Optional[str]:
     """Translates natural language to Cypher using OpenAI."""
@@ -245,10 +271,10 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
             RETURN c.embedding AS embedding, t.value AS label
         """)
         records = result.data()
-    
+
     if not records:
         return pd.DataFrame(), pd.Series()
-    
+
     X = [r["embedding"] for r in records]
     y = [1 if r["label"] == "Yes" else 0 for r in records]
     logger.info(f"Extracted {len(X)} training samples")
@@ -257,7 +283,7 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     """Plots ROC and Precision-Recall curves side by side."""
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-    
+
     # ROC Curve
     fpr, tpr, _ = roc_curve(y_true, y_proba)
     roc_auc = roc_auc_score(y_true, y_proba)
@@ -267,7 +293,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     ax1.set_ylabel('True Positive Rate')
     ax1.set_title('ROC Curve')
     ax1.legend(loc='lower right')
-    
+
     # Precision-Recall Curve
     precision, recall, _ = precision_recall_curve(y_true, y_proba)
     avg_precision = average_precision_score(y_true, y_proba)
@@ -276,7 +302,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     ax2.set_ylabel('Precision')
     ax2.set_title('Precision-Recall Curve')
     ax2.legend(loc='lower left')
-    
+
     st.pyplot(fig)
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
@@ -289,7 +315,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     st.subheader("📊 Class Distribution")
     st.write(Counter(y))
     st.markdown("""
-    - **`0`** 🟢 → No ASD Traits  
+    - **`0`** 🟢 → No ASD Traits
     - **`1`** 🔴 → ASD Traits
     """)
 
@@ -365,13 +391,13 @@ def train_isolation_forest() -> Optional[IsolationForest]:
         contamination=contamination_rate
     )
     iso_forest.fit(embeddings_scaled)
-    st.session_state["iso_scaler"] = scaler
+    .state["iso_scaler"] = scaler
     return iso_forest
 
 def validate_csv(df: pd.DataFrame) -> bool:
     """Validates uploaded CSV file structure."""
     required_columns = [f"A{i}" for i in range(1, 11)] + [
-        "Sex", "Ethnicity", "Jaundice", 
+        "Sex", "Ethnicity", "Jaundice",
         "Family_mem_with_ASD", "Who_completed_the_test"
     ]
     missing_cols = [col for col in required_columns if col not in df.columns]
@@ -383,7 +409,7 @@ def validate_csv(df: pd.DataFrame) -> bool:
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
 st.markdown("""
-    <i>The graph is based on Q-Chat-10 plus survey and other individual characteristics 
+    <i>The graph is based on Q-Chat-10 plus survey and other individual characteristics
     that have proved to be effective in detecting ASD cases from controls.</i>
     """, unsafe_allow_html=True)
 
@@ -416,7 +442,7 @@ if question:
     cypher_query = nl_to_cypher(question)
     if cypher_query:
         st.code(cypher_query, language="cypher")
-        
+
         if st.button("▶️ Run Query"):
             with neo4j_service.session() as session:
                 try:
