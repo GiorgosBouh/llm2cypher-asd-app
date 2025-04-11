@@ -322,7 +322,6 @@ except Exception as e:
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
 
-    return pipeline.named_steps['classifier']
 
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
