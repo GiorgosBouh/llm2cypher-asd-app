@@ -1,18 +1,15 @@
 import streamlit as st
-
-# MUST be the first Streamlit command
-st.set_page_config(layout="wide")
 from neo4j import GraphDatabase
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     classification_report, roc_auc_score,
     roc_curve, precision_recall_curve,
-    average_precision_score, confusion_matrix, ConfusionMatrixDisplay
+    average_precision_score
 )
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
@@ -27,6 +24,9 @@ import logging
 from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler
 import shap
+
+# MUST be the first Streamlit command
+st.set_page_config(layout="wide")
 
 # === Configuration ===
 class Config:
@@ -98,12 +98,23 @@ def safe_neo4j_operation(func):
     return wrapper
 
 @safe_neo4j_operation
+def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
+    """Extracts the embedding for a specific case."""
+    with neo4j_service.session() as session:
+        result = session.run(
+            "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
+            upload_id=upload_id
+        )
+        record = result.single()
+        return np.array(record["embedding"]) if record and record["embedding"] else None
+
+@safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> None:
     """Inserts a user case into the Neo4j graph database."""
     queries = []
     params = {"upload_id": upload_id}
 
-    # Base case creation with minimal properties
+    # Base case creation
     queries.append(("CREATE (c:Case {upload_id: $upload_id})", params))
 
     # Add behavior questions
@@ -154,22 +165,22 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
 
 @safe_neo4j_operation
 def run_node2vec() -> None:
-    """Generates Node2Vec embeddings for all cases with only existing properties."""
+    """Generates Node2Vec embeddings for all cases."""
     with neo4j_service.session() as session:
         # Check and drop existing graph projection if needed
         if session.run("CALL gds.graph.exists('asd-graph') YIELD exists").single()["exists"]:
             session.run("CALL gds.graph.drop('asd-graph')")
 
-        # Create new graph projection with only the embedding property
-        session.run("""
+        # Create new graph projection
+        session.run(f"""
             CALL gds.graph.project(
                 'asd-graph',
                 'Case',
                 '*',
-                {
+                {{
                     nodeProperties: ['embedding'],
                     relationshipProperties: ['value']
-                }
+                }}
             )
         """)
 
@@ -204,7 +215,6 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
     if not records:
         return pd.DataFrame(), pd.Series()
 
-    # Convert to proper 2D array format
     X = np.array([np.array(r["embedding"]) for r in records])
     y = np.array([1 if r["label"] == "Yes" else 0 for r in records])
     logger.info(f"Extracted {len(X)} training samples with shape {X.shape}")
@@ -257,7 +267,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     )
 
     pipeline = Pipeline([
-        ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy='auto')),
+        ('smote', SMOTE(random_state=Config.RANDOM_STATE)),
         ('classifier', RandomForestClassifier(
             n_estimators=Config.N_ESTIMATORS,
             random_state=Config.RANDOM_STATE
@@ -277,32 +287,36 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
-    # SHAP explainability
+    # SHAP explainability - FIXED VERSION
     st.subheader("🧠 Feature Importance (SHAP Values)")
     try:
         # Create a figure explicitly
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(10, 6))
         
         # Prepare data for SHAP
-        X_train_df = pd.DataFrame(X_train, columns=[f'embedding_{i}' for i in range(X_train.shape[1])])
+        X_train_array = np.array(X_train)
         
         # Use TreeExplainer for Random Forest
         explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
-        shap_values = explainer.shap_values(X_train_df)
         
-        # Plot SHAP summary
-        shap.summary_plot(shap_values, X_train_df, plot_type="bar", show=False)
+        # Calculate SHAP values - using the class index for the positive class (1)
+        shap_values = explainer.shap_values(X_train_array)[1]  # Using index 1 for ASD class
+        
+        # Plot SHAP values
+        shap.summary_plot(shap_values, X_train_array, plot_type="bar", show=False)
+        
+        # Display in Streamlit
         st.pyplot(fig, bbox_inches='tight')
+        plt.close(fig)  # Close the figure to prevent memory leaks
+        
     except Exception as e:
-        st.error(f"❌ SHAP analysis failed: {e}")
-        logger.error(f"SHAP error: {e}")
+        st.error(f"❌ SHAP analysis failed: {str(e)}")
+        logger.exception("SHAP analysis error")
 
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
 
     return pipeline.named_steps['classifier']
-
-# ... [rest of the code remains the same]
 
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
