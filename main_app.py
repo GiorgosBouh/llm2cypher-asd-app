@@ -504,8 +504,27 @@ if uploaded_file:
             with st.spinner("Predicting ASD traits..."):
                 model = st.session_state['asd_model']
                 proba = model.predict_proba([embedding])[0][1]
-                prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
-                
+                # Allow user to set the threshold for ASD prediction
+                st.subheader("🛠️ Prediction Threshold")
+                threshold = st.slider("Select prediction threshold", min_value=0.3, max_value=0.9, value=0.5, step=0.01)
+                # Apply the user-defined threshold to make the prediction
+                prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"
+
+                st.subheader("🔍 Prediction Result")
+                col1, col2 = st.columns(2)
+                col1.metric("Prediction", prediction)
+                col2.metric("Confidence", f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}")
+
+                # Optional: show class probabilities as bar chart
+                fig = px.bar(
+                    x=["Control", "ASD Traits"],
+                    y=[1 - proba, proba],
+                    labels={'x': 'Class', 'y': 'Probability'},
+                    title="Prediction Probabilities"
+                )
+                st.plotly_chart(fig)
+# Use threshold to make the prediction
+                prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"                
                 st.subheader("🔍 Prediction Result")
                 col1, col2 = st.columns(2)
                 col1.metric("Prediction", prediction)
