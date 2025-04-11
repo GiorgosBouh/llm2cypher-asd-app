@@ -535,9 +535,7 @@ if uploaded_file:
                     x=["Control", "ASD Traits"],
                     y=[1-proba, proba],
                     labels={'x': 'Class', 'y': 'Probability'},
-                    title="Prediction Probabilities"
-                )
-                st.plotly_chart(fig, key=f"evaluation_plot_{upload_id}")
+                
         
         # === Anomaly Detection ===
         with st.spinner("Checking for anomalies..."):
