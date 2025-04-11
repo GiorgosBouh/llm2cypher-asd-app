@@ -160,7 +160,7 @@ def run_node2vec() -> None:
         if session.run("CALL gds.graph.exists('asd-graph') YIELD exists").single()["exists"]:
             session.run("CALL gds.graph.drop('asd-graph')")
 
-        # Create new graph projection with explicit property types
+        # Create new graph projection with explicit Case node properties
         try:
             session.run(f"""
                 CALL gds.graph.project(
@@ -169,25 +169,12 @@ def run_node2vec() -> None:
                     '*',
                     {{
                         nodeProperties: [
-                            'embedding', // Existing embedding
-                            {{ property: 'A1', type: 'float' }},
-                            {{ property: 'A2', type: 'float' }},
-                            {{ property: 'A3', type: 'float' }},
-                            {{ property: 'A4', type: 'float' }},
-                            {{ property: 'A5', type: 'float' }},
-                            {{ property: 'A6', type: 'float' }},
-                            {{ property: 'A7', type: 'float' }},
-                            {{ property: 'A8', type: 'float' }},
-                            {{ property: 'A9', type: 'float' }},
-                            {{ property: 'A10', type: 'float' }},
-                            {{ property: 'Age_Mons', type: 'float' }},
-                            {{ property: 'Qchat-10-Score', type: 'float' }},
-                            {{ property: 'Sex', type: 'string' }},
-                            {{ property: 'Ethnicity', type: 'string' }},
-                            {{ property: 'Jaundice', type: 'string' }},
-                            {{ property: 'Family_mem_with_ASD', type: 'string' }},
-                            {{ property: 'Who_completed_the_test', type: 'string' }}
-                            // Add 'upload_id' if it's consistently a string
+                            'embedding',
+                            'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9', 'A10',
+                            'Age_Mons', 'Qchat-10-Score',
+                            'Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD',
+                            'Who_completed_the_test',
+                            'upload_id' // Include if you need it in the graph
                         ],
                         relationshipProperties: ['value']
                     }}
