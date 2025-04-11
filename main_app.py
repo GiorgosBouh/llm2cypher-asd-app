@@ -26,7 +26,7 @@ from contextlib import contextmanager
 import logging
 from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler
-import shap  # Moved to top with other imports
+import shap
 
 # === Configuration ===
 class Config:
@@ -103,7 +103,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
     queries = []
     params = {"upload_id": upload_id}
 
-    # Base case creation
+    # Base case creation with minimal properties
     queries.append(("CREATE (c:Case {upload_id: $upload_id})", params))
 
     # Add behavior questions
@@ -154,99 +154,41 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
 
 @safe_neo4j_operation
 def run_node2vec() -> None:
-    """Generates Node2Vec embeddings for all cases."""
+    """Generates Node2Vec embeddings for all cases with only existing properties."""
     with neo4j_service.session() as session:
         # Check and drop existing graph projection if needed
         if session.run("CALL gds.graph.exists('asd-graph') YIELD exists").single()["exists"]:
             session.run("CALL gds.graph.drop('asd-graph')")
 
-        # Create new graph projection with explicit Case node properties
-        try:
-            session.run(f"""
-                CALL gds.graph.project(
-                    'asd-graph',
-                    'Case',
-                    '*',
-                    {{
-                        nodeProperties: [
-                            'embedding',
-                            'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9', 'A10',
-                            'Age_Mons', 'Qchat-10-Score',
-                            'Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD',
-                            'Who_completed_the_test',
-                            'upload_id' // Include if you need it in the graph
-                        ],
-                        relationshipProperties: ['value']
-                    }}
-                )
-            """)
+        # Create new graph projection with only the embedding property
+        session.run("""
+            CALL gds.graph.project(
+                'asd-graph',
+                'Case',
+                '*',
+                {
+                    nodeProperties: ['embedding'],
+                    relationshipProperties: ['value']
+                }
+            )
+        """)
 
-            # Run Node2Vec
-            session.run(f"""
-                CALL gds.node2vec.write(
-                    'asd-graph',
-                    {{
-                        embeddingDimension: {Config.NODE2VEC_EMBEDDING_DIM},
-                        writeProperty: 'embedding',
-                        iterations: {Config.NODE2VEC_ITERATIONS},
-                        randomSeed: {Config.RANDOM_STATE}
-                    }}
-                )
-            """)
+        # Run Node2Vec
+        session.run(f"""
+            CALL gds.node2vec.write(
+                'asd-graph',
+                {{
+                    embeddingDimension: {Config.NODE2VEC_EMBEDDING_DIM},
+                    writeProperty: 'embedding',
+                    iterations: {Config.NODE2VEC_ITERATIONS},
+                    randomSeed: {Config.RANDOM_STATE}
+                }}
+            )
+        """)
 
-            # Clean up
-            session.run("CALL gds.graph.drop('asd-graph')")
-            logger.info("Node2Vec embedding generation completed")
-
-        except Exception as e:
-            st.error(f"Error during Node2Vec embedding generation: {e}")
-            logger.error(f"Error during Node2Vec embedding generation: {e}")
-            raise
-
-def nl_to_cypher(question: str) -> Optional[str]:
-    """Translates natural language to Cypher using OpenAI."""
-    prompt = f"""
-    You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
-
-    Schema:
-    - (:Case {{id: int}})
-    - (:BehaviorQuestion {{name: string}})
-    - (:ASD_Trait {{value: 'Yes' | 'No'}})
-    - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
-    - (:SubmitterType {{type: string}})
-
-    Relationships:
-    - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
-    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
-    - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
-    - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
-    Please make sure:
-    - All value matching (e.g., 'Yes', 'No', 'Female', etc.) is case-insensitive using `toLower()`
-    - Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex)
-    """
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        cypher_query = response.choices[0].message.content.strip()
-        return cypher_query.replace("```cypher", "").replace("```", "").strip()
-    except Exception as e:
-        st.error(f"OpenAI API error: {e}")
-        logger.error(f"OpenAI API error: {e}")
-        return None
-
-@safe_neo4j_operation
-def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
-    """Extracts the embedding for a specific case."""
-    with neo4j_service.session() as session:
-        result = session.run(
-            "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
-            upload_id=upload_id
-        )
-        record = result.single()
-        return np.array(record["embedding"]) if record and record["embedding"] else None
+        # Clean up
+        session.run("CALL gds.graph.drop('asd-graph')")
+        logger.info("Node2Vec embedding generation completed")
 
 @safe_neo4j_operation
 def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
@@ -262,9 +204,10 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
     if not records:
         return pd.DataFrame(), pd.Series()
 
-    X = [r["embedding"] for r in records]
-    y = [1 if r["label"] == "Yes" else 0 for r in records]
-    logger.info(f"Extracted {len(X)} training samples")
+    # Convert to proper 2D array format
+    X = np.array([np.array(r["embedding"]) for r in records])
+    y = np.array([1 if r["label"] == "Yes" else 0 for r in records])
+    logger.info(f"Extracted {len(X)} training samples with shape {X.shape}")
     return pd.DataFrame(X), pd.Series(y)
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
@@ -291,6 +234,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     ax2.legend(loc='lower left')
 
     st.pyplot(fig)
+
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     X, y = extract_training_data()
@@ -301,7 +245,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     st.subheader("📊 Class Distribution")
     st.write(Counter(y))
     st.markdown("""
-    - **`0`** 🟢 → No ASD Traits
+    - **`0`** 🟢 → No ASD Traits  
     - **`1`** 🔴 → ASD Traits
     """)
 
@@ -334,22 +278,31 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
     # SHAP explainability
-  # SHAP explainability
     st.subheader("🧠 Feature Importance (SHAP Values)")
     try:
-        X_train_df = pd.DataFrame(X_train, columns=[f'embedding_{i}' for i in range(Config.NODE2VEC_EMBEDDING_DIM)])
-        explainer = shap.Explainer(pipeline.named_steps['classifier'], X_train_df)
-        shap_values = explainer(X_train_df)
+        # Create a figure explicitly
+        fig, ax = plt.subplots()
+        
+        # Prepare data for SHAP
+        X_train_df = pd.DataFrame(X_train, columns=[f'embedding_{i}' for i in range(X_train.shape[1])])
+        
+        # Use TreeExplainer for Random Forest
+        explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
+        shap_values = explainer.shap_values(X_train_df)
+        
+        # Plot SHAP summary
         shap.summary_plot(shap_values, X_train_df, plot_type="bar", show=False)
-        st.pyplot(bbox_inches='tight')
+        st.pyplot(fig, bbox_inches='tight')
     except Exception as e:
-        st.error(f"❌ SHAP analysis failed (Attempt 3): {e}")
-        logger.error(f"SHAP error (Attempt 3): {e}")
+        st.error(f"❌ SHAP analysis failed: {e}")
+        logger.error(f"SHAP error: {e}")
 
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
 
     return pipeline.named_steps['classifier']
+
+# ... [rest of the code remains the same]
 
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
