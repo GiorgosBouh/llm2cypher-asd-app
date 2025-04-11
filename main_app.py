@@ -422,6 +422,24 @@ st.markdown("""
 # Sidebar connection info
 st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
+with st.expander("ℹ️ Help: KG Schema & Example Questions", expanded=False):
+    st.markdown("### 🧠 Knowledge Graph Schema")
+    st.code("""
+(:Case)-[:HAS_ANSWER {value: int}]->(:BehaviorQuestion {name: string})
+(:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute {type: string, value: string})
+(:Case)-[:SUBMITTED_BY]->(:SubmitterType {type: string})
+(:Case)-[:SCREENED_FOR]->(:ASD_Trait {value: 'Yes' | 'No'})
+""", language="cypher")
+
+    st.markdown("### 💡 Example Questions")
+    st.markdown("""
+- How many children were diagnosed with ASD?
+- Count cases where A1 equals 1 and ASD is Yes.
+- How many female toddlers have ASD traits?
+- What is the most common ethnicity among non-ASD children?
+- How many children have jaundice and ASD?
+""")
+
 # === Natural Language to Cypher Section ===
 st.header("💬 Natural Language to Cypher1")
 question = st.text_input("📝 Ask your question in natural language:")
