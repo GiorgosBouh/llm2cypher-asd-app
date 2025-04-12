@@ -42,6 +42,7 @@ class Config:
     SMOTE_RATIO = 'auto'
     MAX_QUERY_RETRIES = 3
     QUERY_RETRY_DELAY = 1
+    MIN_CASES_FOR_ANOMALY_DETECTION = 2  # ΜΕΙΩΜΕΝΟ ΓΙΑ ΔΟΚΙΜΗ - ΕΠΑΝΑΦΕΡΕΤΕ ΣΕ 10+ ΓΙΑ ΠΑΡΑΓΩΓΗ
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -128,7 +129,7 @@ class Neo4jService:
         """Execute a query with retry logic"""
         params = params or {}
         last_error = None
-        
+
         for attempt in range(retries):
             try:
                 with self.session() as session:
@@ -139,7 +140,7 @@ class Neo4jService:
                 logger.warning(f"Query attempt {attempt + 1} failed: {e}")
                 if attempt < retries - 1:
                     time.sleep(Config.QUERY_RETRY_DELAY)
-        
+
         logger.error(f"Query failed after {retries} attempts")
         raise last_error if last_error else Exception("Unknown query error")
 
@@ -219,7 +220,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
     # Execute all queries
     for query, params in queries:
         neo4j_service.execute_query(query, params)
-    
+
     logger.info(f"Successfully inserted case {upload_id}")
 
 @safe_neo4j_operation
@@ -315,7 +316,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     st.subheader("📊 Class Distribution")
     st.write(Counter(y))
     st.markdown("""
-    - **`0`** 🟢 → No ASD Traits  
+    - **`0`** 🟢 → No ASD Traits
     - **`1`** 🔴 → ASD Traits
     """)
 
@@ -363,6 +364,7 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
         RETURN c.embedding AS embedding
     """)
     embeddings = [record["embedding"] for record in records]
+    logger.info(f"Number of existing embeddings found: {len(embeddings) if embeddings is not None else 0}")
     return np.array(embeddings) if embeddings else None
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
@@ -370,12 +372,12 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
 def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]:
     """Trains and returns both the Isolation Forest model and its scaler"""
     embeddings = get_existing_embeddings()
-    if embeddings is None or len(embeddings) < 10:
-        st.warning("Not enough embeddings for anomaly detection (need at least 10)")
+    if embeddings is None or len(embeddings) < Config.MIN_CASES_FOR_ANOMALY_DETECTION:
+        st.warning(f"Anomaly detection requires at least {Config.MIN_CASES_FOR_ANOMALY_DETECTION} existing cases in the database. Currently we don't have enough data to perform this analysis.")
         return None
 
     scaler = StandardScaler()
-    embeddings_scaled = scaler.fit_transform(embeddings)
+    embeddings_scaled = scaler.fit_embeddings_scaled = scaler.fit_transform(embeddings)
     contamination_rate = 0.05 if len(embeddings) < 50 else 0.1
 
     iso_forest = IsolationForest(
@@ -384,7 +386,7 @@ def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]
         n_estimators=100
     )
     iso_forest.fit(embeddings_scaled)
-    
+
     logger.info("Isolation Forest trained successfully")
     return iso_forest, scaler  # Return both model and scaler
 
@@ -398,14 +400,14 @@ def validate_csv(df: pd.DataFrame) -> bool:
     if missing_cols:
         st.error(f"Missing required columns: {', '.join(missing_cols)}")
         return False
-    
+
     # Validate behavior question values (should be 0 or 1)
     for i in range(1, 11):
         col = f"A{i}"
         if not all(df[col].isin([0, 1])):
             st.error(f"Column {col} should contain only 0 or 1 values")
             return False
-            
+
     return True
 
 @log_execution_time
@@ -507,7 +509,7 @@ def main():
             if model:
                 st.success("Model trained successfully!")
                 st.session_state['asd_model'] = model
- 
+
     st.header("📄 Upload New Case")
     uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv", key="file_uploader")
 
@@ -565,7 +567,7 @@ def main():
                     col1, col2 = st.columns(2)
                     col1.metric("Prediction", prediction)
                     col2.metric(
-                        "Confidence", 
+                        "Confidence",
                         f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}"
                     )
 
@@ -581,7 +583,7 @@ def main():
             with st.spinner("Checking for anomalies..."):
                 try:
                     anomaly_result = train_isolation_forest()
-                    
+
                     if anomaly_result and len(anomaly_result) == 2:  # Ensure we have both model and scaler
                         iso_forest, scaler = anomaly_result
                         embedding_scaled = scaler.transform([embedding])
@@ -592,8 +594,8 @@ def main():
                         if is_anomaly:
                             st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
                             st.markdown("""
-                            **Interpretation:**  
-                            This case appears unusual compared to others in our database.  
+                            **Interpretation:**
+                            This case appears unusual compared to others in our database.
                             Please review carefully as it may represent:
                             - A rare presentation of ASD traits
                             - Uncommon demographic combinations
@@ -617,8 +619,8 @@ def main():
                                 color_discrete_sequence=['#636EFA']
                             )
                             fig.add_vline(
-                                x=anomaly_score, 
-                                line_dash="dash", 
+                                x=anomaly_score,
+                                line_dash="dash",
                                 line_color="red",
                                 annotation_text="Current Case",
                                 annotation_position="top"
@@ -626,8 +628,8 @@ def main():
                             fig.update_layout(showlegend=False)
                             st.plotly_chart(fig)
                     else:
-                        st.warning("""
-                        Anomaly detection requires at least 10 existing cases in the database.
+                        st.warning(f"""
+                        Anomaly detection requires at least {Config.MIN_CASES_FOR_ANOMALY_DETECTION} existing cases in the database.
                         Currently we don't have enough data to perform this analysis.
                         """)
                 except Exception as e:
