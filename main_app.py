@@ -367,10 +367,11 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 @log_execution_time
-def train_isolation_forest() -> Optional[IsolationForest]:
+def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]:
+    """Trains and returns both the Isolation Forest model and its scaler"""
     embeddings = get_existing_embeddings()
     if embeddings is None or len(embeddings) < 10:
-        st.warning("Not enough embeddings for anomaly detection")
+        st.warning("Not enough embeddings for anomaly detection (need at least 10)")
         return None
 
     scaler = StandardScaler()
@@ -383,8 +384,9 @@ def train_isolation_forest() -> Optional[IsolationForest]:
         n_estimators=100
     )
     iso_forest.fit(embeddings_scaled)
-    st.session_state["iso_scaler"] = scaler
-    return iso_forest
+    
+    logger.info("Isolation Forest trained successfully")
+    return iso_forest, scaler  # Return both model and scaler
 
 def validate_csv(df: pd.DataFrame) -> bool:
     """Validates uploaded CSV file structure without checking score."""
@@ -507,103 +509,134 @@ def main():
                 st.session_state['asd_model'] = model
 
     # === File Upload Section ===
-    st.header("📄 Upload New Case")
-    uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv", key="file_uploader")
+st.header("📄 Upload New Case")
+uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv", key="file_uploader")
 
-    if uploaded_file:
-        try:
-            df = pd.read_csv(uploaded_file, delimiter=";")
-            if not validate_csv(df):
+if uploaded_file:
+    try:
+        df = pd.read_csv(uploaded_file, delimiter=";")
+        if not validate_csv(df):
+            st.stop()
+
+        if len(df) != 1:
+            st.error("Please upload exactly one row (one child)")
+            st.stop()
+
+        st.subheader("👀 CSV Preview")
+        st.dataframe(df.T)
+
+        row = df.iloc[0]
+        upload_id = str(uuid.uuid4())
+
+        # Insert case
+        with st.spinner("Inserting case into graph..."):
+            insert_user_case(row, upload_id)
+
+        # Generate embeddings
+        with st.spinner("Generating embeddings..."):
+            run_node2vec()
+            time.sleep(3)  # Give time for embeddings to generate
+
+        # Check if case exists and get embedding
+        with st.spinner("Verifying data..."):
+            embedding = extract_user_embedding(upload_id)
+            if embedding is None:
+                st.error("Failed to generate embedding")
                 st.stop()
 
-            if len(df) != 1:
-                st.error("Please upload exactly one row (one child)")
-                st.stop()
+        # ASD Prediction
+        if 'asd_model' in st.session_state:
+            with st.spinner("Predicting ASD traits..."):
+                model = st.session_state['asd_model']
+                proba = model.predict_proba([embedding])[0][1]
 
-            st.subheader("👀 CSV Preview")
-            st.dataframe(df.T)
+                st.subheader("🛠️ Prediction Threshold")
+                threshold = st.slider(
+                    "Select prediction threshold",
+                    min_value=0.3,
+                    max_value=0.9,
+                    value=0.5,
+                    step=0.01,
+                    key="threshold_slider"
+                )
 
-            row = df.iloc[0]
-            upload_id = str(uuid.uuid4())
+                prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"
 
-            # Insert case
-            with st.spinner("Inserting case into graph..."):
-                insert_user_case(row, upload_id)
+                st.subheader("🔍 Prediction Result")
+                col1, col2 = st.columns(2)
+                col1.metric("Prediction", prediction)
+                col2.metric(
+                    "Confidence", 
+                    f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}"
+                )
 
-            # Generate embeddings
-            with st.spinner("Generating embeddings..."):
-                run_node2vec()
-                time.sleep(3)
+                fig = px.bar(
+                    x=["Control", "ASD Traits"],
+                    y=[1 - proba, proba],
+                    labels={'x': 'Class', 'y': 'Probability'},
+                    title="Prediction Probabilities"
+                )
+                st.plotly_chart(fig)
 
-            # Check if case exists and get embedding
-            with st.spinner("Verifying data..."):
-                embedding = extract_user_embedding(upload_id)
-                if embedding is None:
-                    st.error("Failed to generate embedding")
-                    st.stop()
+        # Anomaly Detection
+        with st.spinner("Checking for anomalies..."):
+            anomaly_model = train_isolation_forest()
+            
+            if anomaly_model is not None:
+                iso_forest, scaler = anomaly_model
+                embedding_scaled = scaler.transform([embedding])
+                anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
-            # ASD Prediction
-            if 'asd_model' in st.session_state:
-                with st.spinner("Predicting ASD traits..."):
-                    model = st.session_state['asd_model']
-                    proba = model.predict_proba([embedding])[0][1]
-
-                    st.subheader("🛠️ Prediction Threshold")
-                    threshold = st.slider("Select prediction threshold", 
-                                        min_value=0.3, 
-                                        max_value=0.9, 
-                                        value=0.5, 
-                                        step=0.01,
-                                        key="threshold_slider")
-
-                    prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"
-
-                    st.subheader("🔍 Prediction Result")
-                    col1, col2 = st.columns(2)
-                    col1.metric("Prediction", prediction)
-                    col2.metric("Confidence", f"{proba:.1%}" if prediction == "YES (ASD Traits Detected)" else f"{1 - proba:.1%}")
-
-                    fig = px.bar(
-                        x=["Control", "ASD Traits"],
-                        y=[1 - proba, proba],
-                        labels={'x': 'Class', 'y': 'Probability'},
-                        title="Prediction Probabilities"
-                    )
-                    st.plotly_chart(fig)
-
-            # Anomaly Detection
-            with st.spinner("Checking for anomalies..."):
-                iso_forest = train_isolation_forest()
-                if iso_forest and "iso_scaler" in st.session_state:
-                    embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
-                    anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-                    is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
-
-                    st.subheader("🕵️ Anomaly Detection")
-                    if is_anomaly:
-                        st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
-                    else:
-                        st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
-
-                    all_embeddings = get_existing_embeddings()
-                    if all_embeddings is not None:
-                        all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
-                        scores = iso_forest.decision_function(all_embeddings_scaled)
-
-                        fig = px.histogram(
-                            x=scores,
-                            nbins=20,
-                            labels={'x': 'Anomaly Score'},
-                            title="Anomaly Score Distribution"
-                        )
-                        fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                        st.plotly_chart(fig)
+                st.subheader("🕵️ Anomaly Detection")
+                if is_anomaly:
+                    st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+                    st.markdown("""
+                    **Interpretation:**  
+                    This case appears unusual compared to others in our database.  
+                    Please review carefully as it may represent:
+                    - A rare presentation of ASD traits
+                    - Uncommon demographic combinations
+                    - Potentially incomplete or unusual data
+                    """)
                 else:
-                    st.error("Anomaly detection model or scaler not available.")
+                    st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+                    st.markdown("This case appears typical compared to others in our database.")
 
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
-            logger.error(f"Error processing file: {e}")
+                # Show distribution of anomaly scores
+                all_embeddings = get_existing_embeddings()
+                if all_embeddings is not None:
+                    all_embeddings_scaled = scaler.transform(all_embeddings)
+                    scores = iso_forest.decision_function(all_embeddings_scaled)
 
-if __name__ == "__main__":
-    main()
+                    fig = px.histogram(
+                        x=scores,
+                        nbins=20,
+                        labels={'x': 'Anomaly Score'},
+                        title="Anomaly Score Distribution",
+                        color_discrete_sequence=['#636EFA']
+                    )
+                    fig.add_vline(
+                        x=anomaly_score, 
+                        line_dash="dash", 
+                        line_color="red",
+                        annotation_text="Current Case",
+                        annotation_position="top"
+                    )
+                    fig.update_layout(showlegend=False)
+                    st.plotly_chart(fig)
+            else:
+                st.warning("""
+                Anomaly detection requires at least 10 existing cases in the database.
+                Currently we don't have enough data to perform this analysis.
+                """)
+
+    except pd.errors.EmptyDataError:
+        st.error("The uploaded file is empty or corrupt")
+        logger.error("Empty file uploaded")
+    except pd.errors.ParserError:
+        st.error("Could not parse the CSV file. Please check the format.")
+        logger.error("CSV parsing error")
+    except Exception as e:
+        st.error(f"Error processing file: {str(e)}")
+        logger.error(f"File processing error: {str(e)}")
