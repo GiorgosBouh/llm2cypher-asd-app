@@ -507,7 +507,8 @@ def main():
             if model:
                 st.success("Model trained successfully!")
                 st.session_state['asd_model'] = model
- st.header("📄 Upload New Case")
+ 
+    st.header("📄 Upload New Case")
     uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv", key="file_uploader")
 
     if uploaded_file:
