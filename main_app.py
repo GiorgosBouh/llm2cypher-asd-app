@@ -508,6 +508,8 @@ def main():
                 st.success("Model trained successfully!")
                 st.session_state['asd_model'] = model
 
+   # ... (all previous imports and configuration remain exactly the same until the file upload section)
+
     # === File Upload Section ===
     st.header("📄 Upload New Case")
     uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv", key="file_uploader")
@@ -578,12 +580,12 @@ def main():
                     )
                     st.plotly_chart(fig)
 
-            # Anomaly Detection
+            # Anomaly Detection - Fixed section
             with st.spinner("Checking for anomalies..."):
-                anomaly_model = train_isolation_forest()
+                anomaly_result = train_isolation_forest()
                 
-                if anomaly_model is not None:
-                    iso_forest, scaler = anomaly_model
+                if anomaly_result is not None:  # Check if we got a result first
+                    iso_forest, scaler = anomaly_result  # Now safe to unpack
                     embedding_scaled = scaler.transform([embedding])
                     anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
                     is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
