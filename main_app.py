@@ -23,7 +23,6 @@ from contextlib import contextmanager
 import logging
 from typing import Optional, Tuple, List, Dict, Any
 from sklearn.preprocessing import StandardScaler
-import shap
 from datetime import datetime
 
 # MUST be the first Streamlit command
@@ -54,6 +53,28 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# === Helper Decorators ===
+def safe_neo4j_operation(func):
+    """Decorator for Neo4j operations with error handling"""
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            st.error(f"Neo4j operation failed: {str(e)}")
+            logger.error(f"Neo4j operation failed: {str(e)}")
+            return None
+    return wrapper
+
+def log_execution_time(func):
+    """Decorator to log function execution time"""
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        logger.info(f"Function {func.__name__} executed in {end_time - start_time:.2f} seconds")
+        return result
+    return wrapper
 
 # === Load environment variables ===
 load_dotenv()
@@ -88,7 +109,7 @@ class Neo4jService:
 
     @contextmanager
     def session(self):
-        """Context manager for Neo4j sessions with retry logic"""
+        """Context manager for Neo4j sessions"""
         session = self.driver.session()
         try:
             yield session
@@ -135,27 +156,6 @@ neo4j_service = get_neo4j_service()
 client = get_openai_client()
 
 # === Helper Functions ===
-def safe_neo4j_operation(func):
-    """Decorator for Neo4j operations with error handling"""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            st.error(f"Neo4j operation failed: {str(e)}")
-            logger.error(f"Neo4j operation failed: {str(e)}")
-            return None
-    return wrapper
-
-def log_execution_time(func):
-    """Decorator to log function execution time"""
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        logger.info(f"Function {func.__name__} executed in {end_time - start_time:.2f} seconds")
-        return result
-    return wrapper
-
 @safe_neo4j_operation
 @log_execution_time
 def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
@@ -216,7 +216,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
         {"who": row["Who_completed_the_test"], "upload_id": upload_id}
     ))
 
-    # Execute all queries in a single transaction
+    # Execute all queries
     for query, params in queries:
         neo4j_service.execute_query(query, params)
     
@@ -263,7 +263,7 @@ def run_node2vec() -> None:
 @safe_neo4j_operation
 @log_execution_time
 def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
-    """Extracts training data from Neo4j."""
+    """Extracts training data from Neo4j without score information."""
     records = neo4j_service.execute_query("""
         MATCH (c:Case)-[:SCREENED_FOR]->(t:ASD_Trait)
         WHERE c.embedding IS NOT NULL
@@ -275,7 +275,7 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
 
     X = np.array([np.array(r["embedding"]) for r in records])
     y = np.array([1 if r["label"] == "Yes" else 0 for r in records])
-    logger.info(f"Extracted {len(X)} training samples with shape {X.shape}")
+    logger.info(f"Extracted {len(X)} training samples")
     return pd.DataFrame(X), pd.Series(y)
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
@@ -348,35 +348,6 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
-    # SHAP explainability
-    st.subheader("🧠 Feature Importance (SHAP Values)")
-    try:
-        # Prepare data for SHAP
-        X_train_array = np.array(X_train)
-        feature_names = [f"embedding_{i}" for i in range(X_train_array.shape[1])]
-        
-        # Create explainer
-        explainer = shap.TreeExplainer(pipeline.named_steps['classifier'])
-        
-        # Calculate SHAP values
-        shap_values = explainer.shap_values(X_train_array)
-        
-        # Create figure explicitly
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        # Plot SHAP values (use index 1 for ASD class if it's a list)
-        if isinstance(shap_values, list):
-            shap.summary_plot(shap_values[1], X_train_array, feature_names=feature_names, plot_type="bar", show=False)
-        else:
-            shap.summary_plot(shap_values, X_train_array, feature_names=feature_names, plot_type="bar", show=False)
-        
-        st.pyplot(fig)
-        plt.close(fig)
-        
-    except Exception as e:
-        st.error(f"❌ SHAP analysis failed: {e}")
-        logger.error(f"SHAP error: {e}")
-
     # Evaluation curves
     plot_combined_curves(y_test, y_proba)
 
@@ -416,7 +387,7 @@ def train_isolation_forest() -> Optional[IsolationForest]:
     return iso_forest
 
 def validate_csv(df: pd.DataFrame) -> bool:
-    """Validates uploaded CSV file structure."""
+    """Validates uploaded CSV file structure without checking score."""
     required_columns = [f"A{i}" for i in range(1, 11)] + [
         "Sex", "Ethnicity", "Jaundice",
         "Family_mem_with_ASD", "Who_completed_the_test"
@@ -529,7 +500,7 @@ def main():
     # === Model Training Section ===
     st.header("🤖 ASD Detection Model")
     if st.button("🔄 Train/Refresh Model", key="train_model"):
-        with st.spinner("Training model with proper SMOTE handling..."):
+        with st.spinner("Training model..."):
             model = train_asd_detection_model()
             if model:
                 st.success("Model trained successfully!")
@@ -571,33 +542,6 @@ def main():
                     st.error("Failed to generate embedding")
                     st.stop()
 
-                # Retrieve qchat_score from graph
-                result = neo4j_service.execute_query("""
-                    MATCH (c:Case {upload_id: $upload_id})
-                    RETURN c.qchat_score AS score
-                """, {"upload_id": upload_id})
-
-                qchat_score = result[0].get("score") if result else None
-                if qchat_score is None:
-                    try:
-                        qchat_score = sum(int(row[f"A{i}"]) for i in range(1, 11))
-                        st.info("ℹ️ Q-chat score was missing from the graph. Calculated from uploaded data.")
-                    except Exception as e:
-                        st.error("❌ Failed to calculate Q-chat score from data.")
-                        logger.error(f"Fallback qchat_score calculation failed: {e}")
-
-            # Display the score
-            if qchat_score is not None:
-                st.subheader("🧶 Q-Chat-10 Score")
-                st.write(f"Score: **{qchat_score} / 10**")
-
-                if qchat_score <= 3:
-                    st.success("✅ Based on Q-Chat-10, this child is not expected to show ASD traits (Score ≤ 3).")
-                else:
-                    st.warning("⚠️ Based on Q-Chat-10, this child may present ASD traits (Score > 3).")
-            else:
-                st.error("⚠️ Q-chat score not found for this case.")
-
             # ASD Prediction
             if 'asd_model' in st.session_state:
                 with st.spinner("Predicting ASD traits..."):
@@ -605,7 +549,12 @@ def main():
                     proba = model.predict_proba([embedding])[0][1]
 
                     st.subheader("🛠️ Prediction Threshold")
-                    threshold = st.slider("Select prediction threshold", min_value=0.3, max_value=0.9, value=0.5, step=0.01)
+                    threshold = st.slider("Select prediction threshold", 
+                                        min_value=0.3, 
+                                        max_value=0.9, 
+                                        value=0.5, 
+                                        step=0.01,
+                                        key="threshold_slider")
 
                     prediction = "YES (ASD Traits Detected)" if proba >= threshold else "NO (Control Case)"
 
