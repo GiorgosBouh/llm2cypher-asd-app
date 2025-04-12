@@ -644,7 +644,7 @@ def main():
             st.error(f"Error processing file: {str(e)}")
             logger.error(f"File processing error: {str(e)}")
 
-    if __name__ == "__main__":
-        main()
+if __name__ == "__main__":
+    main()
 
                        
