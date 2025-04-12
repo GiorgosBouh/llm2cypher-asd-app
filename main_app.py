@@ -366,6 +366,21 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
     embeddings = [record["embedding"] for record in records]
     logger.info(f"Number of existing embeddings found: {len(embeddings) if embeddings is not None else 0}")
     return np.array(embeddings) if embeddings else None
+@safe_neo4j_operation
+@log_execution_time
+def get_existing_embeddings() -> Optional[np.ndarray]:
+    """Retrieves all existing embeddings for anomaly detection."""
+    logger.info("Attempting to retrieve existing embeddings...")
+    query = """
+        MATCH (c:Case)
+        WHERE c.embedding IS NOT NULL
+        RETURN c.embedding AS embedding
+    """
+    records = neo4j_service.execute_query(query)
+    logger.info(f"Number of records returned from Neo4j: {len(records)}")
+    embeddings = [record["embedding"] for record in records]
+    logger.info(f"Number of embeddings extracted: {len(embeddings)}")
+    return np.array(embeddings) if embeddings else Non
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 @log_execution_time
