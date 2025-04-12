@@ -8,11 +8,10 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
-    classification_report, roc_auc_score, 
-    roc_curve, precision_recall_curve, 
-    average_precision_score, confusion_matrix, ConfusionMatrixDisplay
+    roc_auc_score, roc_curve, precision_recall_curve,
+    average_precision_score, classification_report
 )
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline
@@ -25,17 +24,7 @@ import plotly.express as px
 from contextlib import contextmanager
 import logging
 from typing import Optional, Tuple
-from sklearn.preprocessing import StandardScaler  # Added missing import
-from imblearn.pipeline import Pipeline
-from imblearn.over_sampling import SMOTE
-from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_score
-from imblearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, roc_auc_score, average_precision_score, precision_recall_curve, roc_curve
-from imblearn.over_sampling import SMOTE
-import matplotlib.pyplot as plt
-import numpy as np
-from collections import Counter
+from sklearn.preprocessing import StandardScaler
 
 # === Configuration ===
 class Config:
@@ -45,6 +34,7 @@ class Config:
     TEST_SIZE = 0.2
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
+    MIN_CASES_FOR_ANOMALY_DETECTION = 10
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -73,12 +63,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 class Neo4jService:
     def __init__(self, uri: str, user: str, password: str):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
-        
+
     @contextmanager
     def session(self):
         with self.driver.session() as session:
             yield session
-            
+
     def close(self):
         self.driver.close()
 
@@ -108,19 +98,12 @@ def safe_neo4j_operation(func):
 
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> None:
-    """Inserts a user case into the Neo4j graph database.
-    
-    Args:
-        row: A pandas Series containing all case data
-        upload_id: Unique identifier for the case
-    """
+    """Inserts a user case into the Neo4j graph database."""
     queries = []
     params = {"upload_id": upload_id}
-    
-    # Base case creation
+
     queries.append(("CREATE (c:Case {upload_id: $upload_id})", params))
-    
-    # Add behavior questions
+
     for i in range(1, 11):
         q = f"A{i}"
         val = int(row[q])
@@ -132,8 +115,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
             """,
             {"q": q, "val": val, "upload_id": upload_id}
         ))
-    
-    # Add demographic information
+
     demo = {
         "Sex": row["Sex"],
         "Ethnicity": row["Ethnicity"],
@@ -149,8 +131,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
             """,
             {"k": k, "v": v, "upload_id": upload_id}
         ))
-    
-    # Add submitter information
+
     queries.append((
         """
         MATCH (s:SubmitterType {type: $who})
@@ -159,8 +140,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
         """,
         {"who": row["Who_completed_the_test"], "upload_id": upload_id}
     ))
-    
-    # Execute all queries in a single transaction
+
     with neo4j_service.session() as session:
         for query, params in queries:
             session.run(query, **params)
@@ -170,11 +150,9 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
 def run_node2vec() -> None:
     """Generates Node2Vec embeddings for all cases."""
     with neo4j_service.session() as session:
-        # Check and drop existing graph projection if needed
         if session.run("CALL gds.graph.exists('asd-graph') YIELD exists").single()["exists"]:
             session.run("CALL gds.graph.drop('asd-graph')")
-        
-        # Create new graph projection
+
         session.run(f"""
             CALL gds.graph.project(
                 'asd-graph',
@@ -186,8 +164,7 @@ def run_node2vec() -> None:
                 }}
             )
         """)
-        
-        # Run Node2Vec
+
         session.run(f"""
             CALL gds.node2vec.write(
                 'asd-graph',
@@ -199,8 +176,7 @@ def run_node2vec() -> None:
                 }}
             )
         """)
-        
-        # Clean up
+
         session.run("CALL gds.graph.drop('asd-graph')")
         logger.info("Node2Vec embedding generation completed")
 
@@ -208,8 +184,6 @@ def nl_to_cypher(question: str) -> Optional[str]:
     """Translates natural language to Cypher using OpenAI."""
     prompt = f"""
     You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
-
-
 
     Schema:
     - (:Case {{id: int}})
@@ -269,10 +243,10 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
             RETURN c.embedding AS embedding, t.value AS label
         """)
         records = result.data()
-    
+
     if not records:
         return pd.DataFrame(), pd.Series()
-    
+
     X = [r["embedding"] for r in records]
     y = [1 if r["label"] == "Yes" else 0 for r in records]
     logger.info(f"Extracted {len(X)} training samples")
@@ -280,34 +254,28 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     """Plots ROC and Precision-Recall curves side by side."""
-    # ROC Curve
     fpr, tpr, _ = roc_curve(y_true, y_proba)
     roc_auc = roc_auc_score(y_true, y_proba)
-    
-    # Precision-Recall Curve
+
     precision, recall, _ = precision_recall_curve(y_true, y_proba)
     avg_precision = average_precision_score(y_true, y_proba)
-    
-    # Create subplots
+
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-    
-    # Plot ROC
+
     ax1.plot(fpr, tpr, label=f'ROC (AUC = {roc_auc:.2f})')
     ax1.plot([0, 1], [0, 1], 'k--')
     ax1.set_xlabel('False Positive Rate')
     ax1.set_ylabel('True Positive Rate')
     ax1.set_title('ROC Curve')
     ax1.legend(loc='lower right')
-    
-    # Plot Precision-Recall
+
     ax2.plot(recall, precision, label=f'PR (AP = {avg_precision:.2f})')
     ax2.set_xlabel('Recall')
     ax2.set_ylabel('Precision')
     ax2.set_title('Precision-Recall Curve')
     ax2.legend(loc='lower left')
-    
-    st.pyplot(fig)
 
+    st.pyplot(fig)
 
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
@@ -320,7 +288,6 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     st.subheader("📊 Class Distribution")
     st.write(Counter(y))
 
-    # ✅ Σωστό train/test split πριν το SMOTE
     X_train, X_test, y_train, y_test = train_test_split(
         X, y,
         test_size=Config.TEST_SIZE,
@@ -328,12 +295,12 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         random_state=Config.RANDOM_STATE
     )
 
-    # ✅ Pipeline: εφαρμόζει SMOTE μόνο στο training set
     pipeline = Pipeline([
         ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy='auto')),
         ('classifier', RandomForestClassifier(
             n_estimators=Config.N_ESTIMATORS,
-            random_state=Config.RANDOM_STATE
+            random_state=Config.RANDOM_STATE,
+            class_weight='balanced'
         ))
     ])
 
@@ -341,7 +308,6 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     y_pred = pipeline.predict(X_test)
     y_proba = pipeline.predict_proba(X_test)[:, 1]
 
-    # === Μετρικές ===
     st.subheader("📈 Model Evaluation")
     col1, col2 = st.columns(2)
     with col1:
@@ -351,28 +317,8 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
         st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
-    # === Καμπύλες ===
-    fpr, tpr, _ = roc_curve(y_test, y_proba)
-    precision, recall, _ = precision_recall_curve(y_test, y_proba)
+    plot_combined_curves(y_test, y_proba)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-    ax1.plot(fpr, tpr, label=f"AUC = {roc_auc_score(y_test, y_proba):.2f}")
-    ax1.plot([0, 1], [0, 1], 'k--')
-    ax1.set_title("ROC Curve")
-    ax1.set_xlabel("False Positive Rate")
-    ax1.set_ylabel("True Positive Rate")
-    ax1.legend()
-
-    ax2.plot(recall, precision, label="PR Curve")
-    ax2.set_title("Precision-Recall Curve")
-    ax2.set_xlabel("Recall")
-    ax2.set_ylabel("Precision")
-    ax2.legend()
-
-    st.pyplot(fig)
-
-    # ✅ Επιστροφή του μοντέλου
     return pipeline.named_steps['classifier']
 
 @safe_neo4j_operation
@@ -388,17 +334,15 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
         return np.array(embeddings) if embeddings else None
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
-def train_isolation_forest() -> Optional[IsolationForest]:
+def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]:
     embeddings = get_existing_embeddings()
-    if embeddings is None or len(embeddings) < 10:
-        st.warning("Not enough embeddings for anomaly detection")
+    if embeddings is None or len(embeddings) < Config.MIN_CASES_FOR_ANOMALY_DETECTION:
+        st.warning(f"Anomaly detection requires at least {Config.MIN_CASES_FOR_ANOMALY_DETECTION} existing cases.")
         return None
 
-    # Scale the embeddings
     scaler = StandardScaler()
     embeddings_scaled = scaler.fit_transform(embeddings)
 
-    # Contamination (percentage of "anomalies")
     contamination_rate = 0.05 if len(embeddings) < 50 else 0.1
 
     iso_forest = IsolationForest(
@@ -407,15 +351,12 @@ def train_isolation_forest() -> Optional[IsolationForest]:
     )
     iso_forest.fit(embeddings_scaled)
 
-    # Store the scaler for future use
-    st.session_state["iso_scaler"] = scaler
-
-    return iso_forest
+    return iso_forest, scaler
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
 st.markdown("""
-    <i>The graph is based on Q-Chat-10 plus survey and other individual characteristics 
+    <i>The graph is based on Q-Chat-10 plus survey and other individual characteristics
     that have proved to be effective in detecting ASD cases from controls.</i>
     """, unsafe_allow_html=True)
 
@@ -423,14 +364,14 @@ st.markdown("""
 st.sidebar.markdown(f"🔗 **Connected to:** `{os.getenv('NEO4J_URI')}`")
 
 # === Natural Language to Cypher Section ===
-st.header("💬 Natural Language to Cypher1")
+st.header("💬 Natural Language to Cypher")
 question = st.text_input("📝 Ask your question in natural language:")
 
 if question:
     cypher_query = nl_to_cypher(question)
     if cypher_query:
         st.code(cypher_query, language="cypher")
-        
+
         if st.button("▶️ Run Query"):
             with neo4j_service.session() as session:
                 try:
@@ -446,7 +387,7 @@ if question:
 # === Model Training Section ===
 st.header("🤖 ASD Detection Model")
 if st.button("🔄 Train/Refresh Model"):
-    with st.spinner("Training model with proper SMOTE handling..."):
+    with st.spinner("Training model..."):
         model = train_asd_detection_model()
         if model:
             st.success("Model trained successfully!")
@@ -458,7 +399,7 @@ uploaded_file = st.file_uploader("Upload CSV for single child prediction", type=
 
 def validate_csv(df: pd.DataFrame) -> bool:
     required_columns = [f"A{i}" for i in range(1, 11)] + [
-        "Sex", "Ethnicity", "Jaundice", 
+        "Sex", "Ethnicity", "Jaundice",
         "Family_mem_with_ASD", "Who_completed_the_test"
     ]
     missing_cols = [col for col in required_columns if col not in df.columns]
@@ -467,64 +408,66 @@ def validate_csv(df: pd.DataFrame) -> bool:
         return False
     return True
 
+# === CSV Upload ===
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file, delimiter=";")
+
         if not validate_csv(df):
             st.stop()
-            
+
         if len(df) != 1:
             st.error("Please upload exactly one row (one child)")
             st.stop()
-            
+
+        st.subheader("👀 CSV Preview")
+        st.dataframe(df.T)
+
         row = df.iloc[0]
         upload_id = str(uuid.uuid4())
-        
-        # Insert case
+
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
-        
-        # Generate embeddings
+
         with st.spinner("Generating embeddings..."):
             run_node2vec()
-            time.sleep(3)  # Allow time for embeddings to be written
-        
-        # Check if case exists and get embedding
+            time.sleep(3)
+
         with st.spinner("Verifying data..."):
             embedding = extract_user_embedding(upload_id)
             if embedding is None:
                 st.error("Failed to generate embedding")
                 st.stop()
-            
-            st.subheader("Case Embedding")
+
+            st.subheader("🧠 Case Embedding")
             st.write(embedding)
-        
-        # ASD Prediction
+
+        # === ASD Prediction ===
         if 'asd_model' in st.session_state:
             with st.spinner("Predicting ASD traits..."):
                 model = st.session_state['asd_model']
                 proba = model.predict_proba([embedding])[0][1]
                 prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
-                
+
                 st.subheader("🔍 Prediction Result")
                 col1, col2 = st.columns(2)
                 col1.metric("Prediction", prediction)
-                col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
-                
-                # Show probability distribution
+                col2.metric("Confidence", f"{max(proba, 1 - proba):.1%}")
+
                 fig = px.bar(
                     x=["Control", "ASD Traits"],
-                    y=[1-proba, proba],
+                    y=[1 - proba, proba],
                     labels={'x': 'Class', 'y': 'Probability'},
                     title="Prediction Probabilities"
                 )
-                st.plotly_chart(fig)
-        
+                st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
+
         # === Anomaly Detection ===
         with st.spinner("Checking for anomalies..."):
-            iso_forest = train_isolation_forest()
-            if iso_forest and "iso_scaler" in st.session_state:
-                embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
+            iso_forest_scaler = train_isolation_forest()
+            if iso_forest_scaler:
+                iso_forest, scaler = iso_forest_scaler
+                embedding_scaled = scaler.transform([embedding])
                 anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
                 is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
@@ -534,10 +477,9 @@ if uploaded_file:
                 else:
                     st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
 
-                # === Anomaly score distribution visualization ===
                 all_embeddings = get_existing_embeddings()
                 if all_embeddings is not None:
-                    all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
+                    all_embeddings_scaled = scaler.transform(all_embeddings)
                     scores = iso_forest.decision_function(all_embeddings_scaled)
 
                     fig = px.histogram(
@@ -547,17 +489,10 @@ if uploaded_file:
                         title="Anomaly Score Distribution"
                     )
                     fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                    st.plotly_chart(fig)
+                    st.plotly_chart(fig, key=f"anomaly_hist_{upload_id}")
             else:
-                st.error("Anomaly detection model or scaler not available.")
+                st.info("Anomaly detection model not trained yet or insufficient data.")
 
     except Exception as e:
-        st.error(f"Error processing file: {e}")
-        logger.error(f"Error processing file: {e}")
-
-# Clean up when done
-def cleanup():
-    neo4j_service.close()
-
-import atexit
-atexit.register(cleanup)
+        st.error(f"❌ Error processing file: {e}")
+        logger.error(f"❌ Exception during upload processing: {e}")
