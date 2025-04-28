@@ -231,7 +231,7 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
             upload_id=upload_id
         )
         record = result.single()
-        return np.array(record["embedding"]) if record and record["embedding"] else None
+        return np.array([record["embedding"]]) if record and record["embedding"] is not None else None
 
 @safe_neo4j_operation
 def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
@@ -247,7 +247,7 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
     if not records:
         return pd.DataFrame(), pd.Series()
 
-    X = [r["embedding"] for r in records]
+    X = [[r["embedding"]] for r in records]
     y = [1 if r["label"] == "Yes" else 0 for r in records]
     logger.info(f"Extracted {len(X)} training samples")
     return pd.DataFrame(X), pd.Series(y)
@@ -429,9 +429,6 @@ if uploaded_file:
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
-        with st.spinner("Generating embeddings..."):
-            run_node2vec()
-            time.sleep(3)
 
         with st.spinner("Verifying data..."):
             embedding = extract_user_embedding(upload_id)
