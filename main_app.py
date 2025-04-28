@@ -213,7 +213,59 @@ def generate_case_embedding(upload_id: str) -> None:
 
         logger.info(f"Generated embedding for case {upload_id}")
 
-# Modify extract_training_data to handle potentially different embedding dimensions
+def nl_to_cypher(question: str) -> Optional[str]:
+    """Translates natural language to Cypher using OpenAI."""
+    prompt = f"""
+    You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
+
+    Schema:
+    - (:Case {{id: int}})
+    - (:BehaviorQuestion {{name: string}})
+    - (:ASD_Trait {{value: 'Yes' | 'No'}})
+    - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
+    - (:SubmitterType {{type: string}})
+
+    Relationships:
+    - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
+    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
+    - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
+    - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
+    Please make sure:
+- All value matching (e.g., 'Yes', 'No', 'Female', etc.) is case-insensitive using `toLower()`
+- Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex)
+    Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex).
+Always use `toLower()` for case-insensitive value matching (e.g., toLower(d.value) = 'yes')
+
+    Translate the following natural language question to Cypher:
+
+    Q: {question}
+
+    Only return the Cypher query.
+    """
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        cypher_query = response.choices[0].message.content.strip()
+        return cypher_query.replace("```cypher", "").replace("```", "").strip()
+    except Exception as e:
+        st.error(f"OpenAI API error: {e}")
+        logger.error(f"OpenAI API error: {e}")
+        return None
+
+@safe_neo4j_operation
+def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
+    """Extracts the embedding for a specific case."""
+    with neo4j_service.session() as session:
+        result = session.run(
+            "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
+            upload_id=upload_id
+        )
+        record = result.single()
+        return np.array(record["embedding"]) if record and record["embedding"] is not None else None
+
 @safe_neo4j_operation
 def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
     """Extracts training data from Neo4j."""
@@ -233,7 +285,31 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
     logger.info(f"Extracted {len(X)} training samples with embedding dimension {len(X[0]) if X else 0}")
     return pd.DataFrame(X), pd.Series(y)
 
-# Modify train_asd_detection_model to potentially train on different embedding dimensions
+def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
+    """Plots ROC and Precision-Recall curves side by side."""
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    roc_auc = roc_auc_score(y_true, y_proba)
+
+    precision, recall, _ = precision_recall_curve(y_true, y_proba)
+    avg_precision = average_precision_score(y_true, y_proba)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+    ax1.plot(fpr, tpr, label=f'ROC (AUC = {roc_auc:.2f})')
+    ax1.plot([0, 1], [0, 1], 'k--')
+    ax1.set_xlabel('False Positive Rate')
+    ax1.set_ylabel('True Positive Rate')
+    ax1.set_title('ROC Curve')
+    ax1.legend(loc='lower right')
+
+    ax2.plot(recall, precision, label=f'PR (AP = {avg_precision:.2f})')
+    ax2.set_xlabel('Recall')
+    ax2.set_ylabel('Precision')
+    ax2.set_title('Precision-Recall Curve')
+    ax2.legend(loc='lower left')
+
+    st.pyplot(fig)
+
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     X, y = extract_training_data()
@@ -277,7 +353,18 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
 
     return pipeline.named_steps['classifier']
 
-# Modify train_isolation_forest to fit on the existing embeddings
+@safe_neo4j_operation
+def get_existing_embeddings() -> Optional[np.ndarray]:
+    """Retrieves all existing embeddings for anomaly detection."""
+    with neo4j_service.session() as session:
+        result = session.run("""
+            MATCH (c:Case)
+            WHERE c.embedding IS NOT NULL
+            RETURN c.embedding AS embedding
+        """)
+        embeddings = [record["embedding"] for record in result]
+        return np.array(embeddings) if embeddings else None
+
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]:
     embeddings = get_existing_embeddings()
@@ -291,13 +378,13 @@ def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]
     contamination_rate = 0.05 if len(embeddings) < 50 else 0.1
 
     iso_forest = IsolationForest(
-        random_state=Config.RANDOM_STATE,
-        contamination=contamination_rate
-    )
+    random_state=Config.RANDOM_STATE,
+    contamination=contamination_rate
+)
+    
     iso_forest.fit(embeddings_scaled)
 
     return iso_forest, scaler
-
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
@@ -404,6 +491,8 @@ if uploaded_file:
                     title="Prediction Probabilities"
                 )
                 st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
+        else:
+            st.info("Please train the ASD detection model first.")
 
         # === Anomaly Detection ===
         with st.spinner("Checking for anomalies..."):
@@ -439,3 +528,4 @@ if uploaded_file:
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
         logger.error(f"❌ Exception during upload processing: {e}")
+        
