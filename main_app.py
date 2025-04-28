@@ -20,7 +20,7 @@ import logging
 from openai import OpenAI
 from typing import Optional, Tuple
 
-# === Config ===
+# === Configuration ===
 class Config:
     EMBEDDING_DIM = 64
     RANDOM_STATE = 42
@@ -184,7 +184,7 @@ def nl_to_cypher(question: str) -> Optional[str]:
 
     Translate this into Cypher:
 
-    {question}
+    Q: {question}
     """
     try:
         response = client.chat.completions.create(
@@ -192,10 +192,11 @@ def nl_to_cypher(question: str) -> Optional[str]:
             messages=[{"role": "user", "content": prompt}],
             temperature=0
         )
-        query = response.choices[0].message.content.strip()
-        return query.replace("```cypher", "").replace("```", "")
+        cypher_query = response.choices[0].message.content.strip()
+        return cypher_query.replace("```cypher", "").replace("```", "").strip()
     except Exception as e:
-        st.error(f"OpenAI Error: {e}")
+        st.error(f"OpenAI API error: {e}")
+        logger.error(f"OpenAI API error: {e}")
         return None
 
 # === Streamlit UI ===
