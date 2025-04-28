@@ -26,16 +26,17 @@ import logging
 from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 
 # === Configuration ===
 class Config:
-    EMBEDDING_DIM = 64  # Reduced from original Node2Vec dimension
+    EMBEDDING_DIM = 16  # Reduced from original Node2Vec dimension
     RANDOM_STATE = 42
     TEST_SIZE = 0.2
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
+    PRE_COMPUTED_PCA_COMPONENTS = None  # Will be initialized if available
+    FEATURE_SCALER = None  # Will be initialized if available
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -147,6 +148,41 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
             session.run(query, **params)
         logger.info(f"Successfully inserted case {upload_id}")
 
+def get_feature_vector(answers: dict, demographics: dict, submitter_type: str) -> np.ndarray:
+    """Convert case data to a numerical feature vector."""
+    feature_vector = []
+    
+    # Add answers (A1-A10)
+    for i in range(1, 11):
+        feature_vector.append(answers.get(f"A{i}", 0))
+    
+    # Add demographics
+    # Sex: 0 for male, 1 for female
+    sex = demographics.get("Sex", "").lower()
+    feature_vector.append(1 if sex in ["f", "female"] else 0)
+    
+    # Ethnicity: encoded categories
+    ethnicity = demographics.get("Ethnicity", "").lower()
+    ethnicities = ["asian", "hispanic", "black", "white", "middle eastern", "mixed", "south asian"]
+    eth_encoded = ethnicities.index(ethnicity) if ethnicity in ethnicities else len(ethnicities)
+    feature_vector.append(eth_encoded)
+    
+    # Jaundice: 0 for no, 1 for yes
+    jaundice = demographics.get("Jaundice", "").lower()
+    feature_vector.append(1 if jaundice == "yes" else 0)
+    
+    # Family history: 0 for no, 1 for yes
+    family = demographics.get("Family_mem_with_ASD", "").lower()
+    feature_vector.append(1 if family == "yes" else 0)
+    
+    # Submitter type: encoded categories
+    submitter_types = ["family member", "health care professional", "self", "others", "school and/or child care staff"]
+    submitter = submitter_type.lower() if submitter_type else ""
+    sub_encoded = submitter_types.index(submitter) if submitter in submitter_types else len(submitter_types)
+    feature_vector.append(sub_encoded)
+    
+    return np.array(feature_vector)
+
 @safe_neo4j_operation
 def generate_case_embedding(upload_id: str) -> None:
     """Generates an embedding for a case based on its features."""
@@ -158,59 +194,42 @@ def generate_case_embedding(upload_id: str) -> None:
             ORDER BY q.name
         """, upload_id=upload_id)
         answers = {record["question"]: record["value"] for record in result}
-
+        
         # Get demographics for the case
         result = session.run("""
             MATCH (c:Case {upload_id: $upload_id})-[:HAS_DEMOGRAPHIC]->(d:DemographicAttribute)
             RETURN d.type AS type, d.value AS value
         """, upload_id=upload_id)
         demographics = {record["type"]: record["value"] for record in result}
-
+        
         # Get submitter type
         result = session.run("""
             MATCH (c:Case {upload_id: $upload_id})-[:SUBMITTED_BY]->(s:SubmitterType)
             RETURN s.type AS type
         """, upload_id=upload_id)
         submitter_type = result.single()["type"] if result else None
-
-        # Convert features to numerical representation
-        feature_vector = []
-
-        # Add answers (A1-A10)
-        for i in range(1, 11):
-            feature_vector.append(answers.get(f"A{i}", 0))
-
-        # Add demographics (convert to numerical)
-        sex = demographics.get("Sex", "").lower()
-        feature_vector.append(1 if sex in ["f", "female"] else 0)
-
-        ethnicity = demographics.get("Ethnicity", "").lower()
-        feature_vector.append(hash(ethnicity) % 100)
-
-        jaundice = demographics.get("Jaundice", "").lower()
-        feature_vector.append(1 if jaundice == "yes" else 0)
-
-        family = demographics.get("Family_mem_with_ASD", "").lower()
-        feature_vector.append(1 if family == "yes" else 0)
-
-        submitter = submitter_type.lower() if submitter_type else ""
-        feature_vector.append(hash(submitter) % 100)
-
-        # Retrieve existing embeddings and train PCA if available
-        existing_embeddings = get_existing_embeddings()
-        if existing_embeddings is not None and len(existing_embeddings) > 0:
-            pca = PCA(n_components=Config.EMBEDDING_DIM, random_state=Config.RANDOM_STATE)
-            pca.fit(existing_embeddings)
-            embedding = pca.transform([feature_vector])[0]
+        
+        # Convert to feature vector
+        feature_vector = get_feature_vector(answers, demographics, submitter_type)
+        
+        # Generate embedding
+        if Config.PRE_COMPUTED_PCA_COMPONENTS is not None and Config.FEATURE_SCALER is not None:
+            # Scale features using pre-computed scaler
+            features_scaled = Config.FEATURE_SCALER.transform([feature_vector])
+            # Project using pre-computed PCA components
+            embedding = np.dot(features_scaled, Config.PRE_COMPUTED_PCA_COMPONENTS.T)[0]
         else:
-            embedding = np.array(feature_vector)  # Use the raw feature vector if no existing embeddings
-
+            # Fallback to simple approach - use raw features (truncated or padded)
+            embedding = feature_vector[:Config.EMBEDDING_DIM]
+            if len(embedding) < Config.EMBEDDING_DIM:
+                embedding = np.pad(embedding, (0, Config.EMBEDDING_DIM - len(embedding)))
+        
         # Store the embedding in the graph
         session.run("""
             MATCH (c:Case {upload_id: $upload_id})
             SET c.embedding = $embedding
         """, upload_id=upload_id, embedding=embedding.tolist())
-
+        
         logger.info(f"Generated embedding for case {upload_id}")
 
 def nl_to_cypher(question: str) -> Optional[str]:
@@ -282,7 +301,7 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
 
     X = [r["embedding"] for r in records]
     y = [1 if r["label"] == "Yes" else 0 for r in records]
-    logger.info(f"Extracted {len(X)} training samples with embedding dimension {len(X[0]) if X else 0}")
+    logger.info(f"Extracted {len(X)} training samples")
     return pd.DataFrame(X), pd.Series(y)
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
@@ -378,13 +397,72 @@ def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]
     contamination_rate = 0.05 if len(embeddings) < 50 else 0.1
 
     iso_forest = IsolationForest(
-    random_state=Config.RANDOM_STATE,
-    contamination=contamination_rate
-)
-    
+        random_state=Config.RANDOM_STATE,
+        contamination=contamination_rate
+    )
     iso_forest.fit(embeddings_scaled)
 
     return iso_forest, scaler
+
+# === Initialize PCA Components (if available) ===
+@st.cache_resource
+def initialize_pca_components():
+    """Initialize PCA components if we have training data available"""
+    try:
+        X, _ = extract_training_data()
+        if len(X) > Config.EMBEDDING_DIM:
+            # Get raw features for all cases
+            with neo4j_service.session() as session:
+                result = session.run("""
+                    MATCH (c:Case)-[r:HAS_ANSWER]->(q:BehaviorQuestion)
+                    WITH c, q.name AS question, r.value AS value
+                    ORDER BY c, question
+                    RETURN c, collect(value) AS answers
+                """)
+                all_answers = {record["c"].id: record["answers"] for record in result}
+                
+                result = session.run("""
+                    MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(d:DemographicAttribute)
+                    RETURN c, d.type AS type, d.value AS value
+                """)
+                all_demographics = {}
+                for record in result:
+                    if record["c"].id not in all_demographics:
+                        all_demographics[record["c"].id] = {}
+                    all_demographics[record["c"].id][record["type"]] = record["value"]
+                
+                result = session.run("""
+                    MATCH (c:Case)-[:SUBMITTED_BY]->(s:SubmitterType)
+                    RETURN c, s.type AS type
+                """)
+                all_submitters = {record["c"].id: record["type"] for record in result}
+                
+            # Create feature matrix
+            features = []
+            for case_id in all_answers.keys():
+                answers = all_answers.get(case_id, [0]*10)
+                demographics = all_demographics.get(case_id, {})
+                submitter = all_submitters.get(case_id, "")
+                feature_vector = get_feature_vector(
+                    {f"A{i+1}": answers[i] for i in range(10)},
+                    demographics,
+                    submitter
+                )
+                features.append(feature_vector)
+            
+            features = np.array(features)
+            
+            # Fit scaler and PCA
+            scaler = StandardScaler().fit(features)
+            pca = PCA(n_components=Config.EMBEDDING_DIM).fit(scaler.transform(features))
+            
+            return pca.components_, scaler
+    except Exception as e:
+        logger.error(f"Error initializing PCA components: {e}")
+    return None, None
+
+# Initialize PCA components if possible
+Config.PRE_COMPUTED_PCA_COMPONENTS, Config.FEATURE_SCALER = initialize_pca_components()
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
@@ -491,8 +569,6 @@ if uploaded_file:
                     title="Prediction Probabilities"
                 )
                 st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
-        else:
-            st.info("Please train the ASD detection model first.")
 
         # === Anomaly Detection ===
         with st.spinner("Checking for anomalies..."):
@@ -528,4 +604,3 @@ if uploaded_file:
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
         logger.error(f"❌ Exception during upload processing: {e}")
-        
