@@ -158,114 +158,62 @@ def generate_case_embedding(upload_id: str) -> None:
             ORDER BY q.name
         """, upload_id=upload_id)
         answers = {record["question"]: record["value"] for record in result}
-        
+
         # Get demographics for the case
         result = session.run("""
             MATCH (c:Case {upload_id: $upload_id})-[:HAS_DEMOGRAPHIC]->(d:DemographicAttribute)
             RETURN d.type AS type, d.value AS value
         """, upload_id=upload_id)
         demographics = {record["type"]: record["value"] for record in result}
-        
+
         # Get submitter type
         result = session.run("""
             MATCH (c:Case {upload_id: $upload_id})-[:SUBMITTED_BY]->(s:SubmitterType)
             RETURN s.type AS type
         """, upload_id=upload_id)
         submitter_type = result.single()["type"] if result else None
-        
+
         # Convert features to numerical representation
         feature_vector = []
-        
+
         # Add answers (A1-A10)
         for i in range(1, 11):
             feature_vector.append(answers.get(f"A{i}", 0))
-        
+
         # Add demographics (convert to numerical)
-        # Sex: 0 for male, 1 for female
         sex = demographics.get("Sex", "").lower()
         feature_vector.append(1 if sex in ["f", "female"] else 0)
-        
-        # Ethnicity: simple hash (better would be to use proper encoding)
+
         ethnicity = demographics.get("Ethnicity", "").lower()
         feature_vector.append(hash(ethnicity) % 100)
-        
-        # Jaundice: 0 for no, 1 for yes
+
         jaundice = demographics.get("Jaundice", "").lower()
         feature_vector.append(1 if jaundice == "yes" else 0)
-        
-        # Family history: 0 for no, 1 for yes
+
         family = demographics.get("Family_mem_with_ASD", "").lower()
         feature_vector.append(1 if family == "yes" else 0)
-        
-        # Submitter type: simple hash
+
         submitter = submitter_type.lower() if submitter_type else ""
         feature_vector.append(hash(submitter) % 100)
-        
-        # Reduce dimensionality using PCA (could also use t-SNE)
-        pca = PCA(n_components=Config.EMBEDDING_DIM, random_state=Config.RANDOM_STATE)
-        embedding = pca.fit_transform([feature_vector])[0]
-        
+
+        # Retrieve existing embeddings and train PCA if available
+        existing_embeddings = get_existing_embeddings()
+        if existing_embeddings is not None and len(existing_embeddings) > 0:
+            pca = PCA(n_components=Config.EMBEDDING_DIM, random_state=Config.RANDOM_STATE)
+            pca.fit(existing_embeddings)
+            embedding = pca.transform([feature_vector])[0]
+        else:
+            embedding = np.array(feature_vector)  # Use the raw feature vector if no existing embeddings
+
         # Store the embedding in the graph
         session.run("""
             MATCH (c:Case {upload_id: $upload_id})
             SET c.embedding = $embedding
         """, upload_id=upload_id, embedding=embedding.tolist())
-        
+
         logger.info(f"Generated embedding for case {upload_id}")
 
-def nl_to_cypher(question: str) -> Optional[str]:
-    """Translates natural language to Cypher using OpenAI."""
-    prompt = f"""
-    You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
-
-    Schema:
-    - (:Case {{id: int}})
-    - (:BehaviorQuestion {{name: string}})
-    - (:ASD_Trait {{value: 'Yes' | 'No'}})
-    - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
-    - (:SubmitterType {{type: string}})
-
-    Relationships:
-    - (:Case)-[:HAS_ANSWER {{value: int}}]->(:BehaviorQuestion)
-    - (:Case)-[:HAS_DEMOGRAPHIC]->(:DemographicAttribute)
-    - (:Case)-[:SCREENED_FOR]->(:ASD_Trait)
-    - (:Case)-[:SUBMITTED_BY]->(:SubmitterType)
-    Please make sure:
-- All value matching (e.g., 'Yes', 'No', 'Female', etc.) is case-insensitive using `toLower()`
-- Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex)
-    Interpret 'f' as 'female' and 'm' as 'male' where relevant (e.g., Sex).
-Always use `toLower()` for case-insensitive value matching (e.g., toLower(d.value) = 'yes')
-
-    Translate the following natural language question to Cypher:
-
-    Q: {question}
-
-    Only return the Cypher query.
-    """
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0
-        )
-        cypher_query = response.choices[0].message.content.strip()
-        return cypher_query.replace("```cypher", "").replace("```", "").strip()
-    except Exception as e:
-        st.error(f"OpenAI API error: {e}")
-        logger.error(f"OpenAI API error: {e}")
-        return None
-
-@safe_neo4j_operation
-def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
-    """Extracts the embedding for a specific case."""
-    with neo4j_service.session() as session:
-        result = session.run(
-            "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
-            upload_id=upload_id
-        )
-        record = result.single()
-        return np.array(record["embedding"]) if record and record["embedding"] is not None else None
-
+# Modify extract_training_data to handle potentially different embedding dimensions
 @safe_neo4j_operation
 def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
     """Extracts training data from Neo4j."""
@@ -282,34 +230,10 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
 
     X = [r["embedding"] for r in records]
     y = [1 if r["label"] == "Yes" else 0 for r in records]
-    logger.info(f"Extracted {len(X)} training samples")
+    logger.info(f"Extracted {len(X)} training samples with embedding dimension {len(X[0]) if X else 0}")
     return pd.DataFrame(X), pd.Series(y)
 
-def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
-    """Plots ROC and Precision-Recall curves side by side."""
-    fpr, tpr, _ = roc_curve(y_true, y_proba)
-    roc_auc = roc_auc_score(y_true, y_proba)
-
-    precision, recall, _ = precision_recall_curve(y_true, y_proba)
-    avg_precision = average_precision_score(y_true, y_proba)
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-    ax1.plot(fpr, tpr, label=f'ROC (AUC = {roc_auc:.2f})')
-    ax1.plot([0, 1], [0, 1], 'k--')
-    ax1.set_xlabel('False Positive Rate')
-    ax1.set_ylabel('True Positive Rate')
-    ax1.set_title('ROC Curve')
-    ax1.legend(loc='lower right')
-
-    ax2.plot(recall, precision, label=f'PR (AP = {avg_precision:.2f})')
-    ax2.set_xlabel('Recall')
-    ax2.set_ylabel('Precision')
-    ax2.set_title('Precision-Recall Curve')
-    ax2.legend(loc='lower left')
-
-    st.pyplot(fig)
-
+# Modify train_asd_detection_model to potentially train on different embedding dimensions
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     X, y = extract_training_data()
@@ -353,18 +277,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
 
     return pipeline.named_steps['classifier']
 
-@safe_neo4j_operation
-def get_existing_embeddings() -> Optional[np.ndarray]:
-    """Retrieves all existing embeddings for anomaly detection."""
-    with neo4j_service.session() as session:
-        result = session.run("""
-            MATCH (c:Case)
-            WHERE c.embedding IS NOT NULL
-            RETURN c.embedding AS embedding
-        """)
-        embeddings = [record["embedding"] for record in result]
-        return np.array(embeddings) if embeddings else None
-
+# Modify train_isolation_forest to fit on the existing embeddings
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]:
     embeddings = get_existing_embeddings()
@@ -384,6 +297,7 @@ def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]
     iso_forest.fit(embeddings_scaled)
 
     return iso_forest, scaler
+
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
