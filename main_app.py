@@ -230,7 +230,7 @@ def generate_graph_embeddings() -> bool:
             window=5,
             min_count=1,
             batch_words=4,
-            iter=1  # Single iteration for speed
+            epochs=1  # ✅ Use `epochs` instead of `iter`
         )
         
         if time.time() - start_time > timeout:
