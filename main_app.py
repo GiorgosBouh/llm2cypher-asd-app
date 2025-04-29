@@ -152,6 +152,51 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
         for query, params in queries:
             session.run(query, **params)
         logger.info(f"Successfully inserted case {upload_id}")
+@safe_neo4j_operation
+def generate_embedding_for_node(upload_id: str) -> bool:
+    """Generate embedding only for the new case node."""
+    with neo4j_service.session() as session:
+        # Build local subgraph around this case node
+        result = session.run("""
+            MATCH (c:Case {upload_id: $upload_id})-[r]-(n)
+            RETURN elementId(c) AS case_id, collect(elementId(n)) AS neighbors
+        """, upload_id=upload_id)
+        
+        record = result.single()
+        if not record:
+            return False
+
+        case_id = record["case_id"]
+        neighbors = record["neighbors"]
+
+        G = nx.Graph()
+        G.add_node(case_id)
+        for neighbor in neighbors:
+            G.add_node(neighbor)
+            G.add_edge(case_id, neighbor)
+
+        # Generate Node2Vec
+        node2vec = Node2Vec(
+            G,
+            dimensions=Config.EMBEDDING_DIM,
+            walk_length=10,
+            num_walks=20,
+            workers=1,
+            seed=Config.RANDOM_STATE,
+            quiet=True
+        )
+        model = node2vec.fit(window=5, min_count=1, batch_words=4, epochs=1)
+
+        if case_id not in model.wv:
+            return False
+
+        embedding = model.wv[case_id].tolist()
+        session.run("""
+            MATCH (c:Case {upload_id: $upload_id})
+            SET c.embedding = $embedding
+        """, upload_id=upload_id, embedding=embedding)
+
+        return True
 
 @safe_neo4j_operation
 def generate_graph_embeddings() -> bool:
@@ -182,7 +227,7 @@ def generate_graph_embeddings() -> bool:
             # Get relationships with safety limit
             rel_result = session.run(f"""
                 MATCH (n)-[r]->(m)
-                RETURN elementId(n) AS source, elementId(m) AS target
+                RETURN id(n) as source, id(m) as target
                 LIMIT {Config.MAX_RELATIONSHIPS}
             """)
             edges = [(record["source"], record["target"]) for record in rel_result]
@@ -562,9 +607,9 @@ if uploaded_file:
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
-        with st.spinner("Generating updated graph embeddings..."):
-            if generate_graph_embeddings():
-                embedding = extract_user_embedding(upload_id)
+        with st.spinner("Generating embedding for new case..."):
+                if generate_embedding_for_node(upload_id):
+                    embedding = extract_user_embedding(upload_id)
                 if embedding is None:
                     st.error("Failed to generate embedding for the new case")
                     st.stop()
