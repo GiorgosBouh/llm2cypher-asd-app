@@ -395,30 +395,34 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
         return None
 
 @safe_neo4j_operation
-def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
-    """Extracts training data from Neo4j with proper embedding dimensions."""
-    with neo4j_service.session() as session:
-        result = session.run("""
-            MATCH (c:Case)-[:SCREENED_FOR]->(t:ASD_Trait)
-            WHERE c.embedding IS NOT NULL
-            RETURN c.embedding AS embedding, t.value AS label
-        """)
-        records = result.data()
-
-    if not records:
+def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
+    """Load labels from CSV and embeddings from Neo4j by Case_No"""
+    df = pd.read_csv(file_path, delimiter=";")
+    
+    if "Class_ASD_Traits" not in df.columns or "Case_No" not in df.columns:
+        st.error("CSV must contain columns 'Class_ASD_Traits' and 'Case_No'")
         return pd.DataFrame(), pd.Series()
 
-    X = np.array([r["embedding"] for r in records])
-    y = np.array([1 if r["label"] == "Yes" else 0 for r in records])
+    y = df["Class_ASD_Traits"].apply(lambda x: 1 if str(x).strip().lower() == "yes" else 0)
+    embeddings = []
+
+    with neo4j_service.session() as session:
+        for case_no in df["Case_No"]:
+            result = session.run(
+                "MATCH (c:Case {id: $id}) RETURN c.embedding AS embedding",
+                id=int(case_no)
+            )
+            record = result.single()
+            if record and record["embedding"]:
+                embeddings.append(record["embedding"])
+            else:
+                logger.warning(f"No embedding found for case ID {case_no}")
     
-    # Ensure proper dimensions
-    if len(X.shape) == 1:
-        X = X.reshape(-1, 1)
-    elif len(X.shape) == 2 and X.shape[1] != Config.EMBEDDING_DIM:
-        X = X.reshape(-1, Config.EMBEDDING_DIM)
-    
-    logger.info(f"Extracted {len(X)} training samples with shape {X.shape}")
-    return pd.DataFrame(X), pd.Series(y)
+    if not embeddings:
+        st.error("⚠️ No embeddings found for any of the cases.")
+        return pd.DataFrame(), pd.Series()
+
+    return pd.DataFrame(embeddings), y
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     """Plots ROC and Precision-Recall curves side by side."""
@@ -447,7 +451,8 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
-    X, y = extract_training_data()
+    csv_path = "/Users/user/Documents/Autism and NEO4J/archive/Toddler_Autism_dataset_July_2018_2.csv"  # ✅ βάλε το σωστό path εδώ
+    X, y = extract_training_data_from_csv(csv_path)
     if X.empty:
         st.warning("No training data available")
         return None
