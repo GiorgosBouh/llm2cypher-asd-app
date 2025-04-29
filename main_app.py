@@ -1,7 +1,4 @@
 import streamlit as st
-
-# MUST be the first Streamlit command
-st.set_page_config(layout="wide")
 from neo4j import GraphDatabase
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -18,7 +15,6 @@ from imblearn.pipeline import Pipeline
 from collections import Counter
 import uuid
 import numpy as np
-import time
 import matplotlib.pyplot as plt
 import plotly.express as px
 from contextlib import contextmanager
@@ -26,17 +22,22 @@ import logging
 from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+from node2vec import Node2Vec
+import networkx as nx
 
 # === Configuration ===
 class Config:
-    EMBEDDING_DIM = 16  # Reduced from original Node2Vec dimension
+    EMBEDDING_DIM = 64  # Increased dimension for better graph representation
     RANDOM_STATE = 42
     TEST_SIZE = 0.2
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
-    PRE_COMPUTED_PCA_COMPONENTS = None  # Will be initialized if available
-    FEATURE_SCALER = None  # Will be initialized if available
+    NODE2VEC_WALK_LENGTH = 30
+    NODE2VEC_NUM_WALKS = 200
+    NODE2VEC_WORKERS = 4
+    NODE2VEC_P = 1
+    NODE2VEC_Q = 1
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -148,89 +149,56 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
             session.run(query, **params)
         logger.info(f"Successfully inserted case {upload_id}")
 
-def get_feature_vector(answers: dict, demographics: dict, submitter_type: str) -> np.ndarray:
-    """Convert case data to a numerical feature vector."""
-    feature_vector = []
-    
-    # Add answers (A1-A10)
-    for i in range(1, 11):
-        feature_vector.append(answers.get(f"A{i}", 0))
-    
-    # Add demographics
-    # Sex: 0 for male, 1 for female
-    sex = demographics.get("Sex", "").lower()
-    feature_vector.append(1 if sex in ["f", "female"] else 0)
-    
-    # Ethnicity: encoded categories
-    ethnicity = demographics.get("Ethnicity", "").lower()
-    ethnicities = ["asian", "hispanic", "black", "white", "middle eastern", "mixed", "south asian"]
-    eth_encoded = ethnicities.index(ethnicity) if ethnicity in ethnicities else len(ethnicities)
-    feature_vector.append(eth_encoded)
-    
-    # Jaundice: 0 for no, 1 for yes
-    jaundice = demographics.get("Jaundice", "").lower()
-    feature_vector.append(1 if jaundice == "yes" else 0)
-    
-    # Family history: 0 for no, 1 for yes
-    family = demographics.get("Family_mem_with_ASD", "").lower()
-    feature_vector.append(1 if family == "yes" else 0)
-    
-    # Submitter type: encoded categories
-    submitter_types = ["family member", "health care professional", "self", "others", "school and/or child care staff"]
-    submitter = submitter_type.lower() if submitter_type else ""
-    sub_encoded = submitter_types.index(submitter) if submitter in submitter_types else len(submitter_types)
-    feature_vector.append(sub_encoded)
-    
-    return np.array(feature_vector)
-
 @safe_neo4j_operation
-def generate_case_embedding(upload_id: str) -> None:
-    """Generates an embedding for a case based on its features."""
+def generate_graph_embeddings() -> None:
+    """Generates graph embeddings using Node2Vec for all cases."""
     with neo4j_service.session() as session:
-        # Get all answers for the case
+        # First extract the graph structure from Neo4j
         result = session.run("""
-            MATCH (c:Case {upload_id: $upload_id})-[r:HAS_ANSWER]->(q:BehaviorQuestion)
-            RETURN q.name AS question, r.value AS value
-            ORDER BY q.name
-        """, upload_id=upload_id)
-        answers = {record["question"]: record["value"] for record in result}
+            MATCH (n)-[r]->(m)
+            RETURN id(n) as source, id(m) as target, type(r) as relationship
+        """)
+        edges = [(record["source"], record["target"]) for record in result]
         
-        # Get demographics for the case
-        result = session.run("""
-            MATCH (c:Case {upload_id: $upload_id})-[:HAS_DEMOGRAPHIC]->(d:DemographicAttribute)
-            RETURN d.type AS type, d.value AS value
-        """, upload_id=upload_id)
-        demographics = {record["type"]: record["value"] for record in result}
+        # Get all node IDs
+        result = session.run("MATCH (n) RETURN id(n) as node_id")
+        node_ids = [record["node_id"] for record in result]
         
-        # Get submitter type
-        result = session.run("""
-            MATCH (c:Case {upload_id: $upload_id})-[:SUBMITTED_BY]->(s:SubmitterType)
-            RETURN s.type AS type
-        """, upload_id=upload_id)
-        submitter_type = result.single()["type"] if result else None
+    if not edges:
+        st.error("No graph structure found to generate embeddings")
+        return
         
-        # Convert to feature vector
-        feature_vector = get_feature_vector(answers, demographics, submitter_type)
-        
-        # Generate embedding
-        if Config.PRE_COMPUTED_PCA_COMPONENTS is not None and Config.FEATURE_SCALER is not None:
-            # Scale features using pre-computed scaler
-            features_scaled = Config.FEATURE_SCALER.transform([feature_vector])
-            # Project using pre-computed PCA components
-            embedding = np.dot(features_scaled, Config.PRE_COMPUTED_PCA_COMPONENTS.T)[0]
-        else:
-            # Fallback to simple approach - use raw features (truncated or padded)
-            embedding = feature_vector[:Config.EMBEDDING_DIM]
-            if len(embedding) < Config.EMBEDDING_DIM:
-                embedding = np.pad(embedding, (0, Config.EMBEDDING_DIM - len(embedding)))
-        
-        # Store the embedding in the graph
-        session.run("""
-            MATCH (c:Case {upload_id: $upload_id})
-            SET c.embedding = $embedding
-        """, upload_id=upload_id, embedding=embedding.tolist())
-        
-        logger.info(f"Generated embedding for case {upload_id}")
+    # Create a NetworkX graph
+    G = nx.Graph()
+    G.add_nodes_from(node_ids)
+    G.add_edges_from(edges)
+    
+    # Generate Node2Vec embeddings
+    node2vec = Node2Vec(
+        G,
+        dimensions=Config.EMBEDDING_DIM,
+        walk_length=Config.NODE2VEC_WALK_LENGTH,
+        num_walks=Config.NODE2VEC_NUM_WALKS,
+        workers=Config.NODE2VEC_WORKERS,
+        p=Config.NODE2VEC_P,
+        q=Config.NODE2VEC_Q,
+        seed=Config.RANDOM_STATE
+    )
+    
+    model = node2vec.fit(window=10, min_count=1, batch_words=4)
+    
+    # Store embeddings back in Neo4j
+    with neo4j_service.session() as session:
+        for node_id in node_ids:
+            if str(node_id) in model.wv:
+                embedding = model.wv[str(node_id)].tolist()
+                session.run("""
+                    MATCH (n)
+                    WHERE id(n) = $node_id
+                    SET n.embedding = $embedding
+                """, node_id=node_id, embedding=embedding)
+    
+    logger.info("Graph embeddings generated successfully")
 
 def nl_to_cypher(question: str) -> Optional[str]:
     """Translates natural language to Cypher using OpenAI."""
@@ -283,11 +251,13 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
             upload_id=upload_id
         )
         record = result.single()
-        return np.array(record["embedding"]) if record and record["embedding"] is not None else None
+        if record and record["embedding"] is not None:
+            return np.array(record["embedding"]).reshape(1, -1)  # Reshape for sklearn
+        return None
 
 @safe_neo4j_operation
 def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
-    """Extracts training data from Neo4j."""
+    """Extracts training data from Neo4j with proper embedding dimensions."""
     with neo4j_service.session() as session:
         result = session.run("""
             MATCH (c:Case)-[:SCREENED_FOR]->(t:ASD_Trait)
@@ -299,9 +269,16 @@ def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
     if not records:
         return pd.DataFrame(), pd.Series()
 
-    X = [r["embedding"] for r in records]
-    y = [1 if r["label"] == "Yes" else 0 for r in records]
-    logger.info(f"Extracted {len(X)} training samples")
+    X = np.array([r["embedding"] for r in records])
+    y = np.array([1 if r["label"] == "Yes" else 0 for r in records])
+    
+    # Ensure proper dimensions
+    if len(X.shape) == 1:
+        X = X.reshape(-1, 1)
+    elif len(X.shape) == 2 and X.shape[1] != Config.EMBEDDING_DIM:
+        X = X.reshape(-1, Config.EMBEDDING_DIM)
+    
+    logger.info(f"Extracted {len(X)} training samples with shape {X.shape}")
     return pd.DataFrame(X), pd.Series(y)
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
@@ -374,7 +351,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
 
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
-    """Retrieves all existing embeddings for anomaly detection."""
+    """Retrieves all existing embeddings for anomaly detection with proper dimensions."""
     with neo4j_service.session() as session:
         result = session.run("""
             MATCH (c:Case)
@@ -382,7 +359,14 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
             RETURN c.embedding AS embedding
         """)
         embeddings = [record["embedding"] for record in result]
-        return np.array(embeddings) if embeddings else None
+        if embeddings:
+            embeddings = np.array(embeddings)
+            if len(embeddings.shape) == 1:
+                embeddings = embeddings.reshape(-1, 1)
+            elif embeddings.shape[1] != Config.EMBEDDING_DIM:
+                embeddings = embeddings.reshape(-1, Config.EMBEDDING_DIM)
+            return embeddings
+        return None
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]:
@@ -403,66 +387,6 @@ def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]
     iso_forest.fit(embeddings_scaled)
 
     return iso_forest, scaler
-
-# === Initialize PCA Components (if available) ===
-@st.cache_resource
-def initialize_pca_components():
-    """Initialize PCA components if we have training data available"""
-    try:
-        X, _ = extract_training_data()
-        if len(X) > Config.EMBEDDING_DIM:
-            # Get raw features for all cases
-            with neo4j_service.session() as session:
-                result = session.run("""
-                    MATCH (c:Case)-[r:HAS_ANSWER]->(q:BehaviorQuestion)
-                    WITH c, q.name AS question, r.value AS value
-                    ORDER BY c, question
-                    RETURN c, collect(value) AS answers
-                """)
-                all_answers = {record["c"].id: record["answers"] for record in result}
-                
-                result = session.run("""
-                    MATCH (c:Case)-[:HAS_DEMOGRAPHIC]->(d:DemographicAttribute)
-                    RETURN c, d.type AS type, d.value AS value
-                """)
-                all_demographics = {}
-                for record in result:
-                    if record["c"].id not in all_demographics:
-                        all_demographics[record["c"].id] = {}
-                    all_demographics[record["c"].id][record["type"]] = record["value"]
-                
-                result = session.run("""
-                    MATCH (c:Case)-[:SUBMITTED_BY]->(s:SubmitterType)
-                    RETURN c, s.type AS type
-                """)
-                all_submitters = {record["c"].id: record["type"] for record in result}
-                
-            # Create feature matrix
-            features = []
-            for case_id in all_answers.keys():
-                answers = all_answers.get(case_id, [0]*10)
-                demographics = all_demographics.get(case_id, {})
-                submitter = all_submitters.get(case_id, "")
-                feature_vector = get_feature_vector(
-                    {f"A{i+1}": answers[i] for i in range(10)},
-                    demographics,
-                    submitter
-                )
-                features.append(feature_vector)
-            
-            features = np.array(features)
-            
-            # Fit scaler and PCA
-            scaler = StandardScaler().fit(features)
-            pca = PCA(n_components=Config.EMBEDDING_DIM).fit(scaler.transform(features))
-            
-            return pca.components_, scaler
-    except Exception as e:
-        logger.error(f"Error initializing PCA components: {e}")
-    return None, None
-
-# Initialize PCA components if possible
-Config.PRE_COMPUTED_PCA_COMPONENTS, Config.FEATURE_SCALER = initialize_pca_components()
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
@@ -494,6 +418,13 @@ if question:
                         st.info("No results found.")
                 except Exception as e:
                     st.error(f"Query execution failed: {e}")
+
+# === Graph Embeddings Section ===
+st.header("🌐 Graph Embeddings")
+if st.button("🔄 Generate Graph Embeddings"):
+    with st.spinner("Generating graph embeddings (this may take a while)..."):
+        generate_graph_embeddings()
+        st.success("Graph embeddings generated successfully!")
 
 # === Model Training Section ===
 st.header("🤖 ASD Detection Model")
@@ -540,21 +471,25 @@ if uploaded_file:
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
-        with st.spinner("Generating embedding..."):
-            generate_case_embedding(upload_id)
+        with st.spinner("Generating graph embedding (requires existing embeddings)..."):
+            # Generate new embeddings for the entire graph including the new case
+            generate_graph_embeddings()
             embedding = extract_user_embedding(upload_id)
             if embedding is None:
                 st.error("Failed to generate embedding")
                 st.stop()
 
-            st.subheader("🧠 Case Embedding")
+            st.subheader("🧠 Graph Embedding")
             st.write(embedding)
 
         # === ASD Prediction ===
         if 'asd_model' in st.session_state:
             with st.spinner("Predicting ASD traits..."):
                 model = st.session_state['asd_model']
-                proba = model.predict_proba([embedding])[0][1]
+                # Ensure proper dimensions
+                if len(embedding.shape) == 1:
+                    embedding = embedding.reshape(1, -1)
+                proba = model.predict_proba(embedding)[0][1]
                 prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
 
                 st.subheader("🔍 Prediction Result")
@@ -575,7 +510,10 @@ if uploaded_file:
             iso_forest_scaler = train_isolation_forest()
             if iso_forest_scaler:
                 iso_forest, scaler = iso_forest_scaler
-                embedding_scaled = scaler.transform([embedding])
+                # Ensure proper dimensions
+                if len(embedding.shape) == 1:
+                    embedding = embedding.reshape(1, -1)
+                embedding_scaled = scaler.transform(embedding)
                 anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
                 is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
