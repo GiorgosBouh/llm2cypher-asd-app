@@ -451,8 +451,7 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
 
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
-    csv_path = "/Users/user/Documents/Autism and NEO4J/archive/Toddler_Autism_dataset_July_2018_2.csv"  # ✅ βάλε το σωστό path εδώ
-    X, y = extract_training_data_from_csv(csv_path)
+    csv_path = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"    X, y = extract_training_data_from_csv(csv_path)
     if X.empty:
         st.warning("No training data available")
         return None
