@@ -254,7 +254,7 @@ def generate_graph_embeddings() -> bool:
         G.remove_edges_from(nx.selfloop_edges(G))
         
         # Step 3: Generate embeddings
-        status_text.text("Step 3/4: Generating embeddings... (This may take several minutes)")
+        status_text.text("Step 3/4: Generating embeddings... (This may take 3-5 minutes)")
         progress_bar.progress(50)
         
         # Initialize Node2Vec with conservative parameters
