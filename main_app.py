@@ -464,68 +464,74 @@ def extract_training_data_from_csv(csv_path: str) -> Tuple[pd.DataFrame, pd.Seri
         st.error(f"❌ Failed to read training CSV: {e}")
         logger.error(f"CSV read error: {e}")
         return pd.DataFrame(), pd.Series()
-        
+
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
-    csv_path = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-    X, y = extract_training_data_from_csv(csv_path)
-    if X.empty:
-        st.warning("No training data available")
-        return None
+    try:
+        # --- Load the training CSV ---
+        csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+        df = pd.read_csv(csv_url, delimiter=";")
 
-    st.subheader("📊 Class Distribution")
-    st.write(Counter(y))
+        # --- Clean Data ---
+        required_columns = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD", "Who_completed_the_test", "Class_ASD_Traits"]
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            st.error(f"Missing columns: {', '.join(missing_cols)}")
+            return None
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=Config.TEST_SIZE,
-        stratify=y,
-        random_state=Config.RANDOM_STATE
-    )
+        # Convert labels
+        df['label'] = df['Class_ASD_Traits'].apply(lambda x: 1 if str(x).strip().lower() == 'yes' else 0)
 
-    pipeline = Pipeline([
-        ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy='auto')),
-        ('classifier', RandomForestClassifier(
-            n_estimators=Config.N_ESTIMATORS,
-            random_state=Config.RANDOM_STATE,
-            class_weight='balanced'
-        ))
-    ])
+        # Select features (Q-Chat-10 Questions only)
+        X = df[[f"A{i}" for i in range(1, 11)]].copy()
+        y = df['label']
 
-    pipeline.fit(X_train, y_train)
-    y_pred = pipeline.predict(X_test)
-    y_proba = pipeline.predict_proba(X_test)[:, 1]
+        # Handle any missing values
+        X = X.fillna(0)
 
-    st.subheader("📈 Model Evaluation")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("ROC AUC", f"{roc_auc_score(y_test, y_proba):.3f}")
-        st.metric("Average Precision", f"{average_precision_score(y_test, y_proba):.3f}")
-    with col2:
-        st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
-        st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
+        # --- Split dataset ---
+        st.subheader("📊 Class Distribution")
+        st.write(Counter(y))
 
-    plot_combined_curves(y_test, y_proba)
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=Config.TEST_SIZE,
+            stratify=y,
+            random_state=Config.RANDOM_STATE
+        )
 
-    return pipeline.named_steps['classifier']
+        # --- Build Pipeline ---
+        pipeline = Pipeline([
+            ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy='auto')),
+            ('classifier', RandomForestClassifier(
+                n_estimators=Config.N_ESTIMATORS,
+                random_state=Config.RANDOM_STATE,
+                class_weight='balanced'
+            ))
+        ])
 
-@safe_neo4j_operation
-def get_existing_embeddings() -> Optional[np.ndarray]:
-    """Retrieves all existing embeddings for anomaly detection with proper dimensions."""
-    with neo4j_service.session() as session:
-        result = session.run("""
-            MATCH (c:Case)
-            WHERE c.embedding IS NOT NULL
-            RETURN c.embedding AS embedding
-        """)
-        embeddings = [record["embedding"] for record in result]
-        if embeddings:
-            embeddings = np.array(embeddings)
-            if len(embeddings.shape) == 1:
-                embeddings = embeddings.reshape(-1, 1)
-            elif embeddings.shape[1] != Config.EMBEDDING_DIM:
-                embeddings = embeddings.reshape(-1, Config.EMBEDDING_DIM)
-            return embeddings
+        # --- Train Model ---
+        pipeline.fit(X_train, y_train)
+        y_pred = pipeline.predict(X_test)
+        y_proba = pipeline.predict_proba(X_test)[:, 1]
+
+        # --- Evaluate Model ---
+        st.subheader("📈 Model Evaluation")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("ROC AUC", f"{roc_auc_score(y_test, y_proba):.3f}")
+            st.metric("Average Precision", f"{average_precision_score(y_test, y_proba):.3f}")
+        with col2:
+            st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
+            st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
+
+        plot_combined_curves(y_test, y_proba)
+
+        return pipeline.named_steps['classifier']
+
+    except Exception as e:
+        st.error(f"❌ Error training model: {e}")
+        logger.error(f"❌ Error in train_asd_detection_model: {e}", exc_info=True)
         return None
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
