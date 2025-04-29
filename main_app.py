@@ -207,6 +207,10 @@ def generate_graph_embeddings() -> bool:
     model = None
     
     try:
+        # Step 0: Remove label leakage
+        with neo4j_service.session() as session:
+            session.run("MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait) DELETE r")
+            logger.info("🔒 Removed SCREENED_FOR relationships to prevent label leakage")
         # Create temp directory
         temp_dir = tempfile.mkdtemp(prefix="node2vec_")
         logger.info(f"Created temp directory at {temp_dir}")
