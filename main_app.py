@@ -24,21 +24,23 @@ from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler
 from node2vec import Node2Vec
 import networkx as nx
+import tempfile
+import shutil
 
 # === Configuration ===
 class Config:
-    EMBEDDING_DIM = 64  # Good balance between quality and performance
+    EMBEDDING_DIM = 64  # Reduced from original Node2Vec dimension
     RANDOM_STATE = 42
     TEST_SIZE = 0.2
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
-    NODE2VEC_WALK_LENGTH = 30  # Reduced for faster processing
-    NODE2VEC_NUM_WALKS = 100   # Reduced for faster processing
-    NODE2VEC_WORKERS = 2       # Reduced to avoid resource issues
+    NODE2VEC_WALK_LENGTH = 30
+    NODE2VEC_NUM_WALKS = 100
+    NODE2VEC_WORKERS = 2
     NODE2VEC_P = 1
     NODE2VEC_Q = 1
-    EMBEDDING_BATCH_SIZE = 100  # For storing embeddings in Neo4j
+    EMBEDDING_BATCH_SIZE = 100
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -152,16 +154,20 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
 
 @safe_neo4j_operation
 def generate_graph_embeddings() -> bool:
-    """Generates graph embeddings using Node2Vec with progress feedback."""
+    """Generates graph embeddings using Node2Vec with proper temp folder handling."""
     progress_bar = st.progress(0)
     status_text = st.empty()
+    temp_dir = None
     
     try:
-        status_text.text("Step 1/4: Extracting graph structure from Neo4j...")
+        # Create temp directory
+        temp_dir = tempfile.mkdtemp(prefix="node2vec_")
+        logger.info(f"Created temp directory at {temp_dir}")
+        
+        status_text.text("Step 1/4: Extracting graph structure...")
         progress_bar.progress(10)
         
         with neo4j_service.session() as session:
-            # Get all nodes and relationships efficiently
             result = session.run("""
                 MATCH (n)-[r]->(m)
                 RETURN id(n) as source, id(m) as target, type(r) as relationship
@@ -172,29 +178,24 @@ def generate_graph_embeddings() -> bool:
             """)
             edges = [(record["source"], record["target"]) for record in result]
             
-            # Get all node IDs
             result = session.run("MATCH (n) RETURN id(n) as node_id")
             node_ids = [record["node_id"] for record in result]
 
         if not edges or not node_ids:
-            st.error("No graph structure found to generate embeddings")
+            st.error("No graph structure found")
             return False
 
-        status_text.text("Step 2/4: Creating NetworkX graph...")
+        status_text.text("Step 2/4: Creating graph...")
         progress_bar.progress(30)
         
-        # Create a NetworkX graph
         G = nx.Graph()
         G.add_nodes_from(node_ids)
         G.add_edges_from(edges)
-        
-        # Remove self-loops if any
         G.remove_edges_from(nx.selfloop_edges(G))
         
-        status_text.text("Step 3/4: Generating Node2Vec embeddings (this may take several minutes)...")
+        status_text.text("Step 3/4: Generating embeddings...")
         progress_bar.progress(50)
         
-        # Generate Node2Vec embeddings with optimized parameters
         node2vec = Node2Vec(
             G,
             dimensions=Config.EMBEDDING_DIM,
@@ -204,22 +205,20 @@ def generate_graph_embeddings() -> bool:
             p=Config.NODE2VEC_P,
             q=Config.NODE2VEC_Q,
             seed=Config.RANDOM_STATE,
-            temp_folder="./node2vec_temp",  # Add temp folder to avoid memory issues
-            quiet=True  # Less verbose output
+            temp_folder=temp_dir,
+            quiet=True
         )
         
-        # Train with smaller window and fewer iterations for faster results
         model = node2vec.fit(
             window=5,
             min_count=1,
             batch_words=4,
-            iter=3  # Reduced iterations
+            iter=3
         )
         
-        status_text.text("Step 4/4: Storing embeddings in Neo4j...")
+        status_text.text("Step 4/4: Storing embeddings...")
         progress_bar.progress(70)
         
-        # Store embeddings in batches
         with neo4j_service.session() as session:
             total_nodes = len(node_ids)
             for i in range(0, total_nodes, Config.EMBEDDING_BATCH_SIZE):
@@ -227,35 +226,34 @@ def generate_graph_embeddings() -> bool:
                 queries = []
                 for node_id in batch:
                     if str(node_id) in model.wv:
-                        embedding = model.wv[str(node_id)].tolist()
                         queries.append((
                             """
                             MATCH (n)
                             WHERE id(n) = $node_id
                             SET n.embedding = $embedding
                             """,
-                            {"node_id": node_id, "embedding": embedding}
+                            {"node_id": node_id, "embedding": model.wv[str(node_id)].tolist()}
                         ))
                 
-                # Execute batch
                 for query, params in queries:
                     session.run(query, **params)
                 
-                # Update progress
                 progress = min(70 + int(30 * (i + len(batch)) / total_nodes), 99)
                 progress_bar.progress(progress)
         
-        status_text.text("Graph embeddings generated successfully!")
+        status_text.text("Embeddings generated successfully!")
         progress_bar.progress(100)
-        logger.info("Graph embeddings generated successfully")
         return True
         
     except Exception as e:
-        status_text.error(f"Error generating embeddings: {str(e)}")
-        logger.error(f"Error generating embeddings: {str(e)}")
+        status_text.error(f"Error: {str(e)}")
+        logger.error(f"Embedding generation failed: {str(e)}")
         return False
     finally:
-        # Clean up
+        # Clean up temp directory
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+            logger.info(f"Removed temp directory {temp_dir}")
         time.sleep(2)
         status_text.empty()
         progress_bar.empty()
@@ -532,11 +530,11 @@ if uploaded_file:
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
-        with st.spinner("Generating graph embeddings for the updated graph..."):
+        with st.spinner("Generating updated graph embeddings..."):
             if generate_graph_embeddings():
                 embedding = extract_user_embedding(upload_id)
                 if embedding is None:
-                    st.error("Failed to generate embedding for the new case")
+                    st.error("Failed to generate embedding")
                     st.stop()
 
                 st.subheader("🧠 Graph Embedding")
@@ -546,7 +544,6 @@ if uploaded_file:
                 if 'asd_model' in st.session_state:
                     with st.spinner("Predicting ASD traits..."):
                         model = st.session_state['asd_model']
-                        # Ensure proper dimensions
                         if len(embedding.shape) == 1:
                             embedding = embedding.reshape(1, -1)
                         proba = model.predict_proba(embedding)[0][1]
@@ -570,7 +567,6 @@ if uploaded_file:
                     iso_forest_scaler = train_isolation_forest()
                     if iso_forest_scaler:
                         iso_forest, scaler = iso_forest_scaler
-                        # Ensure proper dimensions
                         if len(embedding.shape) == 1:
                             embedding = embedding.reshape(1, -1)
                         embedding_scaled = scaler.transform(embedding)
@@ -599,7 +595,7 @@ if uploaded_file:
                     else:
                         st.info("Anomaly detection model not trained yet or insufficient data.")
             else:
-                st.error("Failed to generate graph embeddings after adding new case")
+                st.error("Failed to generate embeddings after update")
 
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
