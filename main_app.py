@@ -172,7 +172,7 @@ def generate_graph_embeddings() -> bool:
         
         with neo4j_service.session() as session:
             # Get nodes first
-            node_result = session.run("MATCH (n) RETURN id(n) as node_id")
+            node_result = session.run("MATCH (n)RETURN elementId(n) AS node_id")
             node_ids = [record["node_id"] for record in node_result]
             
             if not node_ids:
@@ -182,7 +182,7 @@ def generate_graph_embeddings() -> bool:
             # Get relationships with safety limit
             rel_result = session.run(f"""
                 MATCH (n)-[r]->(m)
-                RETURN id(n) as source, id(m) as target
+                RETURN elementId(n) AS source, elementId(m) AS target
                 LIMIT {Config.MAX_RELATIONSHIPS}
             """)
             edges = [(record["source"], record["target"]) for record in rel_result]
@@ -231,7 +231,7 @@ def generate_graph_embeddings() -> bool:
             min_count=1,
             batch_words=4,
             epochs=1  # ✅ Use `epochs` instead of `iter`
-        )
+    )
         
         if time.time() - start_time > timeout:
             raise TimeoutError("Embedding generation timed out after 10 minutes")
