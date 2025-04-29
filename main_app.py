@@ -448,7 +448,23 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     ax2.legend(loc='lower left')
 
     st.pyplot(fig)
+def extract_training_data_from_csv(csv_path: str) -> Tuple[pd.DataFrame, pd.Series]:
+    try:
+        df = pd.read_csv(csv_path, sep=";")
+        df.columns = [col.strip() for col in df.columns]
 
+        # Προετοιμασία χαρακτηριστικών και ετικετών
+        features = [f"A{i}" for i in range(1, 11)]
+        df = df.dropna(subset=features + ["Class_ASD_Traits"])
+        X = df[features].astype(int)
+        y = df["Class_ASD_Traits"].apply(lambda val: 1 if str(val).strip().lower() == "yes" else 0)
+
+        return X, y
+    except Exception as e:
+        st.error(f"❌ Failed to read training CSV: {e}")
+        logger.error(f"CSV read error: {e}")
+        return pd.DataFrame(), pd.Series()
+        
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     csv_path = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
