@@ -15,29 +15,30 @@ from imblearn.pipeline import Pipeline
 from collections import Counter
 import uuid
 import numpy as np
+import time
 import matplotlib.pyplot as plt
 import plotly.express as px
 from contextlib import contextmanager
 import logging
 from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
 from node2vec import Node2Vec
 import networkx as nx
 
 # === Configuration ===
 class Config:
-    EMBEDDING_DIM = 64  # Increased dimension for better graph representation
+    EMBEDDING_DIM = 64  # Good balance between quality and performance
     RANDOM_STATE = 42
     TEST_SIZE = 0.2
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
-    NODE2VEC_WALK_LENGTH = 30
-    NODE2VEC_NUM_WALKS = 200
-    NODE2VEC_WORKERS = 4
+    NODE2VEC_WALK_LENGTH = 30  # Reduced for faster processing
+    NODE2VEC_NUM_WALKS = 100   # Reduced for faster processing
+    NODE2VEC_WORKERS = 2       # Reduced to avoid resource issues
     NODE2VEC_P = 1
     NODE2VEC_Q = 1
+    EMBEDDING_BATCH_SIZE = 100  # For storing embeddings in Neo4j
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -150,55 +151,114 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
         logger.info(f"Successfully inserted case {upload_id}")
 
 @safe_neo4j_operation
-def generate_graph_embeddings() -> None:
-    """Generates graph embeddings using Node2Vec for all cases."""
-    with neo4j_service.session() as session:
-        # First extract the graph structure from Neo4j
-        result = session.run("""
-            MATCH (n)-[r]->(m)
-            RETURN id(n) as source, id(m) as target, type(r) as relationship
-        """)
-        edges = [(record["source"], record["target"]) for record in result]
+def generate_graph_embeddings() -> bool:
+    """Generates graph embeddings using Node2Vec with progress feedback."""
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    try:
+        status_text.text("Step 1/4: Extracting graph structure from Neo4j...")
+        progress_bar.progress(10)
         
-        # Get all node IDs
-        result = session.run("MATCH (n) RETURN id(n) as node_id")
-        node_ids = [record["node_id"] for record in result]
+        with neo4j_service.session() as session:
+            # Get all nodes and relationships efficiently
+            result = session.run("""
+                MATCH (n)-[r]->(m)
+                RETURN id(n) as source, id(m) as target, type(r) as relationship
+                UNION
+                MATCH (n)
+                WHERE NOT (n)--()
+                RETURN id(n) as source, id(n) as target, 'SELF' as relationship
+            """)
+            edges = [(record["source"], record["target"]) for record in result]
+            
+            # Get all node IDs
+            result = session.run("MATCH (n) RETURN id(n) as node_id")
+            node_ids = [record["node_id"] for record in result]
+
+        if not edges or not node_ids:
+            st.error("No graph structure found to generate embeddings")
+            return False
+
+        status_text.text("Step 2/4: Creating NetworkX graph...")
+        progress_bar.progress(30)
         
-    if not edges:
-        st.error("No graph structure found to generate embeddings")
-        return
+        # Create a NetworkX graph
+        G = nx.Graph()
+        G.add_nodes_from(node_ids)
+        G.add_edges_from(edges)
         
-    # Create a NetworkX graph
-    G = nx.Graph()
-    G.add_nodes_from(node_ids)
-    G.add_edges_from(edges)
-    
-    # Generate Node2Vec embeddings
-    node2vec = Node2Vec(
-        G,
-        dimensions=Config.EMBEDDING_DIM,
-        walk_length=Config.NODE2VEC_WALK_LENGTH,
-        num_walks=Config.NODE2VEC_NUM_WALKS,
-        workers=Config.NODE2VEC_WORKERS,
-        p=Config.NODE2VEC_P,
-        q=Config.NODE2VEC_Q,
-        seed=Config.RANDOM_STATE
-    )
-    
-    model = node2vec.fit(window=10, min_count=1, batch_words=4)
-    
-    # Store embeddings back in Neo4j
-    with neo4j_service.session() as session:
-        for node_id in node_ids:
-            if str(node_id) in model.wv:
-                embedding = model.wv[str(node_id)].tolist()
-                session.run("""
-                    MATCH (n)
-                    WHERE id(n) = $node_id
-                    SET n.embedding = $embedding
-                """, node_id=node_id, embedding=embedding)
-    
-    logger.info("Graph embeddings generated successfully")
+        # Remove self-loops if any
+        G.remove_edges_from(nx.selfloop_edges(G))
+        
+        status_text.text("Step 3/4: Generating Node2Vec embeddings (this may take several minutes)...")
+        progress_bar.progress(50)
+        
+        # Generate Node2Vec embeddings with optimized parameters
+        node2vec = Node2Vec(
+            G,
+            dimensions=Config.EMBEDDING_DIM,
+            walk_length=Config.NODE2VEC_WALK_LENGTH,
+            num_walks=Config.NODE2VEC_NUM_WALKS,
+            workers=Config.NODE2VEC_WORKERS,
+            p=Config.NODE2VEC_P,
+            q=Config.NODE2VEC_Q,
+            seed=Config.RANDOM_STATE,
+            temp_folder="./node2vec_temp",  # Add temp folder to avoid memory issues
+            quiet=True  # Less verbose output
+        )
+        
+        # Train with smaller window and fewer iterations for faster results
+        model = node2vec.fit(
+            window=5,
+            min_count=1,
+            batch_words=4,
+            iter=3  # Reduced iterations
+        )
+        
+        status_text.text("Step 4/4: Storing embeddings in Neo4j...")
+        progress_bar.progress(70)
+        
+        # Store embeddings in batches
+        with neo4j_service.session() as session:
+            total_nodes = len(node_ids)
+            for i in range(0, total_nodes, Config.EMBEDDING_BATCH_SIZE):
+                batch = node_ids[i:i + Config.EMBEDDING_BATCH_SIZE]
+                queries = []
+                for node_id in batch:
+                    if str(node_id) in model.wv:
+                        embedding = model.wv[str(node_id)].tolist()
+                        queries.append((
+                            """
+                            MATCH (n)
+                            WHERE id(n) = $node_id
+                            SET n.embedding = $embedding
+                            """,
+                            {"node_id": node_id, "embedding": embedding}
+                        ))
+                
+                # Execute batch
+                for query, params in queries:
+                    session.run(query, **params)
+                
+                # Update progress
+                progress = min(70 + int(30 * (i + len(batch)) / total_nodes), 99)
+                progress_bar.progress(progress)
+        
+        status_text.text("Graph embeddings generated successfully!")
+        progress_bar.progress(100)
+        logger.info("Graph embeddings generated successfully")
+        return True
+        
+    except Exception as e:
+        status_text.error(f"Error generating embeddings: {str(e)}")
+        logger.error(f"Error generating embeddings: {str(e)}")
+        return False
+    finally:
+        # Clean up
+        time.sleep(2)
+        status_text.empty()
+        progress_bar.empty()
 
 def nl_to_cypher(question: str) -> Optional[str]:
     """Translates natural language to Cypher using OpenAI."""
@@ -422,9 +482,10 @@ if question:
 # === Graph Embeddings Section ===
 st.header("🌐 Graph Embeddings")
 if st.button("🔄 Generate Graph Embeddings"):
-    with st.spinner("Generating graph embeddings (this may take a while)..."):
-        generate_graph_embeddings()
+    if generate_graph_embeddings():
         st.success("Graph embeddings generated successfully!")
+    else:
+        st.error("Failed to generate graph embeddings")
 
 # === Model Training Section ===
 st.header("🤖 ASD Detection Model")
@@ -471,73 +532,74 @@ if uploaded_file:
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
-        with st.spinner("Generating graph embedding (requires existing embeddings)..."):
-            # Generate new embeddings for the entire graph including the new case
-            generate_graph_embeddings()
-            embedding = extract_user_embedding(upload_id)
-            if embedding is None:
-                st.error("Failed to generate embedding")
-                st.stop()
+        with st.spinner("Generating graph embeddings for the updated graph..."):
+            if generate_graph_embeddings():
+                embedding = extract_user_embedding(upload_id)
+                if embedding is None:
+                    st.error("Failed to generate embedding for the new case")
+                    st.stop()
 
-            st.subheader("🧠 Graph Embedding")
-            st.write(embedding)
+                st.subheader("🧠 Graph Embedding")
+                st.write(embedding)
 
-        # === ASD Prediction ===
-        if 'asd_model' in st.session_state:
-            with st.spinner("Predicting ASD traits..."):
-                model = st.session_state['asd_model']
-                # Ensure proper dimensions
-                if len(embedding.shape) == 1:
-                    embedding = embedding.reshape(1, -1)
-                proba = model.predict_proba(embedding)[0][1]
-                prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
+                # === ASD Prediction ===
+                if 'asd_model' in st.session_state:
+                    with st.spinner("Predicting ASD traits..."):
+                        model = st.session_state['asd_model']
+                        # Ensure proper dimensions
+                        if len(embedding.shape) == 1:
+                            embedding = embedding.reshape(1, -1)
+                        proba = model.predict_proba(embedding)[0][1]
+                        prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
 
-                st.subheader("🔍 Prediction Result")
-                col1, col2 = st.columns(2)
-                col1.metric("Prediction", prediction)
-                col2.metric("Confidence", f"{max(proba, 1 - proba):.1%}")
+                        st.subheader("🔍 Prediction Result")
+                        col1, col2 = st.columns(2)
+                        col1.metric("Prediction", prediction)
+                        col2.metric("Confidence", f"{max(proba, 1 - proba):.1%}")
 
-                fig = px.bar(
-                    x=["Control", "ASD Traits"],
-                    y=[1 - proba, proba],
-                    labels={'x': 'Class', 'y': 'Probability'},
-                    title="Prediction Probabilities"
-                )
-                st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
+                        fig = px.bar(
+                            x=["Control", "ASD Traits"],
+                            y=[1 - proba, proba],
+                            labels={'x': 'Class', 'y': 'Probability'},
+                            title="Prediction Probabilities"
+                        )
+                        st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
 
-        # === Anomaly Detection ===
-        with st.spinner("Checking for anomalies..."):
-            iso_forest_scaler = train_isolation_forest()
-            if iso_forest_scaler:
-                iso_forest, scaler = iso_forest_scaler
-                # Ensure proper dimensions
-                if len(embedding.shape) == 1:
-                    embedding = embedding.reshape(1, -1)
-                embedding_scaled = scaler.transform(embedding)
-                anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-                is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+                # === Anomaly Detection ===
+                with st.spinner("Checking for anomalies..."):
+                    iso_forest_scaler = train_isolation_forest()
+                    if iso_forest_scaler:
+                        iso_forest, scaler = iso_forest_scaler
+                        # Ensure proper dimensions
+                        if len(embedding.shape) == 1:
+                            embedding = embedding.reshape(1, -1)
+                        embedding_scaled = scaler.transform(embedding)
+                        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
-                st.subheader("🕵️ Anomaly Detection")
-                if is_anomaly:
-                    st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
-                else:
-                    st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+                        st.subheader("🕵️ Anomaly Detection")
+                        if is_anomaly:
+                            st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+                        else:
+                            st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
 
-                all_embeddings = get_existing_embeddings()
-                if all_embeddings is not None:
-                    all_embeddings_scaled = scaler.transform(all_embeddings)
-                    scores = iso_forest.decision_function(all_embeddings_scaled)
+                        all_embeddings = get_existing_embeddings()
+                        if all_embeddings is not None:
+                            all_embeddings_scaled = scaler.transform(all_embeddings)
+                            scores = iso_forest.decision_function(all_embeddings_scaled)
 
-                    fig = px.histogram(
-                        x=scores,
-                        nbins=20,
-                        labels={'x': 'Anomaly Score'},
-                        title="Anomaly Score Distribution"
-                    )
-                    fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                    st.plotly_chart(fig, key=f"anomaly_hist_{upload_id}")
+                            fig = px.histogram(
+                                x=scores,
+                                nbins=20,
+                                labels={'x': 'Anomaly Score'},
+                                title="Anomaly Score Distribution"
+                            )
+                            fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
+                            st.plotly_chart(fig, key=f"anomaly_hist_{upload_id}")
+                    else:
+                        st.info("Anomaly detection model not trained yet or insufficient data.")
             else:
-                st.info("Anomaly detection model not trained yet or insufficient data.")
+                st.error("Failed to generate graph embeddings after adding new case")
 
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
