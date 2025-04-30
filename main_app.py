@@ -400,8 +400,8 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
     try:
         df = pd.read_csv(file_path, delimiter=";")
         
-        # Clean the data
-        df = df.applymap(lambda x: str(x).replace(",", ".")  # Replace commas with dots in all fields
+        # Clean the data - replace commas with dots in all string fields
+        df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
         
         # Convert numeric columns
         numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
