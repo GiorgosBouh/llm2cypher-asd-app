@@ -532,6 +532,16 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.error(f"❌ Error training model: {e}")
         logger.error(f"❌ Error in train_asd_detection_model: {e}", exc_info=True)
         return None
+@safe_neo4j_operation
+def get_existing_embeddings() -> Optional[np.ndarray]:
+    """Returns all existing case node embeddings from the graph."""
+    with neo4j_service.session() as session:
+        result = session.run("MATCH (c:Case) WHERE c.embedding IS NOT NULL RETURN c.embedding AS embedding")
+        embeddings = [record["embedding"] for record in result if record["embedding"] is not None]
+
+        if not embeddings:
+            return None
+        return np.array(embeddings)
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]:
@@ -648,11 +658,18 @@ if uploaded_file:
                 st.write(embedding)
 
                 # === ASD Prediction ===
+                # === ASD Prediction ===
                 if 'asd_model' in st.session_state:
-                    with st.spinner("Predicting ASD traits..."):
+                     with st.spinner("Predicting ASD traits..."):
                         model = st.session_state['asd_model']
                         if len(embedding.shape) == 1:
                             embedding = embedding.reshape(1, -1)
+        
+                        # ✅ Ασφάλεια για συμβατότητα διαστάσεων
+                        if model.n_features_in_ != embedding.shape[1]:
+                         st.error(f"❌ Model expects {model.n_features_in_} features but got {embedding.shape[1]}")
+                        st.stop()
+
                         proba = model.predict_proba(embedding)[0][1]
                         prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
 
