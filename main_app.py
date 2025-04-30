@@ -582,11 +582,13 @@ if question:
 
 # === Graph Embeddings Section ===
 st.header("🌐 Graph Embeddings")
-if st.button("🔄 Generate Graph Embeddings"):
-    if generate_graph_embeddings():
-        st.success("Graph embeddings generated successfully!")
-    else:
-        st.error("Failed to generate graph embeddings. Check logs for details.")
+if st.button("🔁 Recalculate All Embeddings (Full Graph)"):
+    with st.spinner("Re-generating embeddings for the entire graph..."):
+        success = generate_graph_embeddings()
+        if success:
+            st.success("✅ All embeddings updated successfully!")
+        else:
+            st.error("❌ Failed to regenerate graph embeddings.")
 
 # === Model Training Section ===
 st.header("🤖 ASD Detection Model")
