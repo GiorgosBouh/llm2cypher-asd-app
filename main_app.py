@@ -398,8 +398,15 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Load labels from CSV and embeddings from Neo4j by Case_No"""
     df = pd.read_csv(file_path, delimiter=";")
-    df = df.replace(",", ".", regex=True)
-    
+   # Αντικατέστησε κόμμα με τελεία σε όλα τα string πεδία
+    df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
+
+    # Μετατροπή αριθμητικών στηλών σε float
+    numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     if "Class_ASD_Traits" not in df.columns or "Case_No" not in df.columns:
         st.error("CSV must contain columns 'Class_ASD_Traits' and 'Case_No'")
         return pd.DataFrame(), pd.Series()
@@ -472,6 +479,9 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         # --- Load the training CSV ---
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
         df = pd.read_csv(csv_url, delimiter=";")
+        df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
+        for col in [f"A{i}" for i in range(1, 11)]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
         df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", "")
 
         # --- Clean Data ---
