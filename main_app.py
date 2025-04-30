@@ -396,8 +396,9 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
 
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
-    """Load labels from CSV and embeddings from Neo4j by Case_No"""
-    df = pd.read_csv(file_path, delimiter=";")
+    df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
+    df.columns = [col.strip() for col in df.columns]
+   
    # Αντικατέστησε κόμμα με τελεία σε όλα τα string πεδία
     df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
 
