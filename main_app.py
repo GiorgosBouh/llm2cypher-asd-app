@@ -653,8 +653,8 @@ if uploaded_file:
         
                         # ✅ Ασφάλεια για συμβατότητα διαστάσεων
                         if model.n_features_in_ != embedding.shape[1]:
-                         st.error(f"❌ Model expects {model.n_features_in_} features but got {embedding.shape[1]}")
-                        st.stop()
+                            st.error(f"❌ Model expects {model.n_features_in_} features but got {embedding.shape[1]}")
+                            st.stop()
 
                         proba = model.predict_proba(embedding)[0][1]
                         prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
