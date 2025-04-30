@@ -646,15 +646,28 @@ if uploaded_file:
                 # === ASD Prediction ===
                 # === ASD Prediction ===
                 if 'asd_model' in st.session_state:
-                     with st.spinner("Predicting ASD traits..."):
+                    with st.spinner("Predicting ASD traits..."):
                         model = st.session_state['asd_model']
                         if len(embedding.shape) == 1:
                             embedding = embedding.reshape(1, -1)
-        
-                        # ✅ Ασφάλεια για συμβατότητα διαστάσεων
+
+                # === DEBUGGING BLOCK ===
+                        st.subheader("🧪 DEBUG: Embedding Inspection")
+                        st.write("✅ Embedding Shape:", embedding.shape)
+                        st.write("✅ Embedding Preview:", embedding.tolist())
+
+                        st.write("✅ Model Expected Features:", model.n_features_in_)
                         if model.n_features_in_ != embedding.shape[1]:
-                            st.error(f"❌ Model expects {model.n_features_in_} features but got {embedding.shape[1]}")
+                            st.error(f"❌ Feature Mismatch: Model expects {model.n_features_in_} features, got {embedding.shape[1]}")
                             st.stop()
+
+                # Check similarity to existing embeddings
+                        all_embeddings = get_existing_embeddings()
+                        if all_embeddings is not None:
+                            from sklearn.metrics.pairwise import cosine_similarity
+                            sim = cosine_similarity(embedding, all_embeddings)
+                            st.write("🔍 Max Similarity to Existing Embeddings:", np.max(sim))
+                            st.write("🔍 Mean Similarity to Existing Embeddings:", np.mean(sim))
 
                         proba = model.predict_proba(embedding)[0][1]
                         prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
