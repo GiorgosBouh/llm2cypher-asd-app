@@ -471,6 +471,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         # --- Load the training CSV ---
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
         df = pd.read_csv(csv_url, delimiter=";")
+        df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", "")
 
         # --- Clean Data ---
         required_columns = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD", "Who_completed_the_test", "Class_ASD_Traits"]
