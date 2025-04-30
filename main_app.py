@@ -473,38 +473,24 @@ def extract_training_data_from_csv(csv_path: str) -> Tuple[pd.DataFrame, pd.Seri
         logger.error(f"CSV read error: {e}")
         return pd.DataFrame(), pd.Series()
 
-@st.cache_resource(show_spinner="Training ASD detection model...")
+@st.cache_resource(show_spinner="Training ASD detection model (with embeddings)...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     try:
-        # --- Load the training CSV ---
+        # URL του CSV με τις ετικέτες
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-        df = pd.read_csv(csv_url, delimiter=";")
-        df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
-        for col in [f"A{i}" for i in range(1, 11)]:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-        df.columns = df.columns.str.strip().str.replace('"', '').str.replace("'", "")
 
-        # --- Clean Data ---
-        required_columns = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD", "Who_completed_the_test", "Class_ASD_Traits"]
-        missing_cols = [col for col in required_columns if col not in df.columns]
-        if missing_cols:
-            st.error(f"Missing columns: {', '.join(missing_cols)}")
+        # 📥 Φόρτωσε τα embeddings και τις ετικέτες από το Neo4j και το CSV
+        X, y = extract_training_data_from_csv(csv_url)
+
+        if X.empty or y.empty:
+            st.error("⚠️ Δεν υπάρχουν embeddings ή labels για εκπαίδευση.")
             return None
 
-        # Convert labels
-        df['label'] = df['Class_ASD_Traits'].apply(lambda x: 1 if str(x).strip().lower() == 'yes' else 0)
-
-        # Select features (Q-Chat-10 Questions only)
-        X = df[[f"A{i}" for i in range(1, 11)]].copy()
-        y = df['label']
-
-        # Handle any missing values
-        X = X.fillna(0)
-
-        # --- Split dataset ---
+        # 📊 Εμφάνισε κατανομή τάξεων
         st.subheader("📊 Class Distribution")
         st.write(Counter(y))
 
+        # ✂️ Split
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
             test_size=Config.TEST_SIZE,
@@ -512,7 +498,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
             random_state=Config.RANDOM_STATE
         )
 
-        # --- Build Pipeline ---
+        # 🧪 Χτίσε Pipeline
         pipeline = Pipeline([
             ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy='auto')),
             ('classifier', RandomForestClassifier(
@@ -522,12 +508,12 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
             ))
         ])
 
-        # --- Train Model ---
+        # 🧠 Εκπαίδευσε
         pipeline.fit(X_train, y_train)
         y_pred = pipeline.predict(X_test)
         y_proba = pipeline.predict_proba(X_test)[:, 1]
 
-        # --- Evaluate Model ---
+        # 📈 Αξιολόγηση
         st.subheader("📈 Model Evaluation")
         col1, col2 = st.columns(2)
         with col1:
@@ -537,6 +523,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
             st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
             st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
+        # 📉 Καμπύλες
         plot_combined_curves(y_test, y_proba)
 
         return pipeline.named_steps['classifier']
