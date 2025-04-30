@@ -636,7 +636,8 @@ if uploaded_file:
             insert_user_case(row, upload_id)
 
         with st.spinner("Generating embedding for new case..."):
-            if generate_embedding_for_node(upload_id):
+                # ✅ Αντί για generate_embedding_for_node:
+            if generate_graph_embeddings():
                 embedding = extract_user_embedding(upload_id)
                 if embedding is None:
                     st.error("Failed to generate embedding for the new case")
