@@ -26,6 +26,8 @@ from node2vec import Node2Vec
 import networkx as nx
 import tempfile
 import shutil
+from io import StringIO
+import requests
 
 # === Configuration ===
 class Config:
@@ -35,13 +37,15 @@ class Config:
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
-    NODE2VEC_WALK_LENGTH = 20  # Reduced for faster processing
-    NODE2VEC_NUM_WALKS = 50    # Reduced for faster processing
-    NODE2VEC_WORKERS = 1       # Single worker for reliability
+    NODE2VEC_WALK_LENGTH = 20
+    NODE2VEC_NUM_WALKS = 50
+    NODE2VEC_WORKERS = 1
     NODE2VEC_P = 1
     NODE2VEC_Q = 1
-    EMBEDDING_BATCH_SIZE = 50  # Smaller batches for reliability
-    MAX_RELATIONSHIPS = 100000 # Safety limit for large graphs
+    EMBEDDING_BATCH_SIZE = 50
+    MAX_RELATIONSHIPS = 100000
+    LOCAL_DATA_PATH = "Toddler_Autism_dataset_July_2018_2.csv"
+    DATA_URL = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -152,6 +156,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> None:
         for query, params in queries:
             session.run(query, **params)
         logger.info(f"Successfully inserted case {upload_id}")
+
 @safe_neo4j_operation
 def generate_embedding_for_node(upload_id: str) -> bool:
     """Generate embedding only for the new case node."""
@@ -211,6 +216,7 @@ def generate_graph_embeddings() -> bool:
         with neo4j_service.session() as session:
             session.run("MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait) DELETE r")
             logger.info("🔒 Removed SCREENED_FOR relationships to prevent label leakage")
+        
         # Create temp directory
         temp_dir = tempfile.mkdtemp(prefix="node2vec_")
         logger.info(f"Created temp directory at {temp_dir}")
@@ -221,7 +227,7 @@ def generate_graph_embeddings() -> bool:
         
         with neo4j_service.session() as session:
             # Get nodes first
-            node_result = session.run("MATCH (n)RETURN elementId(n) AS node_id")
+            node_result = session.run("MATCH (n) RETURN elementId(n) AS node_id")
             node_ids = [record["node_id"] for record in node_result]
             
             if not node_ids:
@@ -279,8 +285,8 @@ def generate_graph_embeddings() -> bool:
             window=5,
             min_count=1,
             batch_words=4,
-            epochs=1  # ✅ Use `epochs` instead of `iter`
-    )
+            epochs=1
+        )
         
         if time.time() - start_time > timeout:
             raise TimeoutError("Embedding generation timed out after 10 minutes")
@@ -394,92 +400,84 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
             return np.array(record["embedding"]).reshape(1, -1)  # Reshape for sklearn
         return None
 
-@safe_neo4j_operation
-def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
-    """Load labels from CSV and embeddings from Neo4j by Case_No"""
+@st.cache_data(ttl=3600)
+def load_dataset():
+    """Load dataset with caching and fallback options"""
     try:
-        df = pd.read_csv(file_path, delimiter=";")
+        # Try local file first
+        if os.path.exists(Config.LOCAL_DATA_PATH):
+            return pd.read_csv(Config.LOCAL_DATA_PATH, delimiter=";")
         
-        # Clean the data - replace commas with dots in all string fields
-        df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
-        
-        # Convert numeric columns
-        numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce")
-        
-        # Check for required columns
-        if "Class_ASD_Traits" not in df.columns:
-            # Try alternative column names
-            alt_names = ["Class/ASD Traits", "ASD_Traits", "ASD", "Class"]
-            found = False
-            for alt in alt_names:
-                if alt in df.columns:
-                    df["Class_ASD_Traits"] = df[alt]
-                    found = True
-                    break
-            
-            if not found:
-                st.error("CSV must contain a column for ASD classification (e.g., 'Class_ASD_Traits')")
-                return pd.DataFrame(), pd.Series()
-
-        if "Case_No" not in df.columns:
-            # Try to find an alternative ID column
-            alt_ids = ["ID", "Id", "case_no", "Case_ID"]
-            found = False
-            for alt in alt_ids:
-                if alt in df.columns:
-                    df["Case_No"] = df[alt]
-                    found = True
-                    break
-            
-            if not found:
-                st.error("CSV must contain a case identifier column (e.g., 'Case_No')")
-                return pd.DataFrame(), pd.Series()
-
-        # Convert ASD labels to binary
-        y = df["Class_ASD_Traits"].apply(
-            lambda x: 1 if str(x).strip().lower() in ["yes", "1", "true"] else 0
-        )
-        
-        # Get embeddings from Neo4j
-        embeddings = []
-        missing_cases = []
-        
-        with neo4j_service.session() as session:
-            for case_no in df["Case_No"]:
-                try:
-                    case_no_int = int(float(case_no))  # Handle potential float case numbers
-                    result = session.run(
-                        "MATCH (c:Case {id: $id}) RETURN c.embedding AS embedding",
-                        id=case_no_int
-                    )
-                    record = result.single()
-                    if record and record["embedding"]:
-                        embeddings.append(record["embedding"])
-                    else:
-                        missing_cases.append(case_no_int)
-                        logger.warning(f"No embedding found for case ID {case_no_int}")
-                except Exception as e:
-                    logger.error(f"Error processing case {case_no}: {str(e)}")
-                    missing_cases.append(case_no)
-        
-        if not embeddings:
-            st.error("⚠️ No embeddings found for any of the cases.")
-            if missing_cases:
-                st.error(f"Missing embeddings for cases: {missing_cases}")
-            return pd.DataFrame(), pd.Series()
-        
-        if missing_cases:
-            st.warning(f"⚠️ Missing embeddings for {len(missing_cases)} cases")
-        
-        return pd.DataFrame(embeddings), y
-
+        # Fallback to GitHub with caching
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(Config.DATA_URL, headers=headers)
+        response.raise_for_status()
+        return pd.read_csv(StringIO(response.text), delimiter=";")
     except Exception as e:
-        st.error(f"Error loading CSV: {str(e)}")
-        logger.error(f"Error in extract_training_data_from_csv: {str(e)}", exc_info=True)
+        st.error(f"Failed to load dataset: {e}")
+        logger.error(f"Dataset loading failed: {e}")
+        return None
+
+@safe_neo4j_operation
+def extract_training_data() -> Tuple[pd.DataFrame, pd.Series]:
+    """Load labels and embeddings for training"""
+    df = load_dataset()
+    if df is None:
         return pd.DataFrame(), pd.Series()
+
+    # Clean and convert data
+    df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
+    
+    numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Flexible column matching
+    if "Class_ASD_Traits" not in df.columns:
+        for col in df.columns:
+            if "ASD" in col or "Class" in col:
+                df["Class_ASD_Traits"] = df[col]
+                break
+        else:
+            st.error("Could not find ASD classification column")
+            return pd.DataFrame(), pd.Series()
+
+    if "Case_No" not in df.columns:
+        for col in df.columns:
+            if "Case" in col or "ID" in col:
+                df["Case_No"] = df[col]
+                break
+        else:
+            st.error("Could not find case ID column")
+            return pd.DataFrame(), pd.Series()
+
+    y = df["Class_ASD_Traits"].apply(
+        lambda x: 1 if str(x).strip().lower() in ["yes", "1", "true"] else 0
+    )
+    embeddings = []
+
+    with neo4j_service.session() as session:
+        for case_no in df["Case_No"]:
+            try:
+                case_id = int(float(case_no))
+                result = session.run(
+                    "MATCH (c:Case {id: $id}) RETURN c.embedding AS embedding",
+                    id=case_id
+                )
+                record = result.single()
+                if record and record["embedding"]:
+                    embeddings.append(record["embedding"])
+                else:
+                    logger.warning(f"No embedding found for case ID {case_no}")
+            except Exception as e:
+                logger.error(f"Error processing case {case_no}: {e}")
+
+    if not embeddings:
+        st.error("No embeddings found for training cases")
+        return pd.DataFrame(), pd.Series()
+
+    return pd.DataFrame(embeddings), y
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     """Plots ROC and Precision-Recall curves side by side."""
@@ -506,25 +504,17 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
 
     st.pyplot(fig)
 
-
-@st.cache_resource(show_spinner="Training ASD detection model (with embeddings)...")
+@st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
     try:
-        # URL του CSV με τις ετικέτες
-        csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-
-        # 📥 Φόρτωσε τα embeddings και τις ετικέτες από το Neo4j και το CSV
-        X, y = extract_training_data_from_csv(csv_url)
-
+        X, y = extract_training_data()
         if X.empty or y.empty:
-            st.error("⚠️ Δεν υπάρχουν embeddings ή labels για εκπαίδευση.")
+            st.error("No training data available")
             return None
 
-        # 📊 Εμφάνισε κατανομή τάξεων
-        st.subheader("📊 Class Distribution")
+        st.subheader("Class Distribution")
         st.write(Counter(y))
 
-        # ✂️ Split
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
             test_size=Config.TEST_SIZE,
@@ -532,9 +522,8 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
             random_state=Config.RANDOM_STATE
         )
 
-        # 🧪 Χτίσε Pipeline
         pipeline = Pipeline([
-            ('smote', SMOTE(random_state=Config.RANDOM_STATE, sampling_strategy='auto')),
+            ('smote', SMOTE(random_state=Config.RANDOM_STATE)),
             ('classifier', RandomForestClassifier(
                 n_estimators=Config.N_ESTIMATORS,
                 random_state=Config.RANDOM_STATE,
@@ -542,13 +531,11 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
             ))
         ])
 
-        # 🧠 Εκπαίδευσε
         pipeline.fit(X_train, y_train)
         y_pred = pipeline.predict(X_test)
         y_proba = pipeline.predict_proba(X_test)[:, 1]
 
-        # 📈 Αξιολόγηση
-        st.subheader("📈 Model Evaluation")
+        st.subheader("Model Evaluation")
         col1, col2 = st.columns(2)
         with col1:
             st.metric("ROC AUC", f"{roc_auc_score(y_test, y_proba):.3f}")
@@ -557,15 +544,15 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
             st.metric("F1 Score", f"{classification_report(y_test, y_pred, output_dict=True)['1']['f1-score']:.3f}")
             st.metric("Accuracy", f"{classification_report(y_test, y_pred, output_dict=True)['accuracy']:.3f}")
 
-        # 📉 Καμπύλες
         plot_combined_curves(y_test, y_proba)
 
         return pipeline.named_steps['classifier']
 
     except Exception as e:
-        st.error(f"❌ Error training model: {e}")
-        logger.error(f"❌ Error in train_asd_detection_model: {e}", exc_info=True)
+        st.error(f"Error training model: {e}")
+        logger.error(f"Training error: {e}", exc_info=True)
         return None
+
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
     """Returns all existing case node embeddings from the graph."""
@@ -596,6 +583,18 @@ def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]
     iso_forest.fit(embeddings_scaled)
 
     return iso_forest, scaler
+
+def validate_csv(df: pd.DataFrame) -> bool:
+    """Validate uploaded CSV file"""
+    required_columns = [f"A{i}" for i in range(1, 11)] + [
+        "Sex", "Ethnicity", "Jaundice",
+        "Family_mem_with_ASD", "Who_completed_the_test"
+    ]
+    missing_cols = [col for col in required_columns if col not in df.columns]
+    if missing_cols:
+        st.error(f"Missing required columns: {', '.join(missing_cols)}")
+        return False
+    return True
 
 # === Streamlit UI ===
 st.title("🧠 NeuroCypher ASD")
@@ -649,18 +648,6 @@ if st.button("🔄 Train/Refresh Model"):
 st.header("📄 Upload New Case")
 uploaded_file = st.file_uploader("Upload CSV for single child prediction", type="csv")
 
-def validate_csv(df: pd.DataFrame) -> bool:
-    required_columns = [f"A{i}" for i in range(1, 11)] + [
-        "Sex", "Ethnicity", "Jaundice",
-        "Family_mem_with_ASD", "Who_completed_the_test"
-    ]
-    missing_cols = [col for col in required_columns if col not in df.columns]
-    if missing_cols:
-        st.error(f"Missing required columns: {', '.join(missing_cols)}")
-        return False
-    return True
-
-# === CSV Upload ===
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file, delimiter=";")
@@ -692,17 +679,15 @@ if uploaded_file:
                 st.write(embedding)
 
                 # === ASD Prediction ===
-                # === ASD Prediction ===
                 if 'asd_model' in st.session_state:
-                     with st.spinner("Predicting ASD traits..."):
+                    with st.spinner("Predicting ASD traits..."):
                         model = st.session_state['asd_model']
                         if len(embedding.shape) == 1:
                             embedding = embedding.reshape(1, -1)
         
-                        # ✅ Ασφάλεια για συμβατότητα διαστάσεων
                         if model.n_features_in_ != embedding.shape[1]:
-                         st.error(f"❌ Model expects {model.n_features_in_} features but got {embedding.shape[1]}")
-                        st.stop()
+                            st.error(f"Model expects {model.n_features_in_} features but got {embedding.shape[1]}")
+                            st.stop()
 
                         proba = model.predict_proba(embedding)[0][1]
                         prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
