@@ -398,6 +398,7 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Load labels from CSV and embeddings from Neo4j by Case_No"""
     df = pd.read_csv(file_path, delimiter=";")
+    df = df.replace(",", ".", regex=True)
     
     if "Class_ASD_Traits" not in df.columns or "Case_No" not in df.columns:
         st.error("CSV must contain columns 'Class_ASD_Traits' and 'Case_No'")
