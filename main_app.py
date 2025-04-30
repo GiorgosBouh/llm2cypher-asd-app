@@ -397,40 +397,89 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Load labels from CSV and embeddings from Neo4j by Case_No"""
-    df = pd.read_csv(file_path, delimiter=";")
-   # Αντικατέστησε κόμμα με τελεία σε όλα τα string πεδία
-    df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
+    try:
+        df = pd.read_csv(file_path, delimiter=";")
+        
+        # Clean the data
+        df = df.applymap(lambda x: str(x).replace(",", ".")  # Replace commas with dots in all fields
+        
+        # Convert numeric columns
+        numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        
+        # Check for required columns
+        if "Class_ASD_Traits" not in df.columns:
+            # Try alternative column names
+            alt_names = ["Class/ASD Traits", "ASD_Traits", "ASD", "Class"]
+            found = False
+            for alt in alt_names:
+                if alt in df.columns:
+                    df["Class_ASD_Traits"] = df[alt]
+                    found = True
+                    break
+            
+            if not found:
+                st.error("CSV must contain a column for ASD classification (e.g., 'Class_ASD_Traits')")
+                return pd.DataFrame(), pd.Series()
 
-    # Μετατροπή αριθμητικών στηλών σε float
-    numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+        if "Case_No" not in df.columns:
+            # Try to find an alternative ID column
+            alt_ids = ["ID", "Id", "case_no", "Case_ID"]
+            found = False
+            for alt in alt_ids:
+                if alt in df.columns:
+                    df["Case_No"] = df[alt]
+                    found = True
+                    break
+            
+            if not found:
+                st.error("CSV must contain a case identifier column (e.g., 'Case_No')")
+                return pd.DataFrame(), pd.Series()
 
-    if "Class_ASD_Traits" not in df.columns or "Case_No" not in df.columns:
-        st.error("CSV must contain columns 'Class_ASD_Traits' and 'Case_No'")
+        # Convert ASD labels to binary
+        y = df["Class_ASD_Traits"].apply(
+            lambda x: 1 if str(x).strip().lower() in ["yes", "1", "true"] else 0
+        )
+        
+        # Get embeddings from Neo4j
+        embeddings = []
+        missing_cases = []
+        
+        with neo4j_service.session() as session:
+            for case_no in df["Case_No"]:
+                try:
+                    case_no_int = int(float(case_no))  # Handle potential float case numbers
+                    result = session.run(
+                        "MATCH (c:Case {id: $id}) RETURN c.embedding AS embedding",
+                        id=case_no_int
+                    )
+                    record = result.single()
+                    if record and record["embedding"]:
+                        embeddings.append(record["embedding"])
+                    else:
+                        missing_cases.append(case_no_int)
+                        logger.warning(f"No embedding found for case ID {case_no_int}")
+                except Exception as e:
+                    logger.error(f"Error processing case {case_no}: {str(e)}")
+                    missing_cases.append(case_no)
+        
+        if not embeddings:
+            st.error("⚠️ No embeddings found for any of the cases.")
+            if missing_cases:
+                st.error(f"Missing embeddings for cases: {missing_cases}")
+            return pd.DataFrame(), pd.Series()
+        
+        if missing_cases:
+            st.warning(f"⚠️ Missing embeddings for {len(missing_cases)} cases")
+        
+        return pd.DataFrame(embeddings), y
+
+    except Exception as e:
+        st.error(f"Error loading CSV: {str(e)}")
+        logger.error(f"Error in extract_training_data_from_csv: {str(e)}", exc_info=True)
         return pd.DataFrame(), pd.Series()
-
-    y = df["Class_ASD_Traits"].apply(lambda x: 1 if str(x).strip().lower() == "yes" else 0)
-    embeddings = []
-
-    with neo4j_service.session() as session:
-        for case_no in df["Case_No"]:
-            result = session.run(
-                "MATCH (c:Case {id: $id}) RETURN c.embedding AS embedding",
-                id=int(case_no)
-            )
-            record = result.single()
-            if record and record["embedding"]:
-                embeddings.append(record["embedding"])
-            else:
-                logger.warning(f"No embedding found for case ID {case_no}")
-    
-    if not embeddings:
-        st.error("⚠️ No embeddings found for any of the cases.")
-        return pd.DataFrame(), pd.Series()
-
-    return pd.DataFrame(embeddings), y
 
 def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     """Plots ROC and Precision-Recall curves side by side."""
