@@ -566,7 +566,7 @@ uploaded_file = st.file_uploader("Upload CSV for single child prediction", type=
 
 def validate_csv(df: pd.DataFrame) -> bool:
     required_columns = [f"A{i}" for i in range(1, 11)] + [
-        "Sex", "Ethnicity", "Jaundice",
+        "Sex", "Ethnicity", "Jaundice", 
         "Family_mem_with_ASD", "Who_completed_the_test"
     ]
     missing_cols = [col for col in required_columns if col not in df.columns]
@@ -575,36 +575,32 @@ def validate_csv(df: pd.DataFrame) -> bool:
         return False
     return True
 
-# === CSV Upload ===
 if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file, delimiter=";")
-
         if not validate_csv(df):
             st.stop()
-
+            
         if len(df) != 1:
             st.error("Please upload exactly one row (one child)")
             st.stop()
-
-        st.subheader("👀 CSV Preview")
-        st.dataframe(df.T)
-
+            
         row = df.iloc[0]
         upload_id = str(uuid.uuid4())
         st.session_state["last_upload_id"] = upload_id
 
+        # Insert case
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
-        # 🌐 Recompute full-graph embeddings (includes new case)
-        with st.spinner("Recalculating full-graph embeddings..."):
+        # Generate full-graph embeddings
+        with st.spinner("Generating full-graph embeddings..."):
             success = generate_graph_embeddings()
             if not success:
                 st.error("❌ Failed to generate full-graph embeddings.")
                 st.stop()
 
-        # 🧠 Extract the embedding for the new case
+        # Extract embedding for new case
         embedding = extract_user_embedding()
         if embedding is None:
             st.error("❌ Failed to extract embedding for the new case")
@@ -613,54 +609,32 @@ if uploaded_file:
         st.subheader("🧠 Graph Embedding")
         st.write(embedding)
 
-        # === ASD Prediction ===
+        # ASD Prediction
         if 'asd_model' in st.session_state:
             with st.spinner("Predicting ASD traits..."):
                 model = st.session_state['asd_model']
-                if len(embedding.shape) == 1:
-                    embedding = embedding.reshape(1, -1)
-
-                st.subheader("🧪 DEBUG: Embedding Inspection")
-                st.write("✅ Embedding Shape:", embedding.shape)
-                st.write("✅ Embedding Preview:", embedding.tolist())
-                st.write("✅ Model Expected Features:", model.n_features_in_)
-
-                if model.n_features_in_ != embedding.shape[1]:
-                    st.error(f"❌ Feature Mismatch: Model expects {model.n_features_in_} features, got {embedding.shape[1]}")
-                    st.stop()
-
-                from sklearn.metrics.pairwise import cosine_similarity
-                all_embeddings = get_existing_embeddings()
-                if all_embeddings is not None:
-                    sim = cosine_similarity(embedding, all_embeddings)
-                    st.write("🔍 Max Similarity to Existing Embeddings:", np.max(sim))
-                    st.write("🔍 Mean Similarity to Existing Embeddings:", np.mean(sim))
-
-                proba = model.predict_proba(embedding)[0][1]
+                proba = model.predict_proba([embedding])[0][1]
                 prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
 
                 st.subheader("🔍 Prediction Result")
                 col1, col2 = st.columns(2)
                 col1.metric("Prediction", prediction)
-                col2.metric("Confidence", f"{max(proba, 1 - proba):.1%}")
+                col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
 
-                case_key = st.session_state.get("last_upload_id", "default_key")
+                # Show probability distribution
                 fig = px.bar(
                     x=["Control", "ASD Traits"],
-                    y=[1 - proba, proba],
+                    y=[1-proba, proba],
                     labels={'x': 'Class', 'y': 'Probability'},
                     title="Prediction Probabilities"
                 )
-                st.plotly_chart(fig, key=f"prediction_bar_{case_key}")
+                st.plotly_chart(fig)
 
-        # === Anomaly Detection ===
+        # Anomaly Detection
         with st.spinner("Checking for anomalies..."):
-            iso_forest_scaler = train_isolation_forest()
-            if iso_forest_scaler:
-                iso_forest, scaler = iso_forest_scaler
-                if len(embedding.shape) == 1:
-                    embedding = embedding.reshape(1, -1)
-                embedding_scaled = scaler.transform(embedding)
+            iso_forest = train_isolation_forest()
+            if iso_forest and "iso_scaler" in st.session_state:
+                embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
                 anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
                 is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
@@ -670,9 +644,10 @@ if uploaded_file:
                 else:
                     st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
 
+                # Anomaly score distribution visualization
                 all_embeddings = get_existing_embeddings()
                 if all_embeddings is not None:
-                    all_embeddings_scaled = scaler.transform(all_embeddings)
+                    all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
                     scores = iso_forest.decision_function(all_embeddings_scaled)
 
                     fig = px.histogram(
@@ -682,10 +657,10 @@ if uploaded_file:
                         title="Anomaly Score Distribution"
                     )
                     fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                    st.plotly_chart(fig, key=f"anomaly_hist_{case_key}")
+                    st.plotly_chart(fig)
             else:
-                st.info("Anomaly detection model not trained yet or insufficient data.")
+                st.error("Anomaly detection model or scaler not available.")
 
     except Exception as e:
-        st.error(f"❌ Error processing file: {e}")
-        logger.error(f"❌ Exception during upload processing: {e}")
+        st.error(f"Error processing file: {e}")
+        logger.error(f"Error processing file: {e}")
