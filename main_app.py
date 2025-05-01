@@ -381,14 +381,15 @@ Always use `toLower()` for case-insensitive value matching (e.g., toLower(d.valu
         logger.error(f"OpenAI API error: {e}")
         return None
 
-with neo4j_service.session() as session:
-    result = session.run("MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding", upload_id=upload_id)
-    record = result.single()
-    st.write("🧠 Extracted Embedding:", record)
-
 @safe_neo4j_operation
-def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
-    """Extracts the embedding for a specific case."""
+def extract_user_embedding() -> Optional[np.ndarray]:
+    """Extracts the embedding for the most recently uploaded case."""
+    upload_id = st.session_state.get("last_upload_id")
+
+    if not upload_id:
+        st.error("❌ No upload ID found in session state.")
+        return None
+
     with neo4j_service.session() as session:
         result = session.run(
             "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
@@ -396,7 +397,7 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
         )
         record = result.single()
         if record and record["embedding"] is not None:
-            return np.array(record["embedding"]).reshape(1, -1)  # Reshape for sklearn
+            return np.array(record["embedding"]).reshape(1, -1)
         return None
 
 @safe_neo4j_operation
@@ -636,13 +637,14 @@ if uploaded_file:
 
         row = df.iloc[0]
         upload_id = str(uuid.uuid4())  # ✅ Δημιουργία μοναδικού ID για το νέο case
+        st.session_state["last_upload_id"] = upload_id
 
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
         with st.spinner("Generating embedding for new case..."):
             if generate_embedding_for_node(upload_id):  # ✅ ΜΟΝΟ το νέο case
-                embedding = extract_user_embedding(upload_id)
+                embedding = extract_user_embedding()
                 if embedding is None:
                     st.error("Failed to generate embedding for the new case")
                     st.stop()
@@ -681,13 +683,14 @@ if uploaded_file:
                         col1.metric("Prediction", prediction)
                         col2.metric("Confidence", f"{max(proba, 1 - proba):.1%}")
 
+                        case_key = st.session_state.get("last_upload_id", "default_key")
                         fig = px.bar(
                             x=["Control", "ASD Traits"],
                             y=[1 - proba, proba],
                             labels={'x': 'Class', 'y': 'Probability'},
                             title="Prediction Probabilities"
                         )
-                        st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
+                        st.plotly_chart(fig, key=f"prediction_bar_{case_key}")
 
                 # === Anomaly Detection ===
                 with st.spinner("Checking for anomalies..."):
@@ -718,12 +721,11 @@ if uploaded_file:
                                 title="Anomaly Score Distribution"
                             )
                             fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                            st.plotly_chart(fig, key=f"anomaly_hist_{upload_id}")
+                            st.plotly_chart(fig, key=f"anomaly_hist_{case_key}")
                     else:
                         st.info("Anomaly detection model not trained yet or insufficient data.")
             else:
                 st.error("❌ Failed to generate embedding for the new case.")
-
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
         logger.error(f"❌ Exception during upload processing: {e}")
