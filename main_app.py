@@ -598,21 +598,7 @@ if uploaded_file:
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
-        # 🌐 Recompute full-graph embeddings
-        with st.spinner("Recalculating full-graph embeddings..."):
-            success = generate_graph_embeddings()
-            if not success:
-                st.error("❌ Failed to generate full-graph embeddings.")
-                st.stop()
-
-        # 🔍 Extract embedding for this specific case
-        embedding = extract_user_embedding()
-        if embedding is None:
-            st.error("❌ Failed to extract embedding for the new case")
-            st.stop()
-
-        st.subheader("🧠 Graph Embedding")
-        st.write(embedding)
+        
 
         # === ASD Prediction ===
         if 'asd_model' in st.session_state:
