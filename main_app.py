@@ -381,6 +381,11 @@ Always use `toLower()` for case-insensitive value matching (e.g., toLower(d.valu
         logger.error(f"OpenAI API error: {e}")
         return None
 
+with neo4j_service.session() as session:
+    result = session.run("MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding", upload_id=upload_id)
+    record = result.single()
+    st.write("🧠 Extracted Embedding:", record)
+
 @safe_neo4j_operation
 def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
     """Extracts the embedding for a specific case."""
@@ -636,7 +641,7 @@ if uploaded_file:
             insert_user_case(row, upload_id)
 
         with st.spinner("Generating embedding for new case..."):
-            if generate_embedding_for_node(upload_id):
+            if generate_embedding_for_node(upload_id):  # ✅ Σωστό
                 embedding = extract_user_embedding(upload_id)
                 if embedding is None:
                     st.error("Failed to generate embedding for the new case")
