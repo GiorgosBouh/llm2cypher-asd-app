@@ -635,13 +635,13 @@ if uploaded_file:
         st.dataframe(df.T)
 
         row = df.iloc[0]
-        upload_id = str(uuid.uuid4())
+        upload_id = str(uuid.uuid4())  # ✅ Δημιουργία μοναδικού ID για το νέο case
 
         with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
         with st.spinner("Generating embedding for new case..."):
-            if generate_embedding_for_node(upload_id):  # ✅ Σωστό
+            if generate_embedding_for_node(upload_id):  # ✅ ΜΟΝΟ το νέο case
                 embedding = extract_user_embedding(upload_id)
                 if embedding is None:
                     st.error("Failed to generate embedding for the new case")
@@ -651,14 +651,12 @@ if uploaded_file:
                 st.write(embedding)
 
                 # === ASD Prediction ===
-                # === ASD Prediction ===
                 if 'asd_model' in st.session_state:
                     with st.spinner("Predicting ASD traits..."):
                         model = st.session_state['asd_model']
                         if len(embedding.shape) == 1:
                             embedding = embedding.reshape(1, -1)
 
-                # === DEBUGGING BLOCK ===
                         st.subheader("🧪 DEBUG: Embedding Inspection")
                         st.write("✅ Embedding Shape:", embedding.shape)
                         st.write("✅ Embedding Preview:", embedding.tolist())
@@ -668,7 +666,6 @@ if uploaded_file:
                             st.error(f"❌ Feature Mismatch: Model expects {model.n_features_in_} features, got {embedding.shape[1]}")
                             st.stop()
 
-                # Check similarity to existing embeddings
                         all_embeddings = get_existing_embeddings()
                         if all_embeddings is not None:
                             from sklearn.metrics.pairwise import cosine_similarity
@@ -725,7 +722,7 @@ if uploaded_file:
                     else:
                         st.info("Anomaly detection model not trained yet or insufficient data.")
             else:
-                st.error("Failed to generate embeddings after adding new case")
+                st.error("❌ Failed to generate embedding for the new case.")
 
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
