@@ -35,13 +35,13 @@ class Config:
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
-    NODE2VEC_WALK_LENGTH = 20  # Reduced for faster processing
-    NODE2VEC_NUM_WALKS = 50    # Reduced for faster processing
-    NODE2VEC_WORKERS = 1       # Single worker for reliability
+    NODE2VEC_WALK_LENGTH = 20
+    NODE2VEC_NUM_WALKS = 50
+    NODE2VEC_WORKERS = 1
     NODE2VEC_P = 1
     NODE2VEC_Q = 1
-    EMBEDDING_BATCH_SIZE = 50  # Smaller batches for reliability
-    MAX_RELATIONSHIPS = 100000 # Safety limit for large graphs
+    EMBEDDING_BATCH_SIZE = 50
+    MAX_RELATIONSHIPS = 100000
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -166,6 +166,7 @@ def generate_graph_embeddings() -> bool:
         with neo4j_service.session() as session:
             session.run("MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait) DELETE r")
             logger.info("🔒 Removed SCREENED_FOR relationships to prevent label leakage")
+        
         # Create temp directory
         temp_dir = tempfile.mkdtemp(prefix="node2vec_")
         logger.info(f"Created temp directory at {temp_dir}")
@@ -175,12 +176,16 @@ def generate_graph_embeddings() -> bool:
         progress_bar.progress(10)
         
         with neo4j_service.session() as session:
-            # Get nodes first
-            node_result = session.run("MATCH (n)RETURN elementId(n) AS node_id")
-            node_ids = [record["node_id"] for record in node_result]
+            # Get nodes with their upload_ids
+            node_result = session.run("""
+                MATCH (n) 
+                WHERE n.upload_id IS NOT NULL
+                RETURN elementId(n) AS node_id, n.upload_id AS upload_id
+            """)
+            node_data = [(record["node_id"], record["upload_id"]) for record in node_result]
             
-            if not node_ids:
-                st.error("No nodes found in the graph")
+            if not node_data:
+                st.error("No nodes with upload_ids found in the graph")
                 return False
                 
             # Get relationships with safety limit
@@ -192,11 +197,11 @@ def generate_graph_embeddings() -> bool:
             edges = [(record["source"], record["target"]) for record in rel_result]
 
         # Step 2: Create NetworkX graph
-        status_text.text(f"Step 2/4: Creating graph ({len(node_ids)} nodes, {len(edges)} edges)...")
+        status_text.text(f"Step 2/4: Creating graph ({len(node_data)} nodes, {len(edges)} edges)...")
         progress_bar.progress(30)
         
         G = nx.Graph()
-        G.add_nodes_from(node_ids)
+        G.add_nodes_from([node_id for node_id, _ in node_data])
         
         # Add edges in chunks to avoid memory issues
         chunk_size = 10000
@@ -234,41 +239,32 @@ def generate_graph_embeddings() -> bool:
             window=5,
             min_count=1,
             batch_words=4,
-            epochs=1  # ✅ Use `epochs` instead of `iter`
-    )
+            epochs=1
+        )
         
         if time.time() - start_time > timeout:
             raise TimeoutError("Embedding generation timed out after 10 minutes")
         
-        # Step 4: Store embeddings
+        # Step 4: Store embeddings using upload_id
         status_text.text("Step 4/4: Storing embeddings...")
         progress_bar.progress(70)
         
         with neo4j_service.session() as session:
-            total_nodes = len(node_ids)
+            total_nodes = len(node_data)
             processed = 0
             
-            for i in range(0, total_nodes, Config.EMBEDDING_BATCH_SIZE):
-                batch = node_ids[i:i + Config.EMBEDDING_BATCH_SIZE]
-                queries = []
+            for node_id, upload_id in node_data:
+                if str(node_id) in model.wv:
+                    embedding = model.wv[str(node_id)].tolist()
+                    session.run(
+                        """
+                        MATCH (n {upload_id: $upload_id})
+                        SET n.embedding = $embedding
+                        """,
+                        {"upload_id": upload_id, "embedding": embedding}
+                    )
                 
-                for node_id in batch:
-                    if str(node_id) in model.wv:
-                        embedding = model.wv[str(node_id)].tolist()
-                        queries.append((
-                            """
-                            MATCH (n)
-                            WHERE id(n) = $node_id
-                            SET n.embedding = $embedding
-                            """,
-                            {"node_id": node_id, "embedding": embedding}
-                        ))
-                
-                # Execute batch
-                for query, params in queries:
-                    session.run(query, **params)
-                
-                processed += len(batch)
+                processed += 1
                 progress = 70 + int(30 * (processed / total_nodes))
                 progress_bar.progress(min(progress, 99))
         
@@ -337,14 +333,8 @@ Always use `toLower()` for case-insensitive value matching (e.g., toLower(d.valu
         return None
 
 @safe_neo4j_operation
-def extract_user_embedding() -> Optional[np.ndarray]:
-    """Extracts the embedding for the most recently uploaded case."""
-    upload_id = st.session_state.get("last_upload_id")
-
-    if not upload_id:
-        st.error("❌ No upload ID found in session state.")
-        return None
-
+def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
+    """Extracts the embedding for the specified upload_id."""
     with neo4j_service.session() as session:
         result = session.run(
             "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
@@ -360,7 +350,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
     df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
     df.columns = [col.strip() for col in df.columns]
    
-   # Αντικατέστησε κόμμα με τελεία σε όλα τα string πεδία
+    # Αντικατέστησε κόμμα με τελεία σε όλα τα string πεδία
     df = df.applymap(lambda x: str(x).replace(",", ".") if isinstance(x, str) else x)
 
     # Μετατροπή αριθμητικών στηλών σε float
@@ -418,7 +408,6 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
     ax2.legend(loc='lower left')
 
     st.pyplot(fig)
-
 
 @st.cache_resource(show_spinner="Training ASD detection model (with embeddings)...")
 def train_asd_detection_model() -> Optional[RandomForestClassifier]:
@@ -479,6 +468,7 @@ def train_asd_detection_model() -> Optional[RandomForestClassifier]:
         st.error(f"❌ Error training model: {e}")
         logger.error(f"❌ Error in train_asd_detection_model: {e}", exc_info=True)
         return None
+
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
     """Returns all existing case node embeddings from the graph."""
@@ -601,10 +591,12 @@ if uploaded_file:
                 st.stop()
 
         # Extract embedding for new case
-        embedding = extract_user_embedding()
-        if embedding is None:
-            st.error("❌ Failed to extract embedding for the new case")
-            st.stop()
+        with st.spinner("Extracting embedding for new case..."):
+            embedding = extract_user_embedding(upload_id)
+            if embedding is None:
+                st.error("❌ Failed to extract embedding for the new case")
+                st.stop()
+            st.session_state['current_embedding'] = embedding
 
         st.subheader("🧠 Graph Embedding")
         st.write(embedding)
@@ -613,7 +605,7 @@ if uploaded_file:
         if 'asd_model' in st.session_state:
             with st.spinner("Predicting ASD traits..."):
                 model = st.session_state['asd_model']
-                proba = model.predict_proba([embedding])[0][1]
+                proba = model.predict_proba(embedding)[0][1]
                 prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
 
                 st.subheader("🔍 Prediction Result")
@@ -632,9 +624,10 @@ if uploaded_file:
 
         # Anomaly Detection
         with st.spinner("Checking for anomalies..."):
-            iso_forest = train_isolation_forest()
-            if iso_forest and "iso_scaler" in st.session_state:
-                embedding_scaled = st.session_state["iso_scaler"].transform([embedding])
+            iso_result = train_isolation_forest()
+            if iso_result:
+                iso_forest, scaler = iso_result
+                embedding_scaled = scaler.transform(embedding)
                 anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
                 is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
@@ -647,7 +640,7 @@ if uploaded_file:
                 # Anomaly score distribution visualization
                 all_embeddings = get_existing_embeddings()
                 if all_embeddings is not None:
-                    all_embeddings_scaled = st.session_state["iso_scaler"].transform(all_embeddings)
+                    all_embeddings_scaled = scaler.transform(all_embeddings)
                     scores = iso_forest.decision_function(all_embeddings_scaled)
 
                     fig = px.histogram(
@@ -659,7 +652,7 @@ if uploaded_file:
                     fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
                     st.plotly_chart(fig)
             else:
-                st.error("Anomaly detection model or scaler not available.")
+                st.error("Anomaly detection model not available.")
 
     except Exception as e:
         st.error(f"Error processing file: {e}")
