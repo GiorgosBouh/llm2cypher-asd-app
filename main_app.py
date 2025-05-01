@@ -591,95 +591,101 @@ if uploaded_file:
         st.dataframe(df.T)
 
         row = df.iloc[0]
-        upload_id = str(uuid.uuid4())  # ✅ Create unique ID for the case
+        upload_id = str(uuid.uuid4())  # ✅ Create unique ID
         st.session_state["last_upload_id"] = upload_id
 
-        with st.spinner("🧩 Inserting case into graph..."):
+        # 🚀 Insert new case into Neo4j
+        with st.spinner("Inserting case into graph..."):
             insert_user_case(row, upload_id)
 
-        with st.spinner("🌐 Recalculating full-graph embeddings..."):
-            if generate_graph_embeddings():  # ✅ FULL graph embedding
-                embedding = extract_user_embedding()  # ❗️Now no argument needed
-                if embedding is None:
-                    st.error("Failed to extract embedding for the new case")
+        # 🌐 Recompute full-graph embeddings
+        with st.spinner("Recalculating full-graph embeddings..."):
+            success = generate_graph_embeddings()
+            if not success:
+                st.error("❌ Failed to generate full-graph embeddings.")
+                st.stop()
+
+        # 🔍 Extract embedding for this specific case
+        embedding = extract_user_embedding()
+        if embedding is None:
+            st.error("❌ Failed to extract embedding for the new case")
+            st.stop()
+
+        st.subheader("🧠 Graph Embedding")
+        st.write(embedding)
+
+        # === ASD Prediction ===
+        if 'asd_model' in st.session_state:
+            with st.spinner("Predicting ASD traits..."):
+                model = st.session_state['asd_model']
+                if len(embedding.shape) == 1:
+                    embedding = embedding.reshape(1, -1)
+
+                st.subheader("🧪 DEBUG: Embedding Inspection")
+                st.write("✅ Embedding Shape:", embedding.shape)
+                st.write("✅ Embedding Preview:", embedding.tolist())
+                st.write("✅ Model Expected Features:", model.n_features_in_)
+
+                if model.n_features_in_ != embedding.shape[1]:
+                    st.error(f"❌ Feature Mismatch: Model expects {model.n_features_in_} features, got {embedding.shape[1]}")
                     st.stop()
 
-                st.subheader("🧠 Graph Embedding")
-                st.write(embedding)
+                from sklearn.metrics.pairwise import cosine_similarity
+                all_embeddings = get_existing_embeddings()
+                if all_embeddings is not None:
+                    sim = cosine_similarity(embedding, all_embeddings)
+                    st.write("🔍 Max Similarity to Existing Embeddings:", np.max(sim))
+                    st.write("🔍 Mean Similarity to Existing Embeddings:", np.mean(sim))
 
-                # === ASD Prediction ===
-                if 'asd_model' in st.session_state:
-                    with st.spinner("🤖 Predicting ASD traits..."):
-                        model = st.session_state['asd_model']
-                        if len(embedding.shape) == 1:
-                            embedding = embedding.reshape(1, -1)
+                proba = model.predict_proba(embedding)[0][1]
+                prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
 
-                        st.subheader("🧪 DEBUG: Embedding Inspection")
-                        st.write("✅ Embedding Shape:", embedding.shape)
-                        st.write("✅ Embedding Preview:", embedding.tolist())
+                st.subheader("🔍 Prediction Result")
+                col1, col2 = st.columns(2)
+                col1.metric("Prediction", prediction)
+                col2.metric("Confidence", f"{max(proba, 1 - proba):.1%}")
 
-                        st.write("✅ Model Expected Features:", model.n_features_in_)
-                        if model.n_features_in_ != embedding.shape[1]:
-                            st.error(f"❌ Feature Mismatch: Model expects {model.n_features_in_} features, got {embedding.shape[1]}")
-                            st.stop()
+                case_key = st.session_state.get("last_upload_id", "default_key")
+                fig = px.bar(
+                    x=["Control", "ASD Traits"],
+                    y=[1 - proba, proba],
+                    labels={'x': 'Class', 'y': 'Probability'},
+                    title="Prediction Probabilities"
+                )
+                st.plotly_chart(fig, key=f"prediction_bar_{case_key}")
 
-                        all_embeddings = get_existing_embeddings()
-                        if all_embeddings is not None:
-                            from sklearn.metrics.pairwise import cosine_similarity
-                            sim = cosine_similarity(embedding, all_embeddings)
-                            st.write("🔍 Max Similarity to Existing Embeddings:", np.max(sim))
-                            st.write("🔍 Mean Similarity to Existing Embeddings:", np.mean(sim))
+        # === Anomaly Detection ===
+        with st.spinner("Checking for anomalies..."):
+            iso_forest_scaler = train_isolation_forest()
+            if iso_forest_scaler:
+                iso_forest, scaler = iso_forest_scaler
+                if len(embedding.shape) == 1:
+                    embedding = embedding.reshape(1, -1)
+                embedding_scaled = scaler.transform(embedding)
+                anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
-                        proba = model.predict_proba(embedding)[0][1]
-                        prediction = "YES (ASD Traits Detected)" if proba >= 0.5 else "NO (Control Case)"
+                st.subheader("🕵️ Anomaly Detection")
+                if is_anomaly:
+                    st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+                else:
+                    st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
 
-                        st.subheader("🔍 Prediction Result")
-                        col1, col2 = st.columns(2)
-                        col1.metric("Prediction", prediction)
-                        col2.metric("Confidence", f"{max(proba, 1 - proba):.1%}")
+                all_embeddings = get_existing_embeddings()
+                if all_embeddings is not None:
+                    all_embeddings_scaled = scaler.transform(all_embeddings)
+                    scores = iso_forest.decision_function(all_embeddings_scaled)
 
-                        fig = px.bar(
-                            x=["Control", "ASD Traits"],
-                            y=[1 - proba, proba],
-                            labels={'x': 'Class', 'y': 'Probability'},
-                            title="Prediction Probabilities"
-                        )
-                        st.plotly_chart(fig, key=f"prediction_bar_{upload_id}")
-
-                # === Anomaly Detection ===
-                with st.spinner("🧠 Checking for anomalies..."):
-                    iso_forest_scaler = train_isolation_forest()
-                    if iso_forest_scaler:
-                        iso_forest, scaler = iso_forest_scaler
-                        if len(embedding.shape) == 1:
-                            embedding = embedding.reshape(1, -1)
-                        embedding_scaled = scaler.transform(embedding)
-                        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-                        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
-
-                        st.subheader("🕵️ Anomaly Detection")
-                        if is_anomaly:
-                            st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
-                        else:
-                            st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
-
-                        all_embeddings = get_existing_embeddings()
-                        if all_embeddings is not None:
-                            all_embeddings_scaled = scaler.transform(all_embeddings)
-                            scores = iso_forest.decision_function(all_embeddings_scaled)
-
-                            fig = px.histogram(
-                                x=scores,
-                                nbins=20,
-                                labels={'x': 'Anomaly Score'},
-                                title="Anomaly Score Distribution"
-                            )
-                            fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
-                            st.plotly_chart(fig, key=f"anomaly_hist_{upload_id}")
-                    else:
-                        st.info("Anomaly detection model not trained yet or insufficient data.")
+                    fig = px.histogram(
+                        x=scores,
+                        nbins=20,
+                        labels={'x': 'Anomaly Score'},
+                        title="Anomaly Score Distribution"
+                    )
+                    fig.add_vline(x=anomaly_score, line_dash="dash", line_color="red")
+                    st.plotly_chart(fig, key=f"anomaly_hist_{case_key}")
             else:
-                st.error("❌ Failed to generate graph embeddings.")
+                st.info("Anomaly detection model not trained yet or insufficient data.")
 
     except Exception as e:
         st.error(f"❌ Error processing file: {e}")
