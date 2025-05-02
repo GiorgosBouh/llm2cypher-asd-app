@@ -522,6 +522,29 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
 
     except Exception as e:
         st.error(f"❌ Correlation analysis failed: {str(e)}")
+def plot_combined_curves(y_true, y_proba):
+    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+
+    # ROC Curve
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    ax[0].plot(fpr, tpr, label=f"AUC = {roc_auc_score(y_true, y_proba):.3f}")
+    ax[0].plot([0, 1], [0, 1], 'k--')
+    ax[0].set_xlabel("False Positive Rate")
+    ax[0].set_ylabel("True Positive Rate")
+    ax[0].set_title("ROC Curve")
+    ax[0].legend()
+
+    # Precision-Recall Curve
+    precision, recall, _ = precision_recall_curve(y_true, y_proba)
+    ax[1].plot(recall, precision, label=f"AP = {average_precision_score(y_true, y_proba):.3f}")
+    ax[1].set_xlabel("Recall")
+    ax[1].set_ylabel("Precision")
+    ax[1].set_title("Precision-Recall Curve")
+    ax[1].legend()
+
+    st.pyplot(fig)
+# === Model Evaluation ===
+
 def evaluate_model(model, X_test, y_test):
     """Comprehensive model evaluation"""
     y_pred = model.predict(X_test)
@@ -558,9 +581,10 @@ def evaluate_model(model, X_test, y_test):
     st.subheader("🔍 Feature Importance (Gini)")
     try:
         importances = pd.Series(
-            model.feature_importances_,
+            model.named_steps['classifier'].feature_importances_,
             index=[f"Dim_{i}" for i in range(X_test.shape[1])]
-        ).sort_values(ascending=False)
+        )
+        sort_values(ascending=False)
         st.bar_chart(importances.head(15))
     except Exception as e:
         st.warning(f"Could not plot feature importance: {str(e)}")
