@@ -513,6 +513,46 @@ def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
 
     st.pyplot(fig)
 # === Model Evaluation ===
+def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
+    """Συσχετίζει κάθε διάσταση embedding με τα αρχικά χαρακτηριστικά (A1–A10, δημογραφικά)"""
+    st.subheader("📌 Feature–Embedding Correlation Analysis")
+
+    try:
+        df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
+        df.columns = [col.strip() for col in df.columns]
+
+        # Κρατάμε μόνο όσα Case_No υπάρχουν στο X
+        if "Case_No" not in df.columns:
+            st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
+            return
+
+        if len(X) != len(df):
+            st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
+
+        # Επιλογή χαρακτηριστικών
+        features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
+
+        df = df[features]
+        df = pd.get_dummies(df, drop_first=True)  # μετατροπή κατηγορικών σε αριθμητικά
+
+        if df.shape[0] != X.shape[0]:
+            df = df.iloc[:X.shape[0]]
+
+        corr = pd.DataFrame(index=df.columns, columns=X.columns)
+
+        for feat in df.columns:
+            for dim in X.columns:
+                corr.at[feat, dim] = np.corrcoef(df[feat], X[dim])[0, 1]
+
+        corr = corr.astype(float)
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+        sns.heatmap(corr, cmap="coolwarm", center=0, annot=False)
+        ax.set_title("Συσχέτιση Χαρακτηριστικών με Embedding Διαστάσεις")
+        st.pyplot(fig)
+
+    except Exception as e:
+        st.error(f"❌ Correlation analysis failed: {str(e)}")
 def evaluate_model(model, X_test, y_test):
     """Comprehensive model evaluation"""
     y_pred = model.predict(X_test)
@@ -573,13 +613,15 @@ def train_asd_detection_model() -> Optional[dict]:
     """Trains the ASD detection model with leakage protection"""
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-        
+
         # Load and prepare data
-        X, y = extract_training_data_from_csv(csv_url)
+        X_raw, y = extract_training_data_from_csv(csv_url)
+        X = pd.DataFrame(X_raw, columns=[f"Dim_{i}" for i in range(X_raw.shape[1])])
+
         if X.empty or y.empty:
             st.error("⚠️ No valid training data available")
             return None
-        
+
         # Split data
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
@@ -587,7 +629,7 @@ def train_asd_detection_model() -> Optional[dict]:
             stratify=y,
             random_state=Config.RANDOM_STATE
         )
-        
+
         # Build pipeline
         pipeline = Pipeline([
             ('smote', SMOTE(random_state=Config.RANDOM_STATE)),
@@ -597,24 +639,23 @@ def train_asd_detection_model() -> Optional[dict]:
                 class_weight='balanced'
             ))
         ])
-        
+
         # Train model
         pipeline.fit(X_train, y_train)
-        
+
         # Evaluate
         results = {
             "model": pipeline.named_steps['classifier'],
             "X_test": X_test,
             "y_test": y_test
         }
-        
+
         return results
-        
+
     except Exception as e:
         st.error(f"❌ Error training model: {e}")
         logger.error(f"Training error: {e}", exc_info=True)
         return None
-
 # === Anomaly Detection ===
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
