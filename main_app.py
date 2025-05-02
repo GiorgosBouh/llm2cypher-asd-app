@@ -466,7 +466,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         st.error("⚠️ No valid embeddings found for training")
         return pd.DataFrame(), pd.Series()
 
-    # 🔹 5. Φόρτωση labels και φιλτράρισμα κενών
+    # 🔹 5. Φιλτράρισμα labels που αντιστοιχούν στα valid_ids
     df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
     df_filtered = df_filtered[df_filtered["Class_ASD_Traits"].notna()]
 
@@ -474,13 +474,16 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
     )
 
-    # 🔹 6. Τελικό embedding DataFrame (same length με y)
+    # 🔹 6. Τελικό DataFrame embeddings (same length με y)
     X_df = pd.DataFrame(embeddings[:len(y_series)])
 
     # 🔹 7. Αφαίρεση γραμμών με NaNs
     mask = ~X_df.isnull().any(axis=1)
     X_df = X_df[mask].reset_index(drop=True)
     y_series = y_series[mask].reset_index(drop=True)
+
+    # 🔹 8. Έλεγχος τελικού μεγέθους
+    st.write("✅ Final shape:", X_df.shape, y_series.shape)
 
     return X_df, y_series
 # === Model Evaluation ===
