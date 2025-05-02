@@ -478,18 +478,17 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
     )
 
-    # 🔹 6. Final feature matrix
+      # 🔹 6. Τελικό embedding DataFrame (same length με y)
     X_df = pd.DataFrame(embeddings[:len(y_series)])
 
-    # 🔹 7. Impute any missing values
-    from sklearn.impute import SimpleImputer
+    # 🔹 7. Impute missing values με μέσο όρο
     imputer = SimpleImputer(strategy='mean')
-    X_df = pd.DataFrame(imputer.fit_transform(X_df), columns=X_df.columns)
+    X_df_imputed = pd.DataFrame(imputer.fit_transform(X_df))
 
-    # 🔹 8. Final sanity check
-    st.write("✅ Final shape:", X_df.shape, y_series.shape)
+    # 🔹 8. Έλεγχος τελικού μεγέθους
+    st.write("✅ Final shape:", X_df_imputed.shape, y_series.shape)
 
-    return X_df, y_series.reset_index(drop=True)
+    return X_df_imputed, y_series.reset_index(drop=True)
 
 # === Model Evaluation ===
 def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
