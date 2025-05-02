@@ -543,6 +543,18 @@ def plot_combined_curves(y_true, y_proba):
     ax[1].legend()
 
     st.pyplot(fig)
+def show_permutation_importance(model, X_test, y_test):
+    try:
+        result = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=42)
+        importance_df = pd.DataFrame({
+            "Feature": [f"Dim_{i}" for i in range(X_test.shape[1])],
+            "Importance": result.importances_mean
+        }).sort_values(by="Importance", ascending=False)
+
+        st.subheader("📊 Permutation Importance")
+        st.bar_chart(importance_df.set_index("Feature").head(15))
+    except Exception as e:
+        st.warning(f"Could not calculate permutation importance: {str(e)}")   
 # === Model Evaluation ===
 
 def evaluate_model(model, X_test, y_test):
@@ -583,8 +595,7 @@ def evaluate_model(model, X_test, y_test):
         importances = pd.Series(
             model.named_steps['classifier'].feature_importances_,
             index=[f"Dim_{i}" for i in range(X_test.shape[1])]
-        )
-        sort_values(ascending=False)
+        ).sort_values(ascending=False)
         st.bar_chart(importances.head(15))
     except Exception as e:
         st.warning(f"Could not plot feature importance: {str(e)}")
