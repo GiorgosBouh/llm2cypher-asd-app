@@ -419,6 +419,9 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
         return None
 
 # === Training Data Preparation ===
+from sklearn.impute import SimpleImputer
+
+# === Training Data Preparation ===
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Extracts training data with leakage protection"""
@@ -466,7 +469,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         st.error("⚠️ No valid embeddings found for training")
         return pd.DataFrame(), pd.Series()
 
-    # 🔹 5. Φιλτράρισμα labels που αντιστοιχούν στα valid_ids
+    # 🔹 5. Φόρτωση labels και φιλτράρισμα κενών
     df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
     df_filtered = df_filtered[df_filtered["Class_ASD_Traits"].notna()]
 
@@ -474,18 +477,17 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
     )
 
-    # 🔹 6. Τελικό DataFrame embeddings (same length με y)
+    # 🔹 6. Τελικό embedding DataFrame (same length με y)
     X_df = pd.DataFrame(embeddings[:len(y_series)])
 
-    # 🔹 7. Αφαίρεση γραμμών με NaNs
-    mask = ~X_df.isnull().any(axis=1)
-    X_df = X_df[mask].reset_index(drop=True)
-    y_series = y_series[mask].reset_index(drop=True)
+    # 🔹 7. Impute missing values with column mean
+    imputer = SimpleImputer(strategy='mean')
+    X_df = pd.DataFrame(imputer.fit_transform(X_df), columns=X_df.columns)
 
     # 🔹 8. Έλεγχος τελικού μεγέθους
     st.write("✅ Final shape:", X_df.shape, y_series.shape)
 
-    return X_df, y_series
+    return X_df, y_series.reset_index(drop=True)
 # === Model Evaluation ===
 def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
     """Συσχετίζει κάθε διάσταση embedding με τα αρχικά χαρακτηριστικά (A1–A10, δημογραφικά)"""
