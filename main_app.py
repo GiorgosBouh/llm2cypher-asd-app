@@ -164,10 +164,20 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
     
     return upload_id
 
+@safe_neo4j_operation
+def remove_screened_for_labels():
+    with neo4j_service.session() as session:
+        session.run("""
+            MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait)
+            DELETE r
+        """)
+        logger.info("✅ SCREENED_FOR relationships removed to prevent leakage.")
+
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
 def generate_graph_embeddings() -> bool:
     """Generates graph embeddings with leakage protection"""
+    remove_screened_for_labels()
     progress_bar = st.progress(0)
     status_text = st.empty()
     temp_dir = None
@@ -399,10 +409,12 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Extracts training data with leakage protection"""
+
+    # 🔹 1. Διαβάζουμε τα δεδομένα από το CSV
     df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
     df.columns = [col.strip() for col in df.columns]
-   
-    # Clean numeric fields
+
+    # 🔹 2. Καθαρισμός αριθμητικών στηλών
     numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
     for col in numeric_cols:
         if col in df.columns:
@@ -412,37 +424,40 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         st.error("CSV must contain 'Class_ASD_Traits' and 'Case_No' columns")
         return pd.DataFrame(), pd.Series()
 
-    # Get embeddings with train/test split at database level
+    # 🔹 3. Ορισμός train/test split με flag στο Neo4j
     with neo4j_service.session() as session:
-        # Mark cases as train/test
         session.run("""
             MATCH (c:Case)
             WHERE c.id IS NOT NULL
             SET c.is_train = rand() < $train_ratio
-        """, train_ratio=1-Config.TEST_SIZE)
-        
-        embeddings = []
-        valid_ids = []
+        """, train_ratio=1 - Config.TEST_SIZE)
+
+    # 🔹 4. Εξαγωγή embeddings ΜΟΝΟ από training cases ΧΩΡΙΣ SCREENED_FOR
+    embeddings = []
+    valid_ids = []
+
+    with neo4j_service.session() as session:
         for case_no in df["Case_No"]:
             result = session.run("""
-                MATCH (c:Case {id: $id, is_train: true})
-                WHERE NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
+                MATCH (c:Case {id: $id})
+                WHERE c.is_train = true AND NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
                 RETURN c.embedding AS embedding
             """, id=int(case_no))
-            
+
             record = result.single()
             if record and record["embedding"]:
                 embeddings.append(record["embedding"])
                 valid_ids.append(case_no)
-    
+
     if not embeddings:
         st.error("⚠️ No valid embeddings found for training")
         return pd.DataFrame(), pd.Series()
 
+    # 🔹 5. Φόρτωση labels από CSV (μόνο για τα valid_ids)
     y = df[df["Case_No"].isin(valid_ids)]["Class_ASD_Traits"].apply(
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
     )
-    
+
     return pd.DataFrame(embeddings), y
 
 # === Model Evaluation ===
@@ -599,17 +614,16 @@ def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]
     iso_forest.fit(embeddings_scaled)
 
     return iso_forest, scaler
-
 # === Streamlit UI ===
 def main():
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
         <i>Autism Spectrum Disorder detection using graph embeddings</i>
         """, unsafe_allow_html=True)
-    
+
     # Sidebar
     st.sidebar.markdown(f"🔗 Connected to: `{os.getenv('NEO4J_URI')}`")
-    
+
     # Tab system
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Model Training", 
@@ -617,25 +631,33 @@ def main():
         "📤 Upload New Case", 
         "💬 NLP to Cypher"
     ])
-    
-    # Model Training Tab
+
+    # === Model Training Tab ===
     with tab1:
         st.header("🤖 ASD Detection Model")
+
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):
                 results = train_asd_detection_model()
+
                 if results:
                     st.session_state.model_results = results
-                    st.success("Model trained successfully!")
-                    
-                    # Evaluate model
+                    st.success("✅ Model trained successfully!")
+
+                    # ✅ Αξιολόγηση μοντέλου
                     evaluate_model(
                         results["model"],
                         results["X_test"],
                         results["y_test"]
                     )
-    
-    # Graph Embeddings Tab
+
+                    # ✅ Αυτόματη επανασύνδεση ετικετών
+                    with st.spinner("Reattaching labels to cases..."):
+                        csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+                        reinsert_labels_from_csv(csv_url)
+                        st.success("🎯 Labels reinserted automatically after training!")
+
+    # === Graph Embeddings Tab ===
     with tab2:
         st.header("🌐 Graph Embeddings")
         if st.button("🔁 Recalculate All Embeddings"):
@@ -644,8 +666,8 @@ def main():
                     st.success("Embeddings generated successfully!")
                 else:
                     st.error("Failed to generate embeddings")
-    
-    # File Upload Tab
+
+    # === File Upload Tab ===
     with tab3:
         st.header("📄 Upload New Case")
         uploaded_file = st.file_uploader(
@@ -653,7 +675,7 @@ def main():
             type="csv",
             key="case_uploader"
         )
-        
+
         if uploaded_file:
             try:
                 df = pd.read_csv(uploaded_file, delimiter=";")
@@ -663,51 +685,51 @@ def main():
                     "Sex", "Ethnicity", "Jaundice", 
                     "Family_mem_with_ASD", "Who_completed_the_test"
                 ]
-                
+
                 if not all(col in df.columns for col in required_cols):
                     st.error("❌ Missing required columns in CSV")
                     st.stop()
-                
+
                 if len(df) != 1:
                     st.error("Please upload exactly one case")
                     st.stop()
-                
+
                 # Process file
                 upload_id = str(uuid.uuid4())
                 row = df.iloc[0]
-                
+
                 # 1. Insert case
                 with st.spinner("Inserting case into graph..."):
                     upload_id = insert_user_case(row, upload_id)
                     st.session_state.last_upload_id = upload_id
-                
+
                 # 2. Generate embeddings
                 with st.spinner("Generating graph embeddings..."):
                     if not generate_graph_embeddings():
                         st.error("Embedding generation failed")
                         st.stop()
-                
+
                 # 3. Extract embedding
                 with st.spinner("Extracting case embedding..."):
                     embedding = extract_user_embedding(upload_id)
                     if embedding is None:
                         st.stop()
                     st.session_state.current_embedding = embedding
-                
+
                 st.subheader("🧠 Case Embedding")
                 st.write(embedding)
-                
+
                 # 4. Make prediction if model exists
                 if "model_results" in st.session_state:
                     model = st.session_state.model_results["model"]
                     proba = model.predict_proba(embedding)[0][1]
                     prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
-                    
+
                     st.subheader("🔍 Prediction Result")
                     col1, col2 = st.columns(2)
                     col1.metric("Prediction", prediction)
                     col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
-                    
+
                     # Show probability distribution
                     fig = px.bar(
                         x=["Typical", "ASD Traits"],
@@ -715,7 +737,7 @@ def main():
                         title="Prediction Probabilities"
                     )
                     st.plotly_chart(fig)
-                
+
                 # 5. Anomaly detection
                 with st.spinner("Running anomaly detection..."):
                     iso_result = train_isolation_forest()
@@ -724,27 +746,27 @@ def main():
                         embedding_scaled = scaler.transform(embedding)
                         anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
                         is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
-                        
+
                         st.subheader("🕵️ Anomaly Detection")
                         if is_anomaly:
                             st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
                         else:
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
-                
+
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
                 logger.error(f"Upload error: {str(e)}", exc_info=True)
-    
-    # NLP to Cypher Tab
+
+    # === NLP to Cypher Tab ===
     with tab4:
         st.header("💬 Natural Language to Cypher")
         question = st.text_input("Ask about the data:")
-        
+
         if question:
             cypher = nl_to_cypher(question)
             if cypher:
                 st.code(cypher, language="cypher")
-                
+
                 if st.button("▶️ Execute Query"):
                     with neo4j_service.session() as session:
                         try:
@@ -756,5 +778,6 @@ def main():
                         except Exception as e:
                             st.error(f"Query failed: {str(e)}")
 
+# === App entrypoint ===
 if __name__ == "__main__":
     main()
