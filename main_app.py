@@ -466,12 +466,17 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         st.error("⚠️ No valid embeddings found for training")
         return pd.DataFrame(), pd.Series()
 
-    # 🔹 5. Μετατροπή σε DataFrame και χειρισμός NaNs
-    X_df = pd.DataFrame(embeddings).add_prefix("Dim_")
-    y_series = df[df["Case_No"].isin(valid_ids)]["Class_ASD_Traits"].apply(
+    # 🔹 5. Φόρτωση labels από CSV (μόνο για τα valid_ids με μη κενά labels)
+    df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
+    df_filtered = df_filtered[df_filtered["Class_ASD_Traits"].notna()]
+    
+    y = df_filtered["Class_ASD_Traits"].apply(
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
-    ).reset_index(drop=True)
+    )
+    
+    X_final = pd.DataFrame(embeddings[:len(y)])
 
+    return X_final, y
     # 🔹 6. Αφαίρεση γραμμών με NaN
     mask = ~X_df.isnull().any(axis=1)
     X_df = X_df[mask].reset_index(drop=True)
