@@ -465,6 +465,10 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         )
         
         X = pd.DataFrame(embeddings[:len(y)])
+        st.warning(f"🔎 X shape: {X.shape}")
+        st.warning(f"Sample of X:\n{X.head()}")
+        st.warning(f"✅ Retrieved {len(valid_ids)} valid embeddings from Neo4j")
+        st.warning(f"✅ Matching y labels: {len(y)}")
         
         # Final NaN check
         if X.isna().any().any():
