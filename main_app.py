@@ -488,6 +488,30 @@ def show_permutation_importance(model, X_test, y_test):
     ax.set_xlabel("Importance")
     st.pyplot(fig)
 
+def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
+    """Plots ROC and Precision-Recall curves"""
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    roc_auc = roc_auc_score(y_true, y_proba)
+
+    precision, recall, _ = precision_recall_curve(y_true, y_proba)
+    avg_precision = average_precision_score(y_true, y_proba)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+
+    ax1.plot(fpr, tpr, label=f'ROC (AUC = {roc_auc:.2f})')
+    ax1.plot([0, 1], [0, 1], 'k--')
+    ax1.set_xlabel('False Positive Rate')
+    ax1.set_ylabel('True Positive Rate')
+    ax1.set_title('ROC Curve')
+    ax1.legend(loc='lower right')
+
+    ax2.plot(recall, precision, label=f'PR (AP = {avg_precision:.2f})')
+    ax2.set_xlabel('Recall')
+    ax2.set_ylabel('Precision')
+    ax2.set_title('Precision-Recall Curve')
+    ax2.legend(loc='lower left')
+
+    st.pyplot(fig)
 # === Model Evaluation ===
 def evaluate_model(model, X_test, y_test):
     """Comprehensive model evaluation"""
