@@ -461,8 +461,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
             for case_no in df["Case_No"]:
                 result = session.run("""
                     MATCH (c:Case {id: $id})
-                    WHERE c.is_train = true 
-                    AND NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
+                    WHERE NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
                     RETURN c.embedding AS embedding
                 """, id=int(case_no))
                 
