@@ -425,13 +425,12 @@ from sklearn.impute import SimpleImputer
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Extracts training data with leakage protection"""
-    from sklearn.impute import SimpleImputer
 
-    # 🔹 1. Διαβάζουμε τα δεδομένα
+    # 🔹 1. Διαβάζουμε τα δεδομένα από το CSV
     df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
     df.columns = [col.strip() for col in df.columns]
 
-    # 🔹 2. Μετατροπή αριθμητικών στηλών
+    # 🔹 2. Καθαρισμός αριθμητικών στηλών
     numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
     for col in numeric_cols:
         if col in df.columns:
@@ -439,9 +438,9 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
 
     if "Class_ASD_Traits" not in df.columns or "Case_No" not in df.columns:
         st.error("CSV must contain 'Class_ASD_Traits' and 'Case_No' columns")
-        return None
+        return pd.DataFrame(), pd.Series()
 
-    # 🔹 3. Train-test split flag
+    # 🔹 3. Ορισμός train/test split με flag στο Neo4j
     with neo4j_service.session() as session:
         session.run("""
             MATCH (c:Case)
@@ -449,7 +448,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
             SET c.is_train = rand() < $train_ratio
         """, train_ratio=1 - Config.TEST_SIZE)
 
-    # 🔹 4. Εξαγωγή embeddings
+    # 🔹 4. Εξαγωγή embeddings ΜΟΝΟ από training cases ΧΩΡΙΣ SCREENED_FOR
     embeddings = []
     valid_ids = []
 
@@ -457,7 +456,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         for case_no in df["Case_No"]:
             result = session.run("""
                 MATCH (c:Case {id: $id})
-                WHERE c.is_train = true
+                WHERE c.is_train = true AND NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
                 RETURN c.embedding AS embedding
             """, id=int(case_no))
 
@@ -468,9 +467,9 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
 
     if not embeddings:
         st.error("⚠️ No valid embeddings found for training")
-        return None
+        return pd.DataFrame(), pd.Series()
 
-    # 🔹 5. Labels
+    # 🔹 5. Φιλτράρισμα του DataFrame
     df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
     df_filtered = df_filtered[df_filtered["Class_ASD_Traits"].notna()]
 
@@ -478,26 +477,21 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
     ).reset_index(drop=True)
 
-    # 🔹 6. Embeddings DataFrame
-    X_df = pd.DataFrame(embeddings)
+    # 🔹 6. Δημιουργία X DataFrame
+    X_df = pd.DataFrame(embeddings[:len(y_series)])
 
-    # 🔹 7. Impute missing values with column mean
+    # 🔹 7. Imputation (πλήρης καθαρισμός από NaN)
+    from sklearn.impute import SimpleImputer
     imputer = SimpleImputer(strategy='mean')
     X_df_imputed = pd.DataFrame(imputer.fit_transform(X_df), columns=X_df.columns)
 
-    # 🔹 7b. Drop remaining NaNs just in case
-    X_df_cleaned = X_df_imputed.dropna()
+    # 🔹 8. Τελικός έλεγχος NaNs
+    if X_df_imputed.isna().sum().sum() > 0:
+        st.error("❌ Still contains NaN after imputation!")
+        return pd.DataFrame(), pd.Series()
 
-    # 🔹 7c. Match y size to X
-    y_series = y_series.iloc[:len(X_df_cleaned)]
-
-
-    # 🔹 8. Ασφαλές φιλτράρισμα
-    mask = ~X_df_imputed.isnull().any(axis=1)
-    X_df_final = X_df_imputed[mask].reset_index(drop=True)
-    y_final = y_series[mask].reset_index(drop=True)
-    st.write("✅ Cleaned final shape (no NaNs):", X_df_cleaned.shape, y_series.shape)
-    return X_df_cleaned, y_series.reset_index(drop=True)
+    st.write("✅ Cleaned final shape (no NaNs):", X_df_imputed.shape, y_series.shape)
+    return X_df_imputed, y_series
 
 # === Model Evaluation ===
 def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
