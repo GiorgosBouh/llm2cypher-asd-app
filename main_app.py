@@ -466,63 +466,23 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         st.error("⚠️ No valid embeddings found for training")
         return pd.DataFrame(), pd.Series()
 
-    # 🔹 5. Φόρτωση labels από CSV (μόνο για τα valid_ids με μη κενά labels)
+    # 🔹 5. Φόρτωση labels και φιλτράρισμα κενών
     df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
     df_filtered = df_filtered[df_filtered["Class_ASD_Traits"].notna()]
-    
-    y = df_filtered["Class_ASD_Traits"].apply(
+
+    y_series = df_filtered["Class_ASD_Traits"].apply(
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
     )
-    
-    X_final = pd.DataFrame(embeddings[:len(y)])
 
-    return X_final, y
-    # 🔹 6. Αφαίρεση γραμμών με NaN
+    # 🔹 6. Τελικό embedding DataFrame (same length με y)
+    X_df = pd.DataFrame(embeddings[:len(y_series)])
+
+    # 🔹 7. Αφαίρεση γραμμών με NaNs
     mask = ~X_df.isnull().any(axis=1)
     X_df = X_df[mask].reset_index(drop=True)
     y_series = y_series[mask].reset_index(drop=True)
 
     return X_df, y_series
-
-from sklearn.inspection import permutation_importance
-
-def show_permutation_importance(model, X_test, y_test):
-    st.subheader("🧪 Permutation Feature Importance")
-    result = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=Config.RANDOM_STATE)
-
-    importances = pd.Series(result.importances_mean, index=[f"Dim_{i}" for i in range(X_test.shape[1])])
-    importances_sorted = importances.sort_values(ascending=False).head(15)
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    sns.barplot(x=importances_sorted.values, y=importances_sorted.index, ax=ax)
-    ax.set_title("Top 15 Permutation Importances")
-    ax.set_xlabel("Importance")
-    st.pyplot(fig)
-
-def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
-    """Plots ROC and Precision-Recall curves"""
-    fpr, tpr, _ = roc_curve(y_true, y_proba)
-    roc_auc = roc_auc_score(y_true, y_proba)
-
-    precision, recall, _ = precision_recall_curve(y_true, y_proba)
-    avg_precision = average_precision_score(y_true, y_proba)
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-    ax1.plot(fpr, tpr, label=f'ROC (AUC = {roc_auc:.2f})')
-    ax1.plot([0, 1], [0, 1], 'k--')
-    ax1.set_xlabel('False Positive Rate')
-    ax1.set_ylabel('True Positive Rate')
-    ax1.set_title('ROC Curve')
-    ax1.legend(loc='lower right')
-
-    ax2.plot(recall, precision, label=f'PR (AP = {avg_precision:.2f})')
-    ax2.set_xlabel('Recall')
-    ax2.set_ylabel('Precision')
-    ax2.set_title('Precision-Recall Curve')
-    ax2.legend(loc='lower left')
-
-    st.pyplot(fig)
 # === Model Evaluation ===
 def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
     """Συσχετίζει κάθε διάσταση embedding με τα αρχικά χαρακτηριστικά (A1–A10, δημογραφικά)"""
