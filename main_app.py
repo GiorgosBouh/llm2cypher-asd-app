@@ -425,7 +425,6 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
         
         return None
 
-# === Training Data Preparation ===
 from sklearn.impute import SimpleImputer
 
 # === Training Data Preparation ===
@@ -442,7 +441,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-       # 🔍 Σιγουρευόμαστε ότι οι στήλες υπάρχουν και δεν έχουν κρυφά σύμβολα
+        # 🔍 Καθαρισμός πιθανών κρυφών χαρακτήρων
         df.columns = [col.strip().replace('\r', '') for col in df.columns]
 
         required_cols = ["Case_No", "Class_ASD_Traits"]
@@ -457,18 +456,22 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         with neo4j_service.session() as session:
             embeddings = []
             valid_ids = []
-            
+
             for case_no in df["Case_No"]:
                 result = session.run("""
                     MATCH (c:Case {id: $id})
-                    WHERE NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
+                    WHERE c.embedding IS NOT NULL
                     RETURN c.embedding AS embedding
                 """, id=int(case_no))
-                
+
                 record = result.single()
                 if record and record["embedding"]:
                     embeddings.append(record["embedding"])
                     valid_ids.append(case_no)
+
+        print("📋 Available Case_Nos in CSV:", df["Case_No"].tolist()[:5])
+        print("📦 Valid Case_Nos with embeddings:", valid_ids[:5])
+        print("📊 Total matched embeddings:", len(embeddings))
 
         # Εξασφάλιση ότι το df έχει μόνο τις εγγραφές που υπάρχουν και στα embeddings
         df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
@@ -478,20 +481,16 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
             lambda x: 1 if str(x).strip().lower() == "yes" else 0
         )
 
-        # Debug print
-        print("✅ Retrieved embeddings:", len(embeddings))
-        print("✅ Matching labels:", len(y))
-
         # Αν θέλεις να σιγουρευτείς:
         assert len(embeddings) == len(y), f"⚠️ Embeddings: {len(embeddings)}, Labels: {len(y)}"
 
         # Final X
         X = pd.DataFrame(embeddings[:len(y)])
-        
+
         # Final NaN check
         if X.isna().any().any():
             st.warning(f"⚠️ Found {X.isna().sum().sum()} NaN values in embeddings - applying imputation")
-            X = X.fillna(X.mean())  # Simple mean imputation as fallback
+            X = X.fillna(X.mean())
 
         return X, y
 
