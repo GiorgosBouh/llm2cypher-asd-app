@@ -478,17 +478,22 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
     )
 
-      # 🔹 6. Τελικό embedding DataFrame (same length με y)
+         # 🔹 6. Τελικό embedding DataFrame (same length με y)
     X_df = pd.DataFrame(embeddings[:len(y_series)])
 
     # 🔹 7. Impute missing values με μέσο όρο
     imputer = SimpleImputer(strategy='mean')
     X_df_imputed = pd.DataFrame(imputer.fit_transform(X_df))
 
-    # 🔹 8. Έλεγχος τελικού μεγέθους
-    st.write("✅ Final shape:", X_df_imputed.shape, y_series.shape)
+    # 🔹 8. Αφαίρεση δείγματων που εξακολουθούν να έχουν NaN (ασφαλιστική δικλείδα)
+    mask = ~X_df_imputed.isnull().any(axis=1)
+    X_df_final = X_df_imputed[mask].reset_index(drop=True)
+    y_final = y_series[mask].reset_index(drop=True)
 
-    return X_df_imputed, y_series.reset_index(drop=True)
+    # 🔹 9. Τελικό σχήμα
+    st.write("✅ Cleaned final shape (no NaNs):", X_df_final.shape, y_final.shape)
+
+    return X_df_final, y_final
 
 # === Model Evaluation ===
 def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
