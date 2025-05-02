@@ -471,17 +471,23 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
                     embeddings.append(record["embedding"])
                     valid_ids.append(case_no)
 
-        # Filter and prepare data
+        # Εξασφάλιση ότι το df έχει μόνο τις εγγραφές που υπάρχουν και στα embeddings
         df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
+
+        # Matching labels
         y = df_filtered["Class_ASD_Traits"].apply(
             lambda x: 1 if str(x).strip().lower() == "yes" else 0
         )
-        
+
+        # Debug print
+        print("✅ Retrieved embeddings:", len(embeddings))
+        print("✅ Matching labels:", len(y))
+
+        # Αν θέλεις να σιγουρευτείς:
+        assert len(embeddings) == len(y), f"⚠️ Embeddings: {len(embeddings)}, Labels: {len(y)}"
+
+        # Final X
         X = pd.DataFrame(embeddings[:len(y)])
-        st.warning(f"🔎 X shape: {X.shape}")
-        st.warning(f"Sample of X:\n{X.head()}")
-        st.warning(f"✅ Retrieved {len(valid_ids)} valid embeddings from Neo4j")
-        st.warning(f"✅ Matching y labels: {len(y)}")
         
         # Final NaN check
         if X.isna().any().any():
