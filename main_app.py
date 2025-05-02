@@ -579,6 +579,13 @@ def evaluate_model(model, X_test, y_test):
     """Comprehensive model evaluation"""
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
+    # 📊 Κατανομή πιθανοτήτων
+    st.subheader("📉 Κατανομή πιθανοτήτων πρόβλεψης")
+    fig, ax = plt.subplots()
+    ax.hist(y_proba, bins=20, color='skyblue', edgecolor='black')
+    ax.set_xlabel("Πιθανότητα ASD Traits")
+    ax.set_ylabel("Αριθμός Δειγμάτων")
+    st.pyplot(fig)
 
     # Check for suspicious performance
     if roc_auc_score(y_test, y_proba) > 0.98:
