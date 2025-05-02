@@ -340,6 +340,13 @@ def generate_graph_embeddings() -> bool:
 @safe_neo4j_operation
 def reinsert_labels_from_csv(file_path: str):
     df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
+    df.columns = [col.strip().replace('\ufeff', '') for col in df.columns]  # 🔧 Καθαρισμός ονομάτων στηλών
+
+    # Προαιρετικά για debug
+    if "Class_ASD_Traits" not in df.columns:
+        print("🛑 Οι στήλες είναι:", df.columns.tolist())
+        raise ValueError("Η στήλη 'Class_ASD_Traits' δεν βρέθηκε στο αρχείο.")
+
     with neo4j_service.session() as session:
         for _, row in df.iterrows():
             label = str(row["Class_ASD_Traits"]).strip().lower()
