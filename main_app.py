@@ -424,74 +424,58 @@ from sklearn.impute import SimpleImputer
 # === Training Data Preparation ===
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
-    """Extracts training data with leakage protection"""
+    """Extracts training data with leakage protection and NaN handling"""
+    try:
+        df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
+        df.columns = [col.strip() for col in df.columns]
 
-    # 🔹 1. Διαβάζουμε τα δεδομένα από το CSV
-    df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
-    df.columns = [col.strip() for col in df.columns]
+        # Convert numeric columns
+        numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # 🔹 2. Καθαρισμός αριθμητικών στηλών
-    numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No", "Age_Mons", "Qchat-10-Score"]
-    for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+        # Verify required columns
+        if "Class_ASD_Traits" not in df.columns or "Case_No" not in df.columns:
+            st.error("Missing required columns: 'Class_ASD_Traits' or 'Case_No'")
+            return pd.DataFrame(), pd.Series()
 
-    if "Class_ASD_Traits" not in df.columns or "Case_No" not in df.columns:
-        st.error("CSV must contain 'Class_ASD_Traits' and 'Case_No' columns")
+        # Get embeddings from Neo4j
+        with neo4j_service.session() as session:
+            embeddings = []
+            valid_ids = []
+            
+            for case_no in df["Case_No"]:
+                result = session.run("""
+                    MATCH (c:Case {id: $id})
+                    WHERE c.is_train = true 
+                    AND NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
+                    RETURN c.embedding AS embedding
+                """, id=int(case_no))
+                
+                record = result.single()
+                if record and record["embedding"]:
+                    embeddings.append(record["embedding"])
+                    valid_ids.append(case_no)
+
+        # Filter and prepare data
+        df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
+        y = df_filtered["Class_ASD_Traits"].apply(
+            lambda x: 1 if str(x).strip().lower() == "yes" else 0
+        )
+        
+        X = pd.DataFrame(embeddings[:len(y)])
+        
+        # Final NaN check
+        if X.isna().any().any():
+            st.warning(f"⚠️ Found {X.isna().sum().sum()} NaN values in embeddings - applying imputation")
+            X = X.fillna(X.mean())  # Simple mean imputation as fallback
+
+        return X, y
+
+    except Exception as e:
+        st.error(f"Data extraction failed: {str(e)}")
         return pd.DataFrame(), pd.Series()
-
-    # 🔹 3. Ορισμός train/test split με flag στο Neo4j
-    with neo4j_service.session() as session:
-        session.run("""
-            MATCH (c:Case)
-            WHERE c.id IS NOT NULL
-            SET c.is_train = rand() < $train_ratio
-        """, train_ratio=1 - Config.TEST_SIZE)
-
-    # 🔹 4. Εξαγωγή embeddings ΜΟΝΟ από training cases ΧΩΡΙΣ SCREENED_FOR
-    embeddings = []
-    valid_ids = []
-
-    with neo4j_service.session() as session:
-        for case_no in df["Case_No"]:
-            result = session.run("""
-                MATCH (c:Case {id: $id})
-                WHERE c.is_train = true AND NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
-                RETURN c.embedding AS embedding
-            """, id=int(case_no))
-
-            record = result.single()
-            if record and record["embedding"]:
-                embeddings.append(record["embedding"])
-                valid_ids.append(case_no)
-
-    if not embeddings:
-        st.error("⚠️ No valid embeddings found for training")
-        return pd.DataFrame(), pd.Series()
-
-    # 🔹 5. Φιλτράρισμα του DataFrame
-    df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
-    df_filtered = df_filtered[df_filtered["Class_ASD_Traits"].notna()]
-
-    y_series = df_filtered["Class_ASD_Traits"].apply(
-        lambda x: 1 if str(x).strip().lower() == "yes" else 0
-    ).reset_index(drop=True)
-
-    # 🔹 6. Δημιουργία X DataFrame
-    X_df = pd.DataFrame(embeddings[:len(y_series)])
-
-    # 🔹 7. Imputation (πλήρης καθαρισμός από NaN)
-    from sklearn.impute import SimpleImputer
-    imputer = SimpleImputer(strategy='mean')
-    X_df_imputed = pd.DataFrame(imputer.fit_transform(X_df), columns=X_df.columns)
-
-    # 🔹 8. Τελικός έλεγχος NaNs
-    if X_df_imputed.isna().sum().sum() > 0:
-        st.error("❌ Still contains NaN after imputation!")
-        return pd.DataFrame(), pd.Series()
-
-    st.write("✅ Cleaned final shape (no NaNs):", X_df_imputed.shape, y_series.shape)
-    return X_df_imputed, y_series
 
 # === Model Evaluation ===
 def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
@@ -590,6 +574,7 @@ def evaluate_model(model, X_test, y_test):
 
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
+@st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[dict]:
     """Trains the ASD detection model with leakage protection"""
     try:
@@ -611,8 +596,9 @@ def train_asd_detection_model() -> Optional[dict]:
             random_state=Config.RANDOM_STATE
         )
 
-        # Build pipeline
+        # Build pipeline with imputation
         pipeline = Pipeline([
+            ('imputer', SimpleImputer(strategy='mean')),  # 👈 Added imputation step
             ('smote', SMOTE(random_state=Config.RANDOM_STATE)),
             ('classifier', RandomForestClassifier(
                 n_estimators=Config.N_ESTIMATORS,
@@ -626,7 +612,7 @@ def train_asd_detection_model() -> Optional[dict]:
 
         # Evaluate
         results = {
-            "model": pipeline.named_steps['classifier'],
+            "model": pipeline,
             "X_test": X_test,
             "y_test": y_test
         }
