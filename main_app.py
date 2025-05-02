@@ -466,19 +466,25 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         st.error("⚠️ No valid embeddings found for training")
         return pd.DataFrame(), pd.Series()
 
-    # 🔹 5. Φόρτωση labels από CSV (μόνο για τα valid_ids)
-    y = df[df["Case_No"].isin(valid_ids)]["Class_ASD_Traits"].apply(
+    # 🔹 5. Μετατροπή σε DataFrame και χειρισμός NaNs
+    X_df = pd.DataFrame(embeddings).add_prefix("Dim_")
+    y_series = df[df["Case_No"].isin(valid_ids)]["Class_ASD_Traits"].apply(
         lambda x: 1 if str(x).strip().lower() == "yes" else 0
-    )
+    ).reset_index(drop=True)
 
-    return pd.DataFrame(embeddings), y
+    # 🔹 6. Αφαίρεση γραμμών με NaN
+    mask = ~X_df.isnull().any(axis=1)
+    X_df = X_df[mask].reset_index(drop=True)
+    y_series = y_series[mask].reset_index(drop=True)
+
+    return X_df, y_series
 
 from sklearn.inspection import permutation_importance
 
 def show_permutation_importance(model, X_test, y_test):
     st.subheader("🧪 Permutation Feature Importance")
     result = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=Config.RANDOM_STATE)
-    
+
     importances = pd.Series(result.importances_mean, index=[f"Dim_{i}" for i in range(X_test.shape[1])])
     importances_sorted = importances.sort_values(ascending=False).head(15)
 
