@@ -435,9 +435,15 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce')
 
-        # Verify required columns
-        if "Class_ASD_Traits" not in df.columns or "Case_No" not in df.columns:
-            st.error("Missing required columns: 'Class_ASD_Traits' or 'Case_No'")
+       # 🔍 Σιγουρευόμαστε ότι οι στήλες υπάρχουν και δεν έχουν κρυφά σύμβολα
+        df.columns = [col.strip().replace('\r', '') for col in df.columns]
+
+        required_cols = ["Case_No", "Class_ASD_Traits"]
+        missing = [col for col in required_cols if col not in df.columns]
+
+        if missing:
+            st.error(f"❌ Missing required columns: {', '.join(missing)}")
+            st.write("📋 Found columns in CSV:", df.columns.tolist())
             return pd.DataFrame(), pd.Series()
 
         # Get embeddings from Neo4j
