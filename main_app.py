@@ -471,23 +471,17 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
                     embeddings.append(record["embedding"])
                     valid_ids.append(case_no)
 
-        # Εξασφάλιση ότι το df έχει μόνο τις εγγραφές που υπάρχουν και στα embeddings
+        # Filter and prepare data
         df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
-
-        # Matching labels
         y = df_filtered["Class_ASD_Traits"].apply(
             lambda x: 1 if str(x).strip().lower() == "yes" else 0
         )
-
-        # Debug print
-        print("✅ Retrieved embeddings:", len(embeddings))
-        print("✅ Matching labels:", len(y))
-
-        # Αν θέλεις να σιγουρευτείς:
-        assert len(embeddings) == len(y), f"⚠️ Embeddings: {len(embeddings)}, Labels: {len(y)}"
-
-        # Final X
+        
         X = pd.DataFrame(embeddings[:len(y)])
+        st.warning(f"🔎 X shape: {X.shape}")
+        st.warning(f"Sample of X:\n{X.head()}")
+        st.warning(f"✅ Retrieved {len(valid_ids)} valid embeddings from Neo4j")
+        st.warning(f"✅ Matching y labels: {len(y)}")
         
         # Final NaN check
         if X.isna().any().any():
@@ -509,22 +503,22 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
         df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
         df.columns = [col.strip() for col in df.columns]
 
+        # Κρατάμε μόνο όσα Case_No υπάρχουν στο X
+        if "Case_No" not in df.columns:
+            st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
+            return
+
+        if len(X) != len(df):
+            st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
+
         # Επιλογή χαρακτηριστικών
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
-        df = df[["Case_No"] + features]
 
-        # Κρατάμε μόνο όσα Case_No υπάρχουν στο X (best effort)
-        df = df[df["Case_No"].isin(df["Case_No"].unique()[:len(X)])].copy()
-        df = df.reset_index(drop=True)
         df = df[features]
-        df = pd.get_dummies(df, drop_first=True)
+        df = pd.get_dummies(df, drop_first=True)  # μετατροπή κατηγορικών σε αριθμητικά
 
-        # Αν δεν ταιριάζει ακόμη, κόψε για να προχωρήσεις
         if df.shape[0] != X.shape[0]:
-            st.warning(f"⚠️ Warning: df and X still mismatched ({df.shape[0]} vs {X.shape[0]})")
-            min_len = min(df.shape[0], X.shape[0])
-            df = df.iloc[:min_len]
-            X = X.iloc[:min_len]
+            df = df.iloc[:X.shape[0]]
 
         corr = pd.DataFrame(index=df.columns, columns=X.columns)
 
