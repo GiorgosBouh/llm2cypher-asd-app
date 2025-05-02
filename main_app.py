@@ -64,6 +64,11 @@ missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
     st.error(f"Missing required environment variables: {', '.join(missing_vars)}")
     st.stop()
+# ✅ Load variables for use
+NEO4J_URI = os.getenv("NEO4J_URI")
+NEO4J_USER = os.getenv("NEO4J_USER")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # === Neo4j Service Class ===
 class Neo4jService:
