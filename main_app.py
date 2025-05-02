@@ -509,22 +509,22 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
         df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
         df.columns = [col.strip() for col in df.columns]
 
-        # Κρατάμε μόνο όσα Case_No υπάρχουν στο X
-        if "Case_No" not in df.columns:
-            st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
-            return
-
-        if len(X) != len(df):
-            st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
-
         # Επιλογή χαρακτηριστικών
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
+        df = df[["Case_No"] + features]
 
+        # Κρατάμε μόνο όσα Case_No υπάρχουν στο X (best effort)
+        df = df[df["Case_No"].isin(df["Case_No"].unique()[:len(X)])].copy()
+        df = df.reset_index(drop=True)
         df = df[features]
-        df = pd.get_dummies(df, drop_first=True)  # μετατροπή κατηγορικών σε αριθμητικά
+        df = pd.get_dummies(df, drop_first=True)
 
+        # Αν δεν ταιριάζει ακόμη, κόψε για να προχωρήσεις
         if df.shape[0] != X.shape[0]:
-            df = df.iloc[:X.shape[0]]
+            st.warning(f"⚠️ Warning: df and X still mismatched ({df.shape[0]} vs {X.shape[0]})")
+            min_len = min(df.shape[0], X.shape[0])
+            df = df.iloc[:min_len]
+            X = X.iloc[:min_len]
 
         corr = pd.DataFrame(index=df.columns, columns=X.columns)
 
