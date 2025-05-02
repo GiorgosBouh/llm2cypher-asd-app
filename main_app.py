@@ -173,6 +173,7 @@ def remove_screened_for_labels():
         """)
         logger.info("✅ SCREENED_FOR relationships removed to prevent leakage.")
 
+
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
 def generate_graph_embeddings() -> bool:
@@ -336,6 +337,18 @@ def generate_graph_embeddings() -> bool:
         status_text.empty()
         progress_bar.empty()
 
+@safe_neo4j_operation
+def reinsert_labels_from_csv(file_path: str):
+    df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
+    with neo4j_service.session() as session:
+        for _, row in df.iterrows():
+            label = str(row["Class_ASD_Traits"]).strip().lower()
+            if label in ["yes", "no"]:
+                session.run("""
+                    MATCH (c:Case {id: $id})
+                    MERGE (t:ASD_Trait {value: $label})
+                    MERGE (c)-[:SCREENED_FOR]->(t)
+                """, id=int(row["Case_No"]), label=label.capitalize())
 # === Natural Language to Cypher ===
 def nl_to_cypher(question: str) -> Optional[str]:
     """Translates natural language to Cypher using OpenAI"""
