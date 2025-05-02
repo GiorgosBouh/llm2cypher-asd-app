@@ -586,8 +586,8 @@ def train_asd_detection_model() -> Optional[dict]:
 
         # Load and prepare data
         X_raw, y = extract_training_data_from_csv(csv_url)
-        X = pd.DataFrame(X_raw, columns=[f"Dim_{i}" for i in range(X_raw.shape[1])])
-
+        X = X_raw.copy()
+        X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
         if X.empty or y.empty:
             st.error("⚠️ No valid training data available")
             return None
