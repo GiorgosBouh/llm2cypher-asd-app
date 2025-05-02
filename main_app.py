@@ -457,7 +457,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         for case_no in df["Case_No"]:
             result = session.run("""
                 MATCH (c:Case {id: $id})
-                WHERE c.is_train = true AND NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
+                WHERE c.is_train = true
                 RETURN c.embedding AS embedding
             """, id=int(case_no))
 
@@ -639,6 +639,7 @@ def train_asd_detection_model() -> Optional[dict]:
         logger.error(f"Training error: {e}", exc_info=True)
         return None
 # === Anomaly Detection ===
+# === Anomaly Detection ===
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
     """Returns all case embeddings for anomaly detection"""
@@ -646,7 +647,6 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
         result = session.run("""
             MATCH (c:Case)
             WHERE c.embedding IS NOT NULL
-            AND NOT EXISTS((c)-[:SCREENED_FOR]->(:ASD_Trait))
             RETURN c.embedding AS embedding
         """)
         embeddings = [record["embedding"] for record in result]
