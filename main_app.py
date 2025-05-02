@@ -473,37 +473,27 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
 
     return pd.DataFrame(embeddings), y
 
-# === Model Evaluation ===
-def plot_combined_curves(y_true: np.ndarray, y_proba: np.ndarray) -> None:
-    """Plots ROC and Precision-Recall curves"""
-    fpr, tpr, _ = roc_curve(y_true, y_proba)
-    roc_auc = roc_auc_score(y_true, y_proba)
+from sklearn.inspection import permutation_importance
 
-    precision, recall, _ = precision_recall_curve(y_true, y_proba)
-    avg_precision = average_precision_score(y_true, y_proba)
+def show_permutation_importance(model, X_test, y_test):
+    st.subheader("🧪 Permutation Feature Importance")
+    result = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=Config.RANDOM_STATE)
+    
+    importances = pd.Series(result.importances_mean, index=[f"Dim_{i}" for i in range(X_test.shape[1])])
+    importances_sorted = importances.sort_values(ascending=False).head(15)
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-
-    ax1.plot(fpr, tpr, label=f'ROC (AUC = {roc_auc:.2f})')
-    ax1.plot([0, 1], [0, 1], 'k--')
-    ax1.set_xlabel('False Positive Rate')
-    ax1.set_ylabel('True Positive Rate')
-    ax1.set_title('ROC Curve')
-    ax1.legend(loc='lower right')
-
-    ax2.plot(recall, precision, label=f'PR (AP = {avg_precision:.2f})')
-    ax2.set_xlabel('Recall')
-    ax2.set_ylabel('Precision')
-    ax2.set_title('Precision-Recall Curve')
-    ax2.legend(loc='lower left')
-
+    fig, ax = plt.subplots(figsize=(10, 5))
+    sns.barplot(x=importances_sorted.values, y=importances_sorted.index, ax=ax)
+    ax.set_title("Top 15 Permutation Importances")
+    ax.set_xlabel("Importance")
     st.pyplot(fig)
 
+# === Model Evaluation ===
 def evaluate_model(model, X_test, y_test):
     """Comprehensive model evaluation"""
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
-    
+
     # Check for suspicious performance
     if roc_auc_score(y_test, y_proba) > 0.98:
         st.warning("""
@@ -512,7 +502,7 @@ def evaluate_model(model, X_test, y_test):
         2. Test set contains training data
         3. Label contamination in graph
         """)
-    
+
     st.subheader("📊 Model Evaluation Metrics")
     col1, col2 = st.columns(2)
     with col1:
@@ -521,7 +511,7 @@ def evaluate_model(model, X_test, y_test):
     with col2:
         st.metric("Recall", f"{recall_score(y_test, y_pred):.3f}")
         st.metric("F1 Score", f"{f1_score(y_test, y_pred):.3f}")
-    
+
     # Confusion Matrix
     st.subheader("Confusion Matrix")
     cm = confusion_matrix(y_test, y_pred)
@@ -530,9 +520,9 @@ def evaluate_model(model, X_test, y_test):
     ax.set_xlabel('Predicted')
     ax.set_ylabel('Actual')
     st.pyplot(fig)
-    
-    # Feature Importance
-    st.subheader("🔍 Feature Importance")
+
+    # Feature Importance (based on Gini importance)
+    st.subheader("🔍 Feature Importance (Gini)")
     try:
         importances = pd.Series(
             model.feature_importances_,
@@ -541,10 +531,13 @@ def evaluate_model(model, X_test, y_test):
         st.bar_chart(importances.head(15))
     except Exception as e:
         st.warning(f"Could not plot feature importance: {str(e)}")
-    
+
     # Performance Curves
-    st.subheader("Performance Curves")
+    st.subheader("📈 Performance Curves")
     plot_combined_curves(y_test, y_proba)
+
+    # Permutation Importance
+    show_permutation_importance(model, X_test, y_test)
 
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
