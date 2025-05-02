@@ -545,7 +545,7 @@ def evaluate_model(model, X_test, y_test):
     ax.set_ylabel('Actual')
     st.pyplot(fig)
 
-    # Feature Importance (based on Gini importance)
+    # Feature Importance (Gini)
     st.subheader("🔍 Feature Importance (Gini)")
     try:
         importances = pd.Series(
@@ -562,6 +562,10 @@ def evaluate_model(model, X_test, y_test):
 
     # Permutation Importance
     show_permutation_importance(model, X_test, y_test)
+
+    # Feature-to-Embedding Correlation Analysis
+    csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+    analyze_embedding_correlations(X_test, csv_url)
 
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
