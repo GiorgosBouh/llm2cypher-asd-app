@@ -185,11 +185,18 @@ def generate_graph_embeddings() -> bool:
 
     status_text = st.empty()
     progress_bar = st.progress(0)
-    status_text.text("⏳ Εκκίνηση εξωτερικού builder για embeddings...")
-    progress_bar.progress(10)
+    status_text.text("⏳ Connecting to Neo4j Aura and running builder...")
+    progress_bar.progress(5)
+
+    # 🔎 Βρες το μονοπάτι του builder
+    builder_path = os.path.join(os.path.dirname(__file__), "kg_builder_2.py")
+    if not os.path.exists(builder_path):
+        st.error(f"❌ Δεν βρέθηκε το αρχείο: {builder_path}")
+        return False
 
     try:
-        builder_path = os.path.join(os.path.dirname(__file__), "kg_builder_2.py")
+        st.info(f"📄 Εκκίνηση: `{builder_path}`")
+
         proc = subprocess.Popen(
             [sys.executable, builder_path],
             stdout=subprocess.PIPE,
@@ -198,19 +205,16 @@ def generate_graph_embeddings() -> bool:
         )
 
         output_lines = []
-
-        # Ροή stdout/err γραμμή προς γραμμή
         for line in proc.stdout:
             output_lines.append(line)
             status_text.text(line.strip())
-            st.text(line.strip())  # Πλήρης εκτύπωση στο UI
-            progress_bar.progress(min(progress_bar._value + 5, 95))
+            st.text(line.strip())  # εμφάνιση σε Streamlit
+            progress_bar.progress(min(progress_bar._value + 3, 95))
 
         proc.wait()
-
         if proc.returncode != 0:
-            status_text.error("❌ Ο builder απέτυχε.")
-            st.code("".join(output_lines), language="bash")  # Εμφάνιση όλων των γραμμών
+            status_text.error("❌ Ο builder απέτυχε (return code != 0)")
+            st.code("".join(output_lines), language="bash")
             return False
 
         progress_bar.progress(100)
@@ -218,7 +222,7 @@ def generate_graph_embeddings() -> bool:
         return True
 
     except Exception as e:
-        status_text.error(f"❌ Error generating embeddings: {e}")
+        status_text.error(f"❌ Σφάλμα: {e}")
         return False
 
     finally:
