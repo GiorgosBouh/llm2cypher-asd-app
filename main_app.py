@@ -766,11 +766,7 @@ def main():
     with tab2:
         st.header("🌐 Graph Embeddings")
         if st.button("🔁 Recalculate All Embeddings"):
-            with st.spinner("Generating embeddings with leakage checks..."):
-                if generate_graph_embeddings():
-                    st.success("Embeddings generated successfully!")
-                else:
-                    st.error("Failed to generate embeddings")
+             st.info("Αυτή η λειτουργία έχει απενεργοποιηθεί. Για embeddings, τρέξε το kg_builder_2.py.")
 
     # === File Upload Tab ===
     with tab3:
