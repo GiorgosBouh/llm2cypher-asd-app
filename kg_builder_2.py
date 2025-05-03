@@ -4,20 +4,10 @@ from neo4j import GraphDatabase
 import networkx as nx
 from node2vec import Node2Vec
 from random import shuffle
+import traceback
 
 # --- Neo4j Aura σύνδεση ---
-from dotenv import load_dotenv
-load_dotenv()
-
-def connect_to_neo4j():
-    import os
-    uri = os.getenv("NEO4J_URI")
-    user = os.getenv("NEO4J_USER")
-    password = os.getenv("NEO4J_PASSWORD")
-
-    if not all([uri, user, password]):
-        raise ValueError("❌ Missing Neo4j credentials in environment")
-
+def connect_to_neo4j(uri="neo4j+s://1f5f8a14.databases.neo4j.io", user="neo4j", password="3xhy4XKQSsSLIT7NI-w9m4Z7Y_WcVnL1hDQkWTMIoMQ"):
     print(f"🌐 Connecting to Neo4j Aura: {uri}", flush=True)
     return GraphDatabase.driver(uri, auth=(user, password))
 
@@ -26,23 +16,19 @@ def parse_csv(file_path):
     df = pd.read_csv(file_path, sep=";", encoding="utf-8-sig")
     df.columns = [col.strip() for col in df.columns]
     df = df.apply(lambda col: col.str.strip() if col.dtypes == 'object' else col)
-
     numeric_cols = ['Case_No', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9', 'A10', 'Age_Mons']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "."), errors='coerce')
-
-    print("\u2705 Καθαρίστηκαν οι στήλες:", df.columns.tolist())
+    print("✅ Καθαρίστηκαν οι στήλες:", df.columns.tolist(), flush=True)
     return df.dropna()
 
 # --- Δημιουργία κόμβων ---
 def create_nodes(tx, df):
     for q in [f"A{i}" for i in range(1, 11)]:
         tx.run("MERGE (:BehaviorQuestion {name: $q})", q=q)
-
     for column in ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]:
         for val in df[column].dropna().unique():
             tx.run("MERGE (:DemographicAttribute {type: $type, value: $val})", type=column, val=val)
-
     for val in df["Who_completed_the_test"].dropna().unique():
         tx.run("MERGE (:SubmitterType {type: $val})", val=val)
 
@@ -50,40 +36,24 @@ def create_nodes(tx, df):
 def create_relationships(tx, df):
     case_data = [{"id": int(row["Case_No"])} for _, row in df.iterrows()]
     answer_data, demo_data, submitter_data = [], [], []
-
     for _, row in df.iterrows():
         case_id = int(row["Case_No"])
         for q in [f"A{i}" for i in range(1, 11)]:
             answer_data.append({"case_id": case_id, "q": q, "val": int(row[q])})
-
         for col in ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]:
             demo_data.append({"case_id": case_id, "type": col, "val": row[col]})
-
         submitter_data.append({"case_id": case_id, "val": row["Who_completed_the_test"]})
 
-    tx.run("""
-    UNWIND $data as row
-    MERGE (c:Case {id: row.id})
-    SET c.embedding = null
-    """, data=case_data)
-
-    tx.run("""
-    UNWIND $data as row
-    MATCH (c:Case {id: row.case_id}), (b:BehaviorQuestion {name: row.q})
-    MERGE (c)-[:HAS_ANSWER {value: row.val}]->(b)
-    """, data=answer_data)
-
-    tx.run("""
-    UNWIND $data as row
-    MATCH (c:Case {id: row.case_id}), (d:DemographicAttribute {type: row.type, value: row.val})
-    MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)
-    """, data=demo_data)
-
-    tx.run("""
-    UNWIND $data as row
-    MATCH (c:Case {id: row.case_id}), (s:SubmitterType {type: row.val})
-    MERGE (c)-[:SUBMITTED_BY]->(s)
-    """, data=submitter_data)
+    tx.run("UNWIND $data as row MERGE (c:Case {id: row.id}) SET c.embedding = null", data=case_data)
+    tx.run("""UNWIND $data as row
+              MATCH (c:Case {id: row.case_id}), (b:BehaviorQuestion {name: row.q})
+              MERGE (c)-[:HAS_ANSWER {value: row.val}]->(b)""", data=answer_data)
+    tx.run("""UNWIND $data as row
+              MATCH (c:Case {id: row.case_id}), (d:DemographicAttribute {type: row.type, value: row.val})
+              MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)""", data=demo_data)
+    tx.run("""UNWIND $data as row
+              MATCH (c:Case {id: row.case_id}), (s:SubmitterType {type: row.val})
+              MERGE (c)-[:SUBMITTED_BY]->(s)""", data=submitter_data)
 
 # --- Ελαφριές σχέσεις ομοιότητας ---
 def create_similarity_relationships(tx, df, max_pairs=3000):
@@ -94,15 +64,12 @@ def create_similarity_relationships(tx, df, max_pairs=3000):
             for i in range(len(ids)):
                 for j in range(i+1, len(ids)):
                     pairs.append((int(ids[i]), int(ids[j])))
-
     for i, row1 in df.iterrows():
         for j, row2 in df.iloc[i + 1:].iterrows():
             if abs(row1["Qchat-10-Score"] - row2["Qchat-10-Score"]) <= 1:
                 pairs.append((int(row1["Case_No"]), int(row2["Case_No"])))
-
     shuffle(pairs)
     pairs = pairs[:max_pairs]
-
     tx.run("""
     UNWIND $batch AS pair
     MATCH (c1:Case {id: pair.id1}), (c2:Case {id: pair.id2})
@@ -115,21 +82,19 @@ def generate_embeddings(driver):
     with driver.session() as session:
         for r in session.run("MATCH (c:Case) RETURN c.id AS id"):
             G.add_node(str(r["id"]))
-
         rels = session.run("""
-        MATCH (c1:Case)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SCREENED_FOR|SUBMITTED_BY|GRAPH_SIMILARITY]->(c2)
-        RETURN c1.id AS source, labels(c2)[0] AS target_label, coalesce(c2.id, elementId(c2)) AS target_id
+            MATCH (c1:Case)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY|GRAPH_SIMILARITY]->(c2)
+            RETURN c1.id AS source, c2.id AS target
         """)
         for r in rels:
-            source = str(r["source"])
-            target = f"{r['target_label']}::{r['target_id']}"
-            G.add_edge(source, target)
+            if r["source"] and r["target"]:
+                G.add_edge(str(r["source"]), str(r["target"]))
 
     if len(G.nodes) == 0:
-        print("⚠️ Δεν βρέθηκαν κόμβοι!")
+        print("⚠️ Δεν βρέθηκαν κόμβοι!", flush=True)
         return
 
-    print("⏳ Εκπαίδευση Node2Vec...")
+    print(f"⏳ Εκπαίδευση Node2Vec... ({len(G.nodes)} nodes, {len(G.edges)} edges)", flush=True)
     node2vec = Node2Vec(G, dimensions=64, walk_length=10, num_walks=50, workers=1, seed=42)
     model = node2vec.fit(window=5, min_count=1)
 
@@ -138,7 +103,7 @@ def generate_embeddings(driver):
             vec = model.wv[str(node_id)].tolist()
             session.run("MATCH (c:Case {id: toInteger($id)}) SET c.embedding = $embedding",
                         id=node_id, embedding=vec)
-    print("✅ Embeddings αποθηκεύτηκαν!")
+    print("✅ Embeddings αποθηκεύτηκαν!", flush=True)
 
 # --- Run all ---
 def build_graph():
@@ -147,32 +112,24 @@ def build_graph():
 
     try:
         df = parse_csv(file_path)
-        print("🧠 First row:", df.iloc[0].to_dict())
-
+        print("🧠 First row:", df.iloc[0].to_dict(), flush=True)
         with driver.session() as session:
             print("⏳ Δημιουργία κόμβων...", flush=True)
             session.execute_write(create_nodes, df)
-            print("⏳ Δημιουργία σχέσεων...")
+            print("⏳ Δημιουργία σχέσεων...", flush=True)
             session.execute_write(create_relationships, df)
-            print("⏳ Δημιουργία σχέσεων ομοιότητας...")
+            print("⏳ Δημιουργία σχέσεων ομοιότητας...", flush=True)
             session.execute_write(create_similarity_relationships, df)
-
-        print("⏳ Δημιουργία embeddings...")
+        print("⏳ Δημιουργία embeddings...", flush=True)
         generate_embeddings(driver)
-
-        print("✅ Ολοκληρώθηκε επιτυχώς!")
+        print("✅ Ολοκληρώθηκε επιτυχώς!", flush=True)
 
     except Exception as e:
         print(f"❌ Σφάλμα: {str(e)}", flush=True)
-        import sys
-        sys.exit(1)
+        traceback.print_exc()
+
+    finally:
+        driver.close()
 
 if __name__ == "__main__":
-    try:
-        build_graph()
-        import sys
-        sys.exit(0)
-    except Exception as e:
-        print(f"❌ Σφάλμα: {str(e)}", flush=True)
-        import sys
-        sys.exit(1)
+    build_graph()
