@@ -209,7 +209,12 @@ def generate_graph_embeddings() -> bool:
             output_lines.append(line)
             status_text.text(line.strip())
             st.text(line.strip())  # εμφάνιση σε Streamlit
-            progress_bar.progress(min(progress_bar._value + 3, 95))
+            if not hasattr(progress_bar, "_current_progress"):
+                progress_bar._current_progress = 10
+            else:
+                 progress_bar._current_progress = min(progress_bar._current_progress + 5, 95)
+
+            progress_bar.progress(progress_bar._current_progress)
 
         proc.wait()
         if proc.returncode != 0:
