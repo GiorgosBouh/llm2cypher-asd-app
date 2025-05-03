@@ -313,7 +313,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         # 🔍 Καθαρισμός πιθανών κρυφών χαρακτήρων
         df.columns = [col.strip().replace('\r', '') for col in df.columns]
 
-        required_cols = ["Case_No", "Class_ASD_Traits"]
+        required_cols = ["Case_No", "Class_ASD_Traits "]
         missing = [col for col in required_cols if col not in df.columns]
 
         if missing:
