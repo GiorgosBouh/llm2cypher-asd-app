@@ -302,37 +302,35 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
     """Extracts training data with leakage protection and NaN handling"""
     try:
         df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
-        df.columns = [col.strip() for col in df.columns]
 
-        # Convert numeric columns
-        numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        # 🔍 Καθαρισμός πιθανών κρυφών χαρακτήρων
+        # 🔧 Καθαρισμός στηλών (αφαιρεί και κρυφά και περιττά κενά)
         df.columns = [col.strip().replace('\r', '') for col in df.columns]
+        df.columns = [col.strip() for col in df.columns]  # τελική μορφή
 
-        required_cols = ["Case_No", "Class_ASD_Traits "]
+        # Έλεγχος για βασικές στήλες
+        required_cols = ["Case_No", "Class_ASD_Traits"]
         missing = [col for col in required_cols if col not in df.columns]
-
         if missing:
             st.error(f"❌ Missing required columns: {', '.join(missing)}")
             st.write("📋 Found columns in CSV:", df.columns.tolist())
             return pd.DataFrame(), pd.Series()
 
-        # Get embeddings from Neo4j
-        with neo4j_service.session() as session:
-            embeddings = []
-            valid_ids = []
+        # Μετατροπή αριθμητικών πεδίων
+        numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
 
+        # Απόσπαση embeddings από Neo4j
+        embeddings = []
+        valid_ids = []
+        with neo4j_service.session() as session:
             for case_no in df["Case_No"]:
                 result = session.run("""
                     MATCH (c:Case {id: $id})
                     WHERE c.embedding IS NOT NULL
                     RETURN c.embedding AS embedding
                 """, id=int(case_no))
-
                 record = result.single()
                 if record and record["embedding"]:
                     embeddings.append(record["embedding"])
@@ -342,21 +340,20 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         print("📦 Valid Case_Nos with embeddings:", valid_ids[:5])
         print("📊 Total matched embeddings:", len(embeddings))
 
-        # Εξασφάλιση ότι το df έχει μόνο τις εγγραφές που υπάρχουν και στα embeddings
+        # Φιλτράρισμα μόνο για έγκυρες περιπτώσεις
         df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
 
-        # Matching labels
+        # Απόσπαση ετικετών
         y = df_filtered["Class_ASD_Traits"].apply(
             lambda x: 1 if str(x).strip().lower() == "yes" else 0
         )
 
-        # Αν θέλεις να σιγουρευτείς:
         assert len(embeddings) == len(y), f"⚠️ Embeddings: {len(embeddings)}, Labels: {len(y)}"
 
-        # Final X
+        # Δημιουργία X
         X = pd.DataFrame(embeddings[:len(y)])
 
-        # Final NaN check
+        # Imputation αν υπάρχουν NaN
         if X.isna().any().any():
             st.warning(f"⚠️ Found {X.isna().sum().sum()} NaN values in embeddings - applying imputation")
             X = X.fillna(X.mean())
