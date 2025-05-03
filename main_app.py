@@ -176,6 +176,7 @@ def remove_screened_for_labels():
 
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
+@safe_neo4j_operation
 def generate_graph_embeddings() -> bool:
     """Triggers the external kg_builder_2 process to compute embeddings once for all cases."""
     import subprocess, sys, time, os
@@ -188,10 +189,7 @@ def generate_graph_embeddings() -> bool:
     progress_bar.progress(10)
 
     try:
-        # 🔒 Σωστό relative path — πάντα βρίσκει το αρχείο ακόμα και σε server
         builder_path = os.path.join(os.path.dirname(__file__), "kg_builder_2.py")
-
-        # 🔁 Εκτέλεση subprocess
         proc = subprocess.Popen(
             [sys.executable, builder_path],
             stdout=subprocess.PIPE,
@@ -199,16 +197,20 @@ def generate_graph_embeddings() -> bool:
             text=True
         )
 
-        # 🔁 Ζωντανή ροή εξόδου στο Streamlit
+        output_lines = []
+
+        # Ροή stdout/err γραμμή προς γραμμή
         for line in proc.stdout:
-            st.text(line.strip())               # 👈 εναλλακτικά μπορείς να το αφαιρέσεις για πιο ήσυχο UI
-            status_text.text(line.strip())      # ✅ ενημερώνει την ένδειξη
+            output_lines.append(line)
+            status_text.text(line.strip())
+            st.text(line.strip())  # Πλήρης εκτύπωση στο UI
             progress_bar.progress(min(progress_bar._value + 5, 95))
 
-        stdout, _ = proc.communicate()
+        proc.wait()
+
         if proc.returncode != 0:
-            st.error("❌ Ο builder απέτυχε.")
-            st.code(stdout, language="bash")  # Δείξε όλα τα logs
+            status_text.error("❌ Ο builder απέτυχε.")
+            st.code("".join(output_lines), language="bash")  # Εμφάνιση όλων των γραμμών
             return False
 
         progress_bar.progress(100)

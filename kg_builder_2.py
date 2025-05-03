@@ -168,6 +168,11 @@ def build_graph():
         sys.exit(1)
 
 if __name__ == "__main__":
-    build_graph()
-    import sys
-    sys.exit(0)
+    try:
+        build_graph()
+        import sys
+        sys.exit(0)
+    except Exception as e:
+        print(f"❌ Σφάλμα: {str(e)}", flush=True)
+        import sys
+        sys.exit(1)
