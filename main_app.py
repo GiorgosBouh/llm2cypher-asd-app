@@ -207,7 +207,9 @@ def generate_graph_embeddings() -> bool:
 
         ret = proc.wait()
         if ret != 0:
-            status_text.error("❌ Ο builder απέτυχε.")
+            full_output, _ = proc.communicate()
+            st.error("❌ Ο builder απέτυχε.")
+            st.code(full_output, language="bash")  # 👈 εμφανίζει όλο το stdout/stderr
             return False
 
         progress_bar.progress(100)
