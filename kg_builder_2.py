@@ -75,9 +75,8 @@ def create_relationships(tx, df):
 
 # --- Δημιουργία σχέσεων ομοιότητας ---
 def create_similarity_relationships(tx, df):
+    # Ethnicity
     grouped_ethnicity = df.groupby("Ethnicity")["Case_No"].apply(list)
-    grouped_submitter = df.groupby("Who_completed_the_test")["Case_No"].apply(list)
-
     for case_list in grouped_ethnicity:
         for i in range(len(case_list)):
             for j in range(i + 1, len(case_list)):
@@ -86,6 +85,8 @@ def create_similarity_relationships(tx, df):
                 MERGE (c1)-[:SAME_ETHNICITY]->(c2)
                 """, id1=int(case_list[i]), id2=int(case_list[j]))
 
+    # Submitter
+    grouped_submitter = df.groupby("Who_completed_the_test")["Case_No"].apply(list)
     for case_list in grouped_submitter:
         for i in range(len(case_list)):
             for j in range(i + 1, len(case_list)):
@@ -93,6 +94,19 @@ def create_similarity_relationships(tx, df):
                 MATCH (c1:Case {id: $id1}), (c2:Case {id: $id2})
                 MERGE (c1)-[:SAME_SUBMITTER]->(c2)
                 """, id1=int(case_list[i]), id2=int(case_list[j]))
+
+    # QChat similarity (±1)
+    similar_qchat = []
+    for i, row1 in df.iterrows():
+        for j, row2 in df.iloc[i+1:].iterrows():
+            if abs(row1["Qchat-10-Score"] - row2["Qchat-10-Score"]) <= 1:
+                similar_qchat.append({"id1": int(row1["Case_No"]), "id2": int(row2["Case_No"])} )
+
+    tx.run("""
+    UNWIND $similarPairs AS pair
+    MATCH (c1:Case {id: pair.id1}), (c2:Case {id: pair.id2})
+    MERGE (c1)-[:SIMILAR_QCHAT_SCORE]->(c2)
+    """, similarPairs=similar_qchat)
 
 # --- Embeddings με Node2Vec ---
 def generate_embeddings(driver):
@@ -107,7 +121,7 @@ def generate_embeddings(driver):
             G.add_node(str(record["id"]))
 
         rel_result = session.run("""
-            MATCH (c1:Case)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SCREENED_FOR|SUBMITTED_BY|SAME_ETHNICITY|SAME_SUBMITTER]->(c2)
+            MATCH (c1:Case)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SCREENED_FOR|SUBMITTED_BY|SAME_ETHNICITY|SAME_SUBMITTER|SIMILAR_QCHAT_SCORE]->(c2)
             RETURN c1.id AS source, id(c2) AS target
         """)
         for record in rel_result:
