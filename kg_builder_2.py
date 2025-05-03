@@ -106,10 +106,12 @@ def generate_embeddings(driver):
 
         rels = session.run("""
         MATCH (c1:Case)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SCREENED_FOR|SUBMITTED_BY|GRAPH_SIMILARITY]->(c2)
-        RETURN c1.id AS source, id(c2) AS target
+        RETURN c1.id AS source, labels(c2)[0] AS target_label, coalesce(c2.id, elementId(c2)) AS target_id
         """)
         for r in rels:
-            G.add_edge(str(r["source"]), str(r["target"]))
+            source = str(r["source"])
+            target = f"{r['target_label']}::{r['target_id']}"
+            G.add_edge(source, target)
 
     if len(G.nodes) == 0:
         print("⚠️ Δεν βρέθηκαν κόμβοι!")
