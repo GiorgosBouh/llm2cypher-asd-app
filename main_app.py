@@ -585,6 +585,26 @@ def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]
     iso_forest.fit(embeddings_scaled)
 
     return iso_forest, scaler
+@safe_neo4j_operation
+def reinsert_labels_from_csv(csv_url: str):
+    """Επανατοποθέτηση SCREENED_FOR labels από CSV"""
+    df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
+    df.columns = [col.strip() for col in df.columns]
+
+    if "Case_No" not in df.columns or "Class_ASD_Traits" not in df.columns:
+        st.error("❌ Το CSV δεν περιέχει τις στήλες 'Case_No' και 'Class_ASD_Traits'")
+        return
+
+    with neo4j_service.session() as session:
+        for _, row in df.iterrows():
+            case_id = int(row["Case_No"])
+            label = str(row["Class_ASD_Traits"]).strip().lower()
+            if label in ["yes", "no"]:
+                session.run("""
+                    MATCH (c:Case {id: $case_id})
+                    MERGE (t:ASD_Trait {value: $label})
+                    MERGE (c)-[:SCREENED_FOR]->(t)
+                """, case_id=case_id, label=label.capitalize())
 # === Streamlit UI ===
 def main():
     st.title("🧠 NeuroCypher ASD")
