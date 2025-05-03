@@ -6,7 +6,19 @@ from node2vec import Node2Vec
 from random import shuffle
 
 # --- Neo4j Aura σύνδεση ---
-def connect_to_neo4j(uri="neo4j+s://1f5f8a14.databases.neo4j.io", user="neo4j", password="3xhy4XKQSsSLIT7NI-w9m4Z7Y_WcVnL1hDQkWTMIoMQ"):
+from dotenv import load_dotenv
+load_dotenv()
+
+def connect_to_neo4j():
+    import os
+    uri = os.getenv("NEO4J_URI")
+    user = os.getenv("NEO4J_USER")
+    password = os.getenv("NEO4J_PASSWORD")
+
+    if not all([uri, user, password]):
+        raise ValueError("❌ Missing Neo4j credentials in environment")
+
+    print(f"🌐 Connecting to Neo4j Aura: {uri}", flush=True)
     return GraphDatabase.driver(uri, auth=(user, password))
 
 # --- Καθαρισμός CSV ---
