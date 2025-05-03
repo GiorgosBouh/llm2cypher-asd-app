@@ -74,16 +74,18 @@ def create_relationships(tx, df):
     MERGE (c)-[:SUBMITTED_BY]->(s)
     """, data=submitter_data)
 
-# --- Lightweight similarity relationships ---
-def create_similarity_relationships(tx, df, max_pairs=5000):
+# --- Optimized Similarity Relationships ---
+def create_similarity_relationships(tx, df, max_pairs=1000):
     grouped_ethnicity = df.groupby("Ethnicity")["Case_No"].apply(list)
     grouped_submitter = df.groupby("Who_completed_the_test")["Case_No"].apply(list)
 
     all_pairs = []
     for group in [grouped_ethnicity, grouped_submitter]:
         for case_list in group:
-            all_pairs.extend([(int(case_list[i]), int(case_list[j]))
-                              for i in range(len(case_list)) for j in range(i + 1, len(case_list))])
+            all_pairs.extend([
+                (int(case_list[i]), int(case_list[j]))
+                for i in range(len(case_list)) for j in range(i + 1, len(case_list))
+            ])
 
     for i, row1 in df.iterrows():
         for j, row2 in df.iloc[i + 1:].iterrows():
@@ -91,15 +93,16 @@ def create_similarity_relationships(tx, df, max_pairs=5000):
                 all_pairs.append((int(row1["Case_No"]), int(row2["Case_No"])))
 
     shuffle(all_pairs)
-    batch = [{"id1": p[0], "id2": p[1]} for p in all_pairs[:max_pairs]]
+    selected_pairs = [{"id1": a, "id2": b} for a, b in all_pairs[:max_pairs]]
+    print(f"🔗 Σχέσεις ομοιότητας προς εισαγωγή: {len(selected_pairs)}")
 
     tx.run("""
     UNWIND $batch AS pair
     MATCH (c1:Case {id: pair.id1}), (c2:Case {id: pair.id2})
     MERGE (c1)-[:GRAPH_SIMILARITY]->(c2)
-    """, batch=batch)
+    """, batch=selected_pairs)
 
-# --- Embedding generation ---
+# --- Embedding Generation ---
 def generate_embeddings(driver):
     G = nx.Graph()
 
@@ -133,7 +136,7 @@ def generate_embeddings(driver):
 
     print("✅ Embeddings αποθηκεύτηκαν!")
 
-# --- Main execution ---
+# --- Main Execution ---
 def build_graph():
     driver = connect_to_neo4j()
     file_path = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
@@ -152,6 +155,7 @@ def build_graph():
 
         print("⏳ Δημιουργία embeddings...")
         generate_embeddings(driver)
+
         print("✅ Γράφος δημιουργήθηκε επιτυχώς!")
 
     except Exception as e:
@@ -161,4 +165,3 @@ def build_graph():
 
 if __name__ == "__main__":
     build_graph()
-
