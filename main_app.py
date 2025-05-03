@@ -205,11 +205,10 @@ def generate_graph_embeddings() -> bool:
             status_text.text(line.strip())      # ✅ ενημερώνει την ένδειξη
             progress_bar.progress(min(progress_bar._value + 5, 95))
 
-        ret = proc.wait()
-        if ret != 0:
-            full_output, _ = proc.communicate()
+        stdout, _ = proc.communicate()
+        if proc.returncode != 0:
             st.error("❌ Ο builder απέτυχε.")
-            st.code(full_output, language="bash")  # 👈 εμφανίζει όλο το stdout/stderr
+            st.code(stdout, language="bash")  # Δείξε όλα τα logs
             return False
 
         progress_bar.progress(100)

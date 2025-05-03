@@ -150,7 +150,7 @@ def build_graph():
         print("🧠 First row:", df.iloc[0].to_dict())
 
         with driver.session() as session:
-            print("⏳ Δημιουργία κόμβων...")
+            print("⏳ Δημιουργία κόμβων...", flush=True)
             session.execute_write(create_nodes, df)
             print("⏳ Δημιουργία σχέσεων...")
             session.execute_write(create_relationships, df)
@@ -163,9 +163,11 @@ def build_graph():
         print("✅ Ολοκληρώθηκε επιτυχώς!")
 
     except Exception as e:
-        print(f"❌ Σφάλμα: {str(e)}")
-    finally:
-        driver.close()
+        print(f"❌ Σφάλμα: {str(e)}", flush=True)
+        import sys
+        sys.exit(1)
 
 if __name__ == "__main__":
     build_graph()
+    import sys
+    sys.exit(0)
