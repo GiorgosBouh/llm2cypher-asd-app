@@ -3,12 +3,13 @@ import numpy as np
 from neo4j import GraphDatabase
 import networkx as nx
 from node2vec import Node2Vec
+from random import shuffle
 
-# --- Neo4j Aura σύνδεση ---
+# --- Neo4j Aura connection ---
 def connect_to_neo4j(uri="neo4j+s://1f5f8a14.databases.neo4j.io", user="neo4j", password="3xhy4XKQSsSLIT7NI-w9m4Z7Y_WcVnL1hDQkWTMIoMQ"):
     return GraphDatabase.driver(uri, auth=(user, password))
 
-# --- Ανάγνωση και καθαρισμός CSV από GitHub ---
+# --- CSV loading and cleaning ---
 def parse_csv(file_path):
     df = pd.read_csv(file_path, sep=";", encoding="utf-8-sig")
     df.columns = [col.strip() for col in df.columns]
@@ -21,7 +22,7 @@ def parse_csv(file_path):
     print("\u2705 Καθαρίστηκαν οι στήλες:", df.columns.tolist())
     return df.dropna()
 
-# --- Δημιουργία κόμβων ---
+# --- Node creation ---
 def create_nodes(tx, df):
     for q in [f"A{i}" for i in range(1, 11)]:
         tx.run("MERGE (:BehaviorQuestion {name: $q})", q=q)
@@ -34,7 +35,7 @@ def create_nodes(tx, df):
     for val in df["Who_completed_the_test"].dropna().unique():
         tx.run("MERGE (:SubmitterType {type: $val})", val=val)
 
-# --- Δημιουργία σχέσεων ---
+# --- Relationship creation ---
 def create_relationships(tx, df):
     case_data = [{"id": int(row["Case_No"])} for _, row in df.iterrows()]
     answer_data, demo_data, submitter_data = [], [], []
@@ -73,55 +74,42 @@ def create_relationships(tx, df):
     MERGE (c)-[:SUBMITTED_BY]->(s)
     """, data=submitter_data)
 
-# --- Δημιουργία σχέσεων ομοιότητας ---
-def create_similarity_relationships(tx, df):
-    # Ethnicity
+# --- Lightweight similarity relationships ---
+def create_similarity_relationships(tx, df, max_pairs=5000):
     grouped_ethnicity = df.groupby("Ethnicity")["Case_No"].apply(list)
-    for case_list in grouped_ethnicity:
-        for i in range(len(case_list)):
-            for j in range(i + 1, len(case_list)):
-                tx.run("""
-                MATCH (c1:Case {id: $id1}), (c2:Case {id: $id2})
-                MERGE (c1)-[:SAME_ETHNICITY]->(c2)
-                """, id1=int(case_list[i]), id2=int(case_list[j]))
-
-    # Submitter
     grouped_submitter = df.groupby("Who_completed_the_test")["Case_No"].apply(list)
-    for case_list in grouped_submitter:
-        for i in range(len(case_list)):
-            for j in range(i + 1, len(case_list)):
-                tx.run("""
-                MATCH (c1:Case {id: $id1}), (c2:Case {id: $id2})
-                MERGE (c1)-[:SAME_SUBMITTER]->(c2)
-                """, id1=int(case_list[i]), id2=int(case_list[j]))
 
-    # QChat similarity (±1)
-    similar_qchat = []
+    all_pairs = []
+    for group in [grouped_ethnicity, grouped_submitter]:
+        for case_list in group:
+            all_pairs.extend([(int(case_list[i]), int(case_list[j]))
+                              for i in range(len(case_list)) for j in range(i + 1, len(case_list))])
+
     for i, row1 in df.iterrows():
-        for j, row2 in df.iloc[i+1:].iterrows():
+        for j, row2 in df.iloc[i + 1:].iterrows():
             if abs(row1["Qchat-10-Score"] - row2["Qchat-10-Score"]) <= 1:
-                similar_qchat.append({"id1": int(row1["Case_No"]), "id2": int(row2["Case_No"])} )
+                all_pairs.append((int(row1["Case_No"]), int(row2["Case_No"])))
+
+    shuffle(all_pairs)
+    batch = [{"id1": p[0], "id2": p[1]} for p in all_pairs[:max_pairs]]
 
     tx.run("""
-    UNWIND $similarPairs AS pair
+    UNWIND $batch AS pair
     MATCH (c1:Case {id: pair.id1}), (c2:Case {id: pair.id2})
-    MERGE (c1)-[:SIMILAR_QCHAT_SCORE]->(c2)
-    """, similarPairs=similar_qchat)
+    MERGE (c1)-[:GRAPH_SIMILARITY]->(c2)
+    """, batch=batch)
 
-# --- Embeddings με Node2Vec ---
+# --- Embedding generation ---
 def generate_embeddings(driver):
     G = nx.Graph()
 
     with driver.session() as session:
-        result = session.run("""
-            MATCH (c:Case)
-            RETURN c.id AS id
-        """)
+        result = session.run("MATCH (c:Case) RETURN c.id AS id")
         for record in result:
             G.add_node(str(record["id"]))
 
         rel_result = session.run("""
-            MATCH (c1:Case)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SCREENED_FOR|SUBMITTED_BY|SAME_ETHNICITY|SAME_SUBMITTER|SIMILAR_QCHAT_SCORE]->(c2)
+            MATCH (c1:Case)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SCREENED_FOR|SUBMITTED_BY|GRAPH_SIMILARITY]->(c2)
             RETURN c1.id AS source, id(c2) AS target
         """)
         for record in rel_result:
@@ -145,7 +133,7 @@ def generate_embeddings(driver):
 
     print("✅ Embeddings αποθηκεύτηκαν!")
 
-# --- Κύρια εκτέλεση ---
+# --- Main execution ---
 def build_graph():
     driver = connect_to_neo4j()
     file_path = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
@@ -164,7 +152,6 @@ def build_graph():
 
         print("⏳ Δημιουργία embeddings...")
         generate_embeddings(driver)
-
         print("✅ Γράφος δημιουργήθηκε επιτυχώς!")
 
     except Exception as e:
@@ -174,3 +161,4 @@ def build_graph():
 
 if __name__ == "__main__":
     build_graph()
+
