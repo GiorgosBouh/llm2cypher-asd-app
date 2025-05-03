@@ -178,11 +178,9 @@ def remove_screened_for_labels():
 @safe_neo4j_operation
 def generate_graph_embeddings() -> bool:
     """Triggers the external kg_builder_2 process to compute embeddings once for all cases."""
-    # 1. Remove label edges for leakage protection
-    remove_screened_for_labels()
+    import subprocess, sys, time, os
 
-    # 2. Call the external builder (kg_builder_2.py) via subprocess
-    import subprocess, sys, time
+    remove_screened_for_labels()  # Προστασία από leakage
 
     status_text = st.empty()
     progress_bar = st.progress(0)
@@ -190,20 +188,22 @@ def generate_graph_embeddings() -> bool:
     progress_bar.progress(10)
 
     try:
-        # Launch kg_builder_2.py
+        # 🔒 Σωστό relative path — πάντα βρίσκει το αρχείο ακόμα και σε server
+        builder_path = os.path.join(os.path.dirname(__file__), "kg_builder_2.py")
+
+        # 🔁 Εκτέλεση subprocess
         proc = subprocess.Popen(
-            [sys.executable, "kg_builder_2.py"],
+            [sys.executable, builder_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True
         )
 
-        # Stream its stdout back into Streamlit
+        # 🔁 Ζωντανή ροή εξόδου στο Streamlit
         for line in proc.stdout:
-            if line.startswith("⏳"):  # any builder progress marker
-                # bump progress by 5% each time
-                progress_bar.progress(min(progress_bar._value + 5, 90))
-            status_text.text(line.strip())
+            st.text(line.strip())               # 👈 εναλλακτικά μπορείς να το αφαιρέσεις για πιο ήσυχο UI
+            status_text.text(line.strip())      # ✅ ενημερώνει την ένδειξη
+            progress_bar.progress(min(progress_bar._value + 5, 95))
 
         ret = proc.wait()
         if ret != 0:
@@ -211,7 +211,7 @@ def generate_graph_embeddings() -> bool:
             return False
 
         progress_bar.progress(100)
-        status_text.text("✅ Embeddings generated externally and stored!")
+        status_text.text("✅ Embeddings generated and stored!")
         return True
 
     except Exception as e:
