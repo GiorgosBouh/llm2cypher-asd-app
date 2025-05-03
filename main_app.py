@@ -177,185 +177,51 @@ def remove_screened_for_labels():
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
 def generate_graph_embeddings() -> bool:
-    """Generates graph embeddings with leakage protection"""
+    """Triggers the external kg_builder_2 process to compute embeddings once for all cases."""
+    # 1. Remove label edges for leakage protection
     remove_screened_for_labels()
-    progress_bar = st.progress(0)
+
+    # 2. Call the external builder (kg_builder_2.py) via subprocess
+    import subprocess, sys, time
+
     status_text = st.empty()
-    temp_dir = None
-    model = None
-    
+    progress_bar = st.progress(0)
+    status_text.text("⏳ Εκκίνηση εξωτερικού builder για embeddings...")
+    progress_bar.progress(10)
+
     try:
-        # Step 0: Remove all label connections to prevent leakage
-        with neo4j_service.session() as session:
-            deleted = session.run("""
-                MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait)
-                DELETE r
-                RETURN count(r) AS deleted_count
-            """).single()["deleted_count"]
-            logger.info(f"Deleted {deleted} SCREENED_FOR relationships")
-
-            if Config.LEAKAGE_CHECK:
-                remaining = session.run("""
-                    MATCH (c:Case)-[:SCREENED_FOR]->(:ASD_Trait)
-                    RETURN count(c) AS remaining
-                """).single()["remaining"]
-                if remaining > 0:
-                    raise ValueError(f"Data leakage detected: {remaining} cases still linked to labels")
-
-        # Create temp directory
-        temp_dir = tempfile.mkdtemp(prefix="node2vec_")
-        logger.info(f"Created temp directory at {temp_dir}")
-        
-        # Step 1: Extract graph structure
-        status_text.text("Step 1/4: Extracting graph structure...")
-        progress_bar.progress(10)
-        
-        with neo4j_service.session() as session:
-            # Get nodes with their upload_ids (excluding label connections)
-            node_result = session.run("""
-                MATCH (n) 
-                WHERE n:BehaviorQuestion OR n:DemographicAttribute 
-                   OR n:SubmitterType OR (n:Case AND NOT EXISTS((n)-[:SCREENED_FOR]->(:ASD_Trait)))
-                RETURN elementId(n) AS node_id, n.upload_id AS upload_id
-            """)
-            node_data = [(record["node_id"], record["upload_id"]) for record in node_result]
-            
-            if not node_data:
-                st.error("No valid nodes found for embedding generation")
-                return False
-                
-            # Get relationships with safety limit
-            rel_result = session.run(f"""
-                MATCH (n)-[r]->(m)
-                RETURN id(n) as source, id(m) as target
-                LIMIT {Config.MAX_RELATIONSHIPS}
-            """)
-            edges = [(record["source"], record["target"]) for record in rel_result]
-
-        # Step 2: Create NetworkX graph
-        status_text.text(f"Step 2/4: Creating graph ({len(node_data)} nodes, {len(edges)} edges)...")
-        progress_bar.progress(30)
-        
-        G = nx.Graph()
-        G.add_nodes_from([node_id for node_id, _ in node_data])
-        
-        # Add edges in chunks to avoid memory issues
-        chunk_size = 10000
-        for i in range(0, len(edges), chunk_size):
-            G.add_edges_from(edges[i:i+chunk_size])
-            progress = 30 + int(20 * min(i/len(edges), 1))
-            progress_bar.progress(progress)
-        
-        # Remove self-loops if any
-        G.remove_edges_from(nx.selfloop_edges(G))
-        
-        # Step 3: Generate embeddings
-        status_text.text("Step 3/4: Generating embeddings... (This may take 3-5 minutes)")
-        progress_bar.progress(50)
-        
-        # Initialize Node2Vec with conservative parameters
-        node2vec = Node2Vec(
-            G,
-            dimensions=Config.EMBEDDING_DIM,
-            walk_length=Config.NODE2VEC_WALK_LENGTH,
-            num_walks=Config.NODE2VEC_NUM_WALKS,
-            workers=Config.NODE2VEC_WORKERS,
-            p=Config.NODE2VEC_P,
-            q=Config.NODE2VEC_Q,
-            seed=Config.RANDOM_STATE,
-            temp_folder=temp_dir,
-            quiet=True
+        # Launch kg_builder_2.py
+        proc = subprocess.Popen(
+            [sys.executable, "kg_builder_2.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
         )
-        
-        # Train model with timeout
-        start_time = time.time()
-        timeout = Config.EMBEDDING_GENERATION_TIMEOUT
-        
-        model = node2vec.fit(
-            window=5,
-            min_count=1,
-            batch_words=4,
-            epochs=1
-        )
-        
-        if time.time() - start_time > timeout:
-            raise TimeoutError(f"Embedding generation timed out after {timeout} seconds")
-        
-        # Step 4: Store embeddings
-        status_text.text("Step 4/4: Storing embeddings...")
-        progress_bar.progress(70)
-        
-        with neo4j_service.session() as session:
-            total_nodes = len(node_data)
-            processed = 0
-            
-            for node_id, upload_id in node_data:
-                if str(node_id) in model.wv:
-                    embedding = model.wv[str(node_id)].tolist()
-                    # Use upload_id if available, otherwise use node_id
-                    if upload_id:
-                        session.run(
-                            """
-                            MATCH (n {upload_id: $upload_id})
-                            SET n.embedding = $embedding
-                            """,
-                            {"upload_id": upload_id, "embedding": embedding}
-                        )
-                    else:
-                        session.run(
-                            """
-                            MATCH (n)
-                            WHERE elementId(n) = $node_id
-                            SET n.embedding = $embedding
-                            """,
-                            {"node_id": node_id, "embedding": embedding}
-                        )
-                
-                processed += 1
-                progress = 70 + int(30 * (processed / total_nodes))
-                progress_bar.progress(min(progress, 99))
-        
-        status_text.text("✅ Graph embeddings generated successfully!")
+
+        # Stream its stdout back into Streamlit
+        for line in proc.stdout:
+            if line.startswith("⏳"):  # any builder progress marker
+                # bump progress by 5% each time
+                progress_bar.progress(min(progress_bar._value + 5, 90))
+            status_text.text(line.strip())
+
+        ret = proc.wait()
+        if ret != 0:
+            status_text.error("❌ Ο builder απέτυχε.")
+            return False
+
         progress_bar.progress(100)
-        logger.info("Successfully generated and stored graph embeddings")
+        status_text.text("✅ Embeddings generated externally and stored!")
         return True
-        
+
     except Exception as e:
-        status_text.error(f"❌ Error generating embeddings: {str(e)}")
-        logger.error(f"Embedding generation failed: {str(e)}", exc_info=True)
+        status_text.error(f"❌ Error generating embeddings: {e}")
         return False
+
     finally:
-        # Clean up resources
-        if temp_dir and os.path.exists(temp_dir):
-            try:
-                shutil.rmtree(temp_dir)
-                logger.info(f"Removed temp directory {temp_dir}")
-            except Exception as e:
-                logger.error(f"Error removing temp directory: {str(e)}")
-        
-        time.sleep(2)
+        time.sleep(1)
         status_text.empty()
         progress_bar.empty()
-
-@safe_neo4j_operation
-def reinsert_labels_from_csv(file_path: str):
-    df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
-    df.columns = [col.strip().replace('\ufeff', '') for col in df.columns]  # 🔧 Καθαρισμός ονομάτων στηλών
-
-    # Προαιρετικά για debug
-    if "Class_ASD_Traits" not in df.columns:
-        print("🛑 Οι στήλες είναι:", df.columns.tolist())
-        raise ValueError("Η στήλη 'Class_ASD_Traits' δεν βρέθηκε στο αρχείο.")
-
-    with neo4j_service.session() as session:
-        for _, row in df.iterrows():
-            label = str(row["Class_ASD_Traits"]).strip().lower()
-            if label in ["yes", "no"]:
-                session.run("""
-                    MATCH (c:Case {id: $id})
-                    MERGE (t:ASD_Trait {value: $label})
-                    MERGE (c)-[:SCREENED_FOR]->(t)
-                """, id=int(row["Case_No"]), label=label.capitalize())
 # === Natural Language to Cypher ===
 def nl_to_cypher(question: str) -> Optional[str]:
     """Translates natural language to Cypher using OpenAI"""
