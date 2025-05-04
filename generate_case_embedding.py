@@ -1,72 +1,57 @@
-import os
-from dotenv import load_dotenv
-from neo4j import GraphDatabase
-import networkx as nx
 from node2vec import Node2Vec
+import networkx as nx
 import numpy as np
 
-# === Load environment variables ===
-load_dotenv()
-NEO4J_URI = os.getenv("NEO4J_URI")
-NEO4J_USER = os.getenv("NEO4J_USER")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+def generate_embedding_for_case(driver, upload_id: str):
+    print(f"[INFO] Generating embedding for case: {upload_id}")
 
-# === Connect to Neo4j ===
-driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
-
-def generate_embedding_for_case(upload_id):
     G = nx.Graph()
 
     with driver.session() as session:
-        # Step 1: Get the case node
+        # 1. Ανάκτησε τον κόμβο και τους γείτονες
         result = session.run("""
-            MATCH (c:Case {upload_id: $upload_id})
-            RETURN c.id AS id
+            MATCH (c:Case {upload_id: $upload_id})-[r]-(n)
+            RETURN c.id AS case_id, id(n) AS neighbor_id
         """, upload_id=upload_id)
 
-        record = result.single()
-        if not record:
-            print(f"❌ Case with upload_id {upload_id} not found.")
-            return
+        edges = []
+        case_id = None
 
-        node_id = str(record["id"])
-        G.add_node(node_id)
+        for record in result:
+            case_id = str(record["case_id"])
+            neighbor_id = str(record["neighbor_id"])
+            edges.append((case_id, neighbor_id))
 
-        # Step 2: Get its neighbors
-        neighbors = session.run("""
-            MATCH (c:Case {upload_id: $upload_id})-[r]->(n)
-            RETURN c.id AS source, n.id AS target
-        """, upload_id=upload_id)
+        if not edges:
+            print("\u26a0\ufe0f Not enough structure to build a subgraph for Node2Vec.")
+            return False
 
-        for r in neighbors:
-            if r["source"] and r["target"]:
-                G.add_edge(str(r["source"]), str(r["target"]))
+        # 2. Δημιούργησε γράφο
+        for edge in edges:
+            G.add_node(edge[0])
+            G.add_node(edge[1])
+            G.add_edge(edge[0], edge[1])
 
-        if len(G.nodes) < 2:
-            print("⚠️ Not enough structure to build a subgraph for Node2Vec.")
-            return
+    print(f"[DEBUG] Subgraph Nodes: {list(G.nodes)}")
+    print(f"[DEBUG] Subgraph Edges: {list(G.edges)}")
 
-        print(f"⏳ Training Node2Vec for case {upload_id} ({len(G.nodes)} nodes)...")
+    if len(G.nodes) < 2:
+        print("\u26a0\ufe0f Subgraph too small for Node2Vec walk.")
+        return False
 
-        node2vec = Node2Vec(G, dimensions=64, walk_length=10, num_walks=50, workers=1, seed=42)
-        model = node2vec.fit(window=5, min_count=1)
+    # 3. Εκπαίδευσε Node2Vec στο subgraph
+    node2vec = Node2Vec(
+        G, dimensions=64, walk_length=10, num_walks=20, workers=1, seed=42
+    )
+    model = node2vec.fit(window=5, min_count=1)
 
-        vec = model.wv[node_id].tolist()
-
-        # Step 3: Store the new embedding
+    # 4. Απόθηκευσε το embedding στο γράφο
+    vec = model.wv[case_id].tolist()
+    with driver.session() as session:
         session.run("""
             MATCH (c:Case {upload_id: $upload_id})
             SET c.embedding = $embedding
         """, upload_id=upload_id, embedding=vec)
 
-        print(f"✅ Embedding stored for case {upload_id}.")
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) != 2:
-        print("Usage: python generate_case_embedding.py <upload_id>")
-        exit(1)
-
-    upload_id = sys.argv[1]
-    generate_embedding_for_case(upload_id)
-    driver.close()
+    print("\u2705 Local embedding saved successfully!")
+    return True

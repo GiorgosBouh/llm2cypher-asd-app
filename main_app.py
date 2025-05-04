@@ -713,11 +713,13 @@ def main():
                     upload_id = insert_user_case(row, upload_id)
                     st.session_state.last_upload_id = upload_id
 
-                # 2. Generate embeddings
-                with st.spinner("Generating embedding for new case..."):
-                    if not generate_embedding_for_case(upload_id):
-                        st.error("Embedding generation failed")
-                        st.stop()
+                # 2. Generate embedding just for this case
+                with st.spinner("Generating graph embedding for new case..."):
+                    from generate_case_embedding import generate_embedding_for_case
+                    success = generate_embedding_for_case(neo4j_service.driver, upload_id)
+                    if not success:
+                        st.error("❌ Failed to generate embedding for new case")
+                        st.stop()           
 
                 # 3. Extract embedding
                 with st.spinner("Extracting case embedding..."):
