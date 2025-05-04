@@ -675,7 +675,7 @@ def main():
     with tab2:
         st.header("🌐 Graph Embeddings")
         if st.button("🔁 Recalculate All Embeddings"):
-             st.info("Αυτή η λειτουργία έχει απενεργοποιηθεί. Για embeddings, τρέξε το kg_builder_2.py.")
+            st.info("Αυτή η λειτουργία έχει απενεργοποιηθεί. Για embeddings, τρέξε το kg_builder_2.py.")
 
     # === File Upload Tab ===
     with tab3:
@@ -731,6 +731,38 @@ def main():
                 st.subheader("🧠 Case Embedding")
                 st.write(embedding)
 
+                # === DEBUGGING INFO for New Case ===
+                st.subheader("🧪 Embedding Diagnostics")
+
+                st.text("📦 Embedding vector:")
+                st.write(embedding.tolist())
+
+                st.text("✅ Embedding integrity check:")
+                if embedding is None:
+                    st.error("❌ Embedding is None.")
+                elif np.isnan(embedding).any():
+                    st.error("❌ Embedding contains NaN values.")
+                else:
+                    st.success("✅ Embedding is valid (no NaNs)")
+
+                with neo4j_service.session() as session:
+                    degree_result = session.run("""
+                        MATCH (c:Case {upload_id: $upload_id})--(n)
+                        RETURN count(n) AS degree
+                    """, upload_id=upload_id)
+                    degree = degree_result.single()["degree"]
+                    st.text(f"🔗 Number of connected nodes: {degree}")
+                    if degree < 5:
+                        st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
+
+                if "model_results" in st.session_state:
+                    X_train = st.session_state.model_results["X_test"]
+                    train_mean = X_train.mean().values
+                    dist = np.linalg.norm(embedding - train_mean)
+                    st.text(f"📏 Distance from train mean: {dist:.4f}")
+                    if dist > 5.0:
+                        st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
+
                 # 4. Make prediction if model exists
                 if "model_results" in st.session_state:
                     model = st.session_state.model_results["model"]
@@ -742,7 +774,6 @@ def main():
                     col1.metric("Prediction", prediction)
                     col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
 
-                    # Show probability distribution
                     fig = px.bar(
                         x=["Typical", "ASD Traits"],
                         y=[1-proba, proba],
