@@ -118,15 +118,6 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
         {"upload_id": upload_id, "id": int(row["Case_No"])}
     ))
 
-    # ✅ Διαγραφή παλιών σχέσεων (αν υπάρχουν)
-    queries.append((
-        """
-        MATCH (c:Case {upload_id: $upload_id})-[r]->()
-        DELETE r
-        """,
-        {"upload_id": upload_id}
-    ))
-
     # ✅ Δημιουργία σχέσεων με ερωτήσεις συμπεριφοράς
     for i in range(1, 11):
         q = f"A{i}"
@@ -135,7 +126,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
             """
             MATCH (q:BehaviorQuestion {name: $q})
             MATCH (c:Case {upload_id: $upload_id})
-            MERGE (c)-[:HAS_ANSWER {value: $val}]->(q)
+            CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
             """,
             {"q": q, "val": val, "upload_id": upload_id}
         ))
@@ -152,7 +143,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
             """
             MATCH (d:DemographicAttribute {type: $k, value: $v})
             MATCH (c:Case {upload_id: $upload_id})
-            MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)
+            CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
             """,
             {"k": k, "v": v, "upload_id": upload_id}
         ))
@@ -162,7 +153,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
         """
         MATCH (s:SubmitterType {type: $who})
         MATCH (c:Case {upload_id: $upload_id})
-        MERGE (c)-[:SUBMITTED_BY]->(s)
+        CREATE (c)-[:SUBMITTED_BY]->(s)
         """,
         {"who": row["Who_completed_the_test"], "upload_id": upload_id}
     ))
@@ -171,7 +162,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
     with neo4j_service.session() as session:
         for query, params in queries:
             session.run(query, **params)
-        logger.info(f"✅ Inserted/updated case with upload_id {upload_id}")
+        logger.info(f"✅ Inserted new case with upload_id {upload_id}")
 
     return upload_id
 
@@ -726,10 +717,9 @@ def main():
 
                 # 2. Generate embedding just for this case
                 with st.spinner("Generating graph embedding for new case..."):
-                    from generate_case_embedding import generate_embedding_for_case
                     success = generate_embedding_for_case(neo4j_service.driver, upload_id)
                     if not success:
-                        st.error("❌ Failed to generate embedding for new case")
+                        st.error("❌ Failed to generate embedding. The case may be too isolated in the graph.")
                         st.stop()           
 
                 # 3. Extract embedding
