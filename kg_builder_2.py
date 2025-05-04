@@ -5,6 +5,7 @@ import networkx as nx
 from node2vec import Node2Vec
 from random import shuffle
 import traceback
+import sys  # ✅ Προστέθηκε για έξοδο με κωδικό
 
 def connect_to_neo4j(uri="neo4j+s://1f5f8a14.databases.neo4j.io", user="neo4j", password="3xhy4XKQSsSLIT7NI-w9m4Z7Y_WcVnL1hDQkWTMIoMQ"):
     print(f"🌐 Connecting to Neo4j Aura: {uri}", flush=True)
@@ -128,13 +129,15 @@ def build_graph():
         print("⏳ Δημιουργία embeddings...", flush=True)
         generate_embeddings(driver)
         print("✅ Ολοκληρώθηκε επιτυχώς!", flush=True)
+        sys.exit(0)  # ✅ επιτυχής έξοδος
 
     except Exception as e:
         print(f"❌ Σφάλμα: {str(e)}", flush=True)
         traceback.print_exc()
+        sys.exit(1)  # ❌ αποτυχία
 
     finally:
         driver.close()
 
 if __name__ == "__main__":
-    build_graph()
+    build_graph()    build_graph()
