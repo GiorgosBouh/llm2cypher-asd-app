@@ -46,7 +46,13 @@ def create_relationships(tx, df):
             demo_data.append({"case_id": case_id, "type": col, "val": row[col]})
         submitter_data.append({"case_id": case_id, "val": row["Who_completed_the_test"]})
 
-    tx.run("UNWIND $data as row MERGE (c:Case {id: row.id}) SET c.embedding = null", data=case_data)
+    tx.run("""
+    UNWIND $data as row 
+    MERGE (c:Case {id: row.id}) 
+    SET c.upload_id = "initial_case_" + toString(row.id),
+        c.embedding = null
+    """, data=case_data)
+
     tx.run("""UNWIND $data as row
               MATCH (c:Case {id: row.case_id}), (b:BehaviorQuestion {name: row.q})
               MERGE (c)-[:HAS_ANSWER {value: row.val}]->(b)""", data=answer_data)
