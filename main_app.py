@@ -717,7 +717,7 @@ def main():
 
                 # 2. Generate embedding just for this case
                 with st.spinner("Generating graph embedding for new case..."):
-                    success = generate_embedding_for_case(neo4j_service.driver, upload_id)
+                    success = generate_embedding_for_case(upload_id)
                     if not success:
                         st.error("❌ Failed to generate embedding. The case may be too isolated in the graph.")
                         st.stop()           
