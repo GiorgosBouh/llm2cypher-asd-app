@@ -176,7 +176,6 @@ def remove_screened_for_labels():
 
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
-@safe_neo4j_operation
 def generate_graph_embeddings() -> bool:
     """Triggers the external kg_builder_2 process to compute embeddings once for all cases."""
     import subprocess, sys, time, os
@@ -196,7 +195,7 @@ def generate_graph_embeddings() -> bool:
 
     try:
         st.info(f"📄 Εκκίνηση: `{builder_path}`")
-
+        print(f"[DEBUG] Running kg_builder_2.py at: {builder_path}")
         proc = subprocess.Popen(
             [sys.executable, builder_path],
             stdout=subprocess.PIPE,
@@ -220,6 +219,11 @@ def generate_graph_embeddings() -> bool:
         if proc.returncode != 0:
             status_text.error("❌ Ο builder απέτυχε (return code != 0)")
             st.code("".join(output_lines), language="bash")
+            return False
+        if proc.returncode != 0:
+            #Εκτύπωσε το πλήρες output αν απέτυχε
+            st.error("❌ Ο builder απέτυχε (return code != 0)")
+            st.code("".join(output_lines), language="bash")  # ✅ Προσθέτει εμφανές log
             return False
 
         progress_bar.progress(100)
