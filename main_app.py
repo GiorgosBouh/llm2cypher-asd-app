@@ -118,6 +118,15 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
         {"upload_id": upload_id, "id": int(row["Case_No"])}
     ))
 
+    # ✅ Διαγραφή παλιών σχέσεων (αν υπάρχουν)
+    queries.append((
+        """
+        MATCH (c:Case {upload_id: $upload_id})-[r]->()
+        DELETE r
+        """,
+        {"upload_id": upload_id}
+    ))
+
     # ✅ Δημιουργία σχέσεων με ερωτήσεις συμπεριφοράς
     for i in range(1, 11):
         q = f"A{i}"
@@ -126,7 +135,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
             """
             MATCH (q:BehaviorQuestion {name: $q})
             MATCH (c:Case {upload_id: $upload_id})
-            CREATE (c)-[:HAS_ANSWER {value: $val}]->(q)
+            MERGE (c)-[:HAS_ANSWER {value: $val}]->(q)
             """,
             {"q": q, "val": val, "upload_id": upload_id}
         ))
@@ -143,7 +152,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
             """
             MATCH (d:DemographicAttribute {type: $k, value: $v})
             MATCH (c:Case {upload_id: $upload_id})
-            CREATE (c)-[:HAS_DEMOGRAPHIC]->(d)
+            MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)
             """,
             {"k": k, "v": v, "upload_id": upload_id}
         ))
@@ -153,7 +162,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
         """
         MATCH (s:SubmitterType {type: $who})
         MATCH (c:Case {upload_id: $upload_id})
-        CREATE (c)-[:SUBMITTED_BY]->(s)
+        MERGE (c)-[:SUBMITTED_BY]->(s)
         """,
         {"who": row["Who_completed_the_test"], "upload_id": upload_id}
     ))
@@ -162,7 +171,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
     with neo4j_service.session() as session:
         for query, params in queries:
             session.run(query, **params)
-        logger.info(f"✅ Inserted new case with upload_id {upload_id}")
+        logger.info(f"✅ Inserted/updated case with upload_id {upload_id}")
 
     return upload_id
 
