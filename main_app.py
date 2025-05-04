@@ -110,12 +110,11 @@ def safe_neo4j_operation(func):
 # === Data Insertion ===
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
-    """Inserts a user case into Neo4j with leakage protection"""
     queries = []
     params = {"upload_id": upload_id, "id": int(row["Case_No"])}
 
-    # Create Case node
-    queries.append(("CREATE (c:Case {upload_id: $upload_id, id: $id})", params))
+    # ✅ Δημιουργία μοναδικού κόμβου με upload_id
+    queries.append(("CREATE (c:Case {id: $id, upload_id: $upload_id})", params))
 
     # Add answers to behavioral questions
     for i in range(1, 11):
