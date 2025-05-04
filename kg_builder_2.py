@@ -5,7 +5,7 @@ import networkx as nx
 from node2vec import Node2Vec
 from random import shuffle
 import traceback
-import sys  # ✅ Προστέθηκε για έξοδο με κωδικό
+import sys
 
 def connect_to_neo4j(uri="neo4j+s://1f5f8a14.databases.neo4j.io", user="neo4j", password="3xhy4XKQSsSLIT7NI-w9m4Z7Y_WcVnL1hDQkWTMIoMQ"):
     print(f"🌐 Connecting to Neo4j Aura: {uri}", flush=True)
@@ -35,33 +35,41 @@ def create_nodes(tx, df):
         tx.run("MERGE (:SubmitterType {type: $val})", val=val)
 
 def create_relationships(tx, df):
-    case_data = [{"id": int(row["Case_No"])} for _, row in df.iterrows()]
+    case_data = []
     answer_data, demo_data, submitter_data = [], [], []
 
     for _, row in df.iterrows():
         case_id = int(row["Case_No"])
+        upload_id = str(case_id)  # χρήση του case_id ως upload_id
+        case_data.append({"id": case_id, "upload_id": upload_id})
+
         for q in [f"A{i}" for i in range(1, 11)]:
-            answer_data.append({"case_id": case_id, "q": q, "val": int(row[q])})
+            answer_data.append({"upload_id": upload_id, "q": q, "val": int(row[q])})
+
         for col in ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]:
-            demo_data.append({"case_id": case_id, "type": col, "val": row[col]})
-        submitter_data.append({"case_id": case_id, "val": row["Who_completed_the_test"]})
+            demo_data.append({"upload_id": upload_id, "type": col, "val": row[col]})
 
+        submitter_data.append({"upload_id": upload_id, "val": row["Who_completed_the_test"]})
+
+    tx.run("UNWIND $data as row MERGE (c:Case {id: row.id}) SET c.upload_id = row.upload_id, c.embedding = null", data=case_data)
     tx.run("""
-    UNWIND $data as row 
-    MERGE (c:Case {id: row.id}) 
-    SET c.upload_id = "initial_case_" + toString(row.id),
-        c.embedding = null
-    """, data=case_data)
-
-    tx.run("""UNWIND $data as row
-              MATCH (c:Case {id: row.case_id}), (b:BehaviorQuestion {name: row.q})
-              MERGE (c)-[:HAS_ANSWER {value: row.val}]->(b)""", data=answer_data)
-    tx.run("""UNWIND $data as row
-              MATCH (c:Case {id: row.case_id}), (d:DemographicAttribute {type: row.type, value: row.val})
-              MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)""", data=demo_data)
-    tx.run("""UNWIND $data as row
-              MATCH (c:Case {id: row.case_id}), (s:SubmitterType {type: row.val})
-              MERGE (c)-[:SUBMITTED_BY]->(s)""", data=submitter_data)
+        UNWIND $data as row
+        MATCH (q:BehaviorQuestion {name: row.q})
+        MATCH (c:Case {upload_id: row.upload_id})
+        MERGE (c)-[:HAS_ANSWER {value: row.val}]->(q)
+    """, data=answer_data)
+    tx.run("""
+        UNWIND $data as row
+        MATCH (d:DemographicAttribute {type: row.type, value: row.val})
+        MATCH (c:Case {upload_id: row.upload_id})
+        MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)
+    """, data=demo_data)
+    tx.run("""
+        UNWIND $data as row
+        MATCH (s:SubmitterType {type: row.val})
+        MATCH (c:Case {upload_id: row.upload_id})
+        MERGE (c)-[:SUBMITTED_BY]->(s)
+    """, data=submitter_data)
 
 def create_similarity_relationships(tx, df, max_pairs=3000):
     pairs = []
@@ -135,12 +143,12 @@ def build_graph():
         print("⏳ Δημιουργία embeddings...", flush=True)
         generate_embeddings(driver)
         print("✅ Ολοκληρώθηκε επιτυχώς!", flush=True)
-        sys.exit(0)  # ✅ επιτυχής έξοδος
+        sys.exit(0)
 
     except Exception as e:
         print(f"❌ Σφάλμα: {str(e)}", flush=True)
         traceback.print_exc()
-        sys.exit(1)  # ❌ αποτυχία
+        sys.exit(1)
 
     finally:
         driver.close()
