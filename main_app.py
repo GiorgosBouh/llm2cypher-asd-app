@@ -178,8 +178,12 @@ def remove_screened_for_labels():
 
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
-def generate_embedding_for_case(upload_id: str) -> bool:
-    import subprocess, sys, os
+def generate_embedding_wrapper(driver, upload_id):
+    from generate_case_embedding import generate_embedding_for_case
+    return generate_embedding_for_case(driver, upload_id)
+
+# Και όταν θέλετε να καλέσετε τη συνάρτηση:
+    success = generate_embedding_wrapper(neo4j_service.driver, upload_id)
 
     builder_path = os.path.join(os.path.dirname(__file__), "generate_case_embedding.py")
     if not os.path.exists(builder_path):
