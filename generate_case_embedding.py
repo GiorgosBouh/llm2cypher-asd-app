@@ -10,42 +10,44 @@ def generate_embedding_for_case(driver, upload_id):
         G = nx.Graph()
 
         with driver.session() as session:
-            # 🔎 Ανάκτηση του Neo4j internal ID του case
+            # 🔍 Ανάκτηση internal ID για το συγκεκριμένο case
             result = session.run(
                 "MATCH (c:Case {upload_id: $upload_id}) RETURN id(c) AS case_id",
                 upload_id=upload_id
             ).single()
 
             if not result or "case_id" not in result:
-                print("❌ Case not found in graph.")
+                print("❌ Case not found.")
                 return False
 
             case_id = result["case_id"]
 
-            # 🔄 Φόρτωση κόμβων
-            nodes = session.run("MATCH (n) RETURN id(n) AS node_id")
-            for node in nodes:
-                G.add_node(str(node["node_id"]))
-
-            # 🔗 Φόρτωση σχέσεων με έλεγχο βάρους
-            edges = session.run("""
-                MATCH (n1)-[r]->(n2)
-                RETURN id(n1) AS source, id(n2) AS target,
+            # 🔄 Φόρτωση edges και γειτονικών κόμβων του συγκεκριμένου case
+            edge_result = session.run(
+                """
+                MATCH (c:Case {upload_id: $upload_id})-[r]-(n)
+                RETURN id(c) AS source, id(n) AS target,
                        CASE WHEN r.value IS NOT NULL THEN toFloat(r.value) ELSE 1.0 END AS weight
-            """)
+                """,
+                upload_id=upload_id
+            )
 
-            for edge in edges:
-                weight = edge["weight"]
-                if weight is None or not np.isfinite(weight):
+            for record in edge_result:
+                src = str(record["source"])
+                tgt = str(record["target"])
+                weight = record["weight"]
+
+                if not np.isfinite(weight):
                     continue
-                G.add_edge(str(edge["source"]), str(edge["target"]), weight=weight)
+
+                G.add_edge(src, tgt, weight=weight)
 
         # ⚠️ Έλεγχος ελάχιστων κόμβων
         if len(G.nodes) < 2:
-            print("⚠️ Not enough nodes to build graph.")
+            print("⚠️ Not enough connected nodes to build embedding.")
             return False
 
-        print(f"✅ Graph built: {len(G.nodes)} nodes, {len(G.edges)} edges")
+        print(f"✅ Subgraph: {len(G.nodes)} nodes, {len(G.edges)} edges")
 
         # 🧠 Εκπαίδευση Node2Vec
         node2vec = Node2Vec(
@@ -58,14 +60,15 @@ def generate_embedding_for_case(driver, upload_id):
         )
         model = node2vec.fit(window=5, min_count=1)
 
-        # ✅ Ανάκτηση embedding για το συγκεκριμένο node
-        if str(case_id) not in model.wv:
-            print(f"❌ Node {case_id} not found in embedding space.")
+        # ✅ Ανάκτηση embedding
+        case_id_str = str(case_id)
+        if case_id_str not in model.wv:
+            print(f"❌ Case node {case_id} not found in embedding space.")
             return False
 
-        vector = model.wv[str(case_id)]
+        vector = model.wv[case_id_str]
         if not np.all(np.isfinite(vector)):
-            print("❌ Embedding contains non-finite values.")
+            print("❌ Non-finite values in embedding.")
             return False
 
         embedding = vector.tolist()
@@ -78,12 +81,13 @@ def generate_embedding_for_case(driver, upload_id):
                 embedding=embedding
             )
 
-        print("✅ Embedding generated and stored successfully.")
+        print("✅ Embedding saved for case:", upload_id)
         return True
 
     except Exception as e:
-        print(f"❌ Error during embedding generation: {e}")
+        print(f"❌ Error: {str(e)}")
         return False
+
 
 if __name__ == "__main__":
     uri = os.getenv("NEO4J_URI")
