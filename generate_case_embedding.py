@@ -22,17 +22,13 @@ def generate_embedding_for_case(driver, upload_id):
                 case_node_id = record["case_id"]
                 neighbor_id = record["neighbor_id"]
                 rel_type = record["rel_type"]
-                raw_value = record["value"]
 
-                # ✅ Ασφαλής μετατροπή τιμής edge weight
                 try:
-                    value = float(raw_value) if raw_value is not None else 1.0
-                    if not np.isfinite(value):
-                        print(f"⚠️ Skipping edge with non-finite weight: {raw_value}")
-                        continue
-                except Exception as e:
-                    print(f"⚠️ Skipping edge with invalid weight ({raw_value}): {e}")
-                    continue
+                    value = float(record["value"])
+                    if np.isnan(value) or not np.isfinite(value):
+                        value = 1.0
+                except:
+                    value = 1.0
 
                 nodes.update([case_node_id, neighbor_id])
                 edges.append((case_node_id, neighbor_id, {"weight": value}))
@@ -80,7 +76,6 @@ def generate_embedding_for_case(driver, upload_id):
                 embedding=vector
             )
 
-            # Optional sanity check
             if np.isnan(vector).any():
                 print("❌ Embedding contains NaN values")
                 return False
