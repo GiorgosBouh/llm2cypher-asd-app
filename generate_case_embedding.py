@@ -2,7 +2,6 @@ import numpy as np
 import networkx as nx
 from node2vec import Node2Vec
 
-
 def generate_embedding_for_case(driver, upload_id):
     try:
         with driver.session() as session:
@@ -23,10 +22,20 @@ def generate_embedding_for_case(driver, upload_id):
                 case_node_id = record["case_id"]
                 neighbor_id = record["neighbor_id"]
                 rel_type = record["rel_type"]
-                value = record["value"] if record["value"] is not None else 1.0
+                raw_value = record["value"]
+
+                # ✅ Ασφαλής μετατροπή τιμής edge weight
+                try:
+                    value = float(raw_value) if raw_value is not None else 1.0
+                    if not np.isfinite(value):
+                        print(f"⚠️ Skipping edge with non-finite weight: {raw_value}")
+                        continue
+                except Exception as e:
+                    print(f"⚠️ Skipping edge with invalid weight ({raw_value}): {e}")
+                    continue
 
                 nodes.update([case_node_id, neighbor_id])
-                edges.append((case_node_id, neighbor_id, {"weight": float(value)}))
+                edges.append((case_node_id, neighbor_id, {"weight": value}))
 
             if not edges or len(nodes) < 2:
                 print("⚠️ Not enough structure to build a subgraph for Node2Vec.")
