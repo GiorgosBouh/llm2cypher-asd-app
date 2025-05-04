@@ -516,13 +516,15 @@ def evaluate_model(model, X_test, y_test):
 
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
-@st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model() -> Optional[dict]:
     """Trains the ASD detection model with leakage protection"""
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
 
-        # Load and prepare data
+        # 1️⃣ Αφαίρεση SCREENED_FOR για προστασία από leakage
+        remove_screened_for_labels()
+
+        # 2️⃣ Φόρτωση και καθαρισμός δεδομένων
         X_raw, y = extract_training_data_from_csv(csv_url)
         X = X_raw.copy()
         X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
@@ -530,7 +532,7 @@ def train_asd_detection_model() -> Optional[dict]:
             st.error("⚠️ No valid training data available")
             return None
 
-        # Split data
+        # 3️⃣ Split data
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
             test_size=Config.TEST_SIZE,
@@ -538,9 +540,9 @@ def train_asd_detection_model() -> Optional[dict]:
             random_state=Config.RANDOM_STATE
         )
 
-        # Build pipeline with imputation
+        # 4️⃣ Pipeline with imputation + SMOTE + classifier
         pipeline = Pipeline([
-            ('imputer', SimpleImputer(strategy='mean')),  # 👈 Added imputation step
+            ('imputer', SimpleImputer(strategy='mean')),
             ('smote', SMOTE(random_state=Config.RANDOM_STATE)),
             ('classifier', RandomForestClassifier(
                 n_estimators=Config.N_ESTIMATORS,
@@ -549,17 +551,17 @@ def train_asd_detection_model() -> Optional[dict]:
             ))
         ])
 
-        # Train model
         pipeline.fit(X_train, y_train)
 
-        # Evaluate
-        results = {
+        # 5️⃣ Επανατοποθέτηση labels ΜΟΝΟ για τις περιπτώσεις με embeddings
+        reinsert_labels_from_csv(csv_url)
+
+        # 6️⃣ Επιστροφή
+        return {
             "model": pipeline,
             "X_test": X_test,
             "y_test": y_test
         }
-
-        return results
 
     except Exception as e:
         st.error(f"❌ Error training model: {e}")
