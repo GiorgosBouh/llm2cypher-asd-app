@@ -111,12 +111,14 @@ def safe_neo4j_operation(func):
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
     queries = []
-    params = {"upload_id": upload_id, "id": int(row["Case_No"])}
 
-    # ✅ Δημιουργία μοναδικού κόμβου με upload_id
-    queries.append(("CREATE (c:Case {id: $id, upload_id: $upload_id})", params))
+    # ✅ Δημιουργία ή ενημέρωση κόμβου Case με μοναδικό upload_id
+    queries.append((
+        "MERGE (c:Case {upload_id: $upload_id}) SET c.id = $id, c.embedding = null",
+        {"upload_id": upload_id, "id": int(row["Case_No"])}
+    ))
 
-    # Add answers to behavioral questions
+    # ✅ Δημιουργία σχέσεων με ερωτήσεις συμπεριφοράς
     for i in range(1, 11):
         q = f"A{i}"
         val = int(row[q])
@@ -129,7 +131,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
             {"q": q, "val": val, "upload_id": upload_id}
         ))
 
-    # Add demographic attributes
+    # ✅ Δημογραφικά χαρακτηριστικά
     demo = {
         "Sex": row["Sex"],
         "Ethnicity": row["Ethnicity"],
@@ -146,7 +148,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
             {"k": k, "v": v, "upload_id": upload_id}
         ))
 
-    # Add submitter information
+    # ✅ Πληροφορία συμπληρωτή
     queries.append((
         """
         MATCH (s:SubmitterType {type: $who})
@@ -156,11 +158,12 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
         {"who": row["Who_completed_the_test"], "upload_id": upload_id}
     ))
 
+    # ✅ Εκτέλεση όλων των ερωτημάτων
     with neo4j_service.session() as session:
         for query, params in queries:
             session.run(query, **params)
-        logger.info(f"Successfully inserted case {upload_id}")
-    
+        logger.info(f"✅ Inserted new case with upload_id {upload_id}")
+
     return upload_id
 
 @safe_neo4j_operation
