@@ -176,21 +176,29 @@ def remove_screened_for_labels():
 
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
-def generate_graph_embeddings() -> bool:
-    """Triggers the external kg_builder_2 process to compute embeddings once for all cases."""
-    import subprocess, sys, time, os
+def generate_embedding_for_case(upload_id: str) -> bool:
+    import subprocess, sys, os
 
-    remove_screened_for_labels()  # Προστασία από leakage
-
-    status_text = st.empty()
-    progress_bar = st.progress(0)
-    status_text.text("⏳ Connecting to Neo4j Aura and running builder...")
-    progress_bar.progress(5)
-
-    # 🔎 Βρες το μονοπάτι του builder
-    builder_path = os.path.join(os.path.dirname(__file__), "kg_builder_2.py")
+    builder_path = os.path.join(os.path.dirname(__file__), "generate_case_embedding.py")
     if not os.path.exists(builder_path):
         st.error(f"❌ Δεν βρέθηκε το αρχείο: {builder_path}")
+        return False
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, builder_path, upload_id],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True
+        )
+        st.text(proc.stdout)
+
+        if proc.returncode != 0:
+            st.error("❌ Η δημιουργία embedding για το case απέτυχε")
+            return False
+        return True
+    except Exception as e:
+        st.error(f"❌ Σφάλμα: {e}")
         return False
 
     try:
@@ -706,8 +714,8 @@ def main():
                     st.session_state.last_upload_id = upload_id
 
                 # 2. Generate embeddings
-                with st.spinner("Generating graph embeddings..."):
-                    if not generate_graph_embeddings():
+                with st.spinner("Generating embedding for new case..."):
+                    if not generate_embedding_for_case(upload_id):
                         st.error("Embedding generation failed")
                         st.stop()
 
