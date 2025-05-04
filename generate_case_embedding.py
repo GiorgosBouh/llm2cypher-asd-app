@@ -5,59 +5,51 @@ from neo4j import GraphDatabase
 import sys
 import os
 
-def create_similarity_links(driver, upload_id):
-    with driver.session() as session:
-        session.run("""
-        MATCH (new:Case {upload_id: $upload_id})
-        MATCH (existing:Case)
-        WHERE new <> existing AND
-              abs(new.Age_Mons - existing.Age_Mons) <= 3
-        OPTIONAL MATCH (new)-[r1:HAS_ANSWER]->(q:BehaviorQuestion)<-[r2:HAS_ANSWER]-(existing)
-        WITH new, existing, count(q) AS shared_answers
-        WHERE shared_answers >= 5
-        MERGE (new)-[:SIMILAR_TO]->(existing)
-        """, upload_id=upload_id)
-
 def generate_embedding_for_case(driver, upload_id):
     try:
         G = nx.Graph()
 
-        # Step 1: Συνδέουμε το νέο case με παρόμοια υπάρχοντα
-        create_similarity_links(driver, upload_id)
-
         with driver.session() as session:
+            # 🔎 Ανάκτηση του upload_id-based Case
             result = session.run(
-                "MATCH (c:Case {upload_id: $upload_id}) RETURN id(c) AS case_id",
+                "MATCH (c:Case {upload_id: $upload_id}) RETURN c.id AS case_id",
                 upload_id=upload_id
             ).single()
 
-            if not result or "case_id" not in result:
+            if not result or result["case_id"] is None:
                 print("❌ Case not found in graph.")
                 return False
 
             case_id = result["case_id"]
 
-            nodes = session.run("MATCH (n) RETURN id(n) AS node_id")
+            # 🔄 Φόρτωση κόμβων
+            nodes = session.run("MATCH (n) RETURN n.id AS id")
             for node in nodes:
-                G.add_node(str(node["node_id"]))
+                if node["id"] is not None:
+                    G.add_node(str(node["id"]))
 
+            # 🔗 Φόρτωση σχέσεων με έλεγχο βάρους
             edges = session.run("""
                 MATCH (n1)-[r]->(n2)
-                RETURN id(n1) AS source, id(n2) AS target,
+                WHERE n1.id IS NOT NULL AND n2.id IS NOT NULL
+                RETURN n1.id AS source, n2.id AS target,
                        CASE WHEN r.value IS NOT NULL THEN toFloat(r.value) ELSE 1.0 END AS weight
             """)
+
             for edge in edges:
                 weight = edge["weight"]
                 if weight is None or not np.isfinite(weight):
                     continue
                 G.add_edge(str(edge["source"]), str(edge["target"]), weight=weight)
 
+        # ⚠️ Έλεγχος ελάχιστων κόμβων
         if len(G.nodes) < 2:
             print("⚠️ Not enough nodes to build graph.")
             return False
 
         print(f"✅ Graph built: {len(G.nodes)} nodes, {len(G.edges)} edges")
 
+        # 🧠 Εκπαίδευση Node2Vec
         node2vec = Node2Vec(
             G,
             dimensions=64,
@@ -68,6 +60,7 @@ def generate_embedding_for_case(driver, upload_id):
         )
         model = node2vec.fit(window=5, min_count=1)
 
+        # ✅ Ανάκτηση embedding
         if str(case_id) not in model.wv:
             print(f"❌ Node {case_id} not found in embedding space.")
             return False
@@ -79,6 +72,7 @@ def generate_embedding_for_case(driver, upload_id):
 
         embedding = vector.tolist()
 
+        # 💾 Αποθήκευση στο Neo4j
         with driver.session() as session:
             session.run(
                 "MATCH (c:Case {upload_id: $upload_id}) SET c.embedding = $embedding",
@@ -108,4 +102,3 @@ if __name__ == "__main__":
     driver.close()
 
     sys.exit(0 if success else 1)
-
