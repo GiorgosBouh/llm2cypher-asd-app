@@ -709,23 +709,69 @@ def main():
 
     with tab4:
         st.header("💬 Natural Language to Cypher")
-        question = st.text_input("Ask about the data:")
 
-        if question:
-            cypher = nl_to_cypher(question)
-            if cypher:
-                st.code(cypher, language="cypher")
+        with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
+            st.markdown("""
+            ### 📚 Dataset Overview
+            This knowledge graph contains screening data for toddlers to help detect potential signs of Autism Spectrum Disorder (ASD).
 
-                if st.button("▶️ Execute Query"):
-                    with neo4j_service.session() as session:
-                        try:
-                            results = session.run(cypher).data()
-                            if results:
-                                st.dataframe(pd.DataFrame(results))
-                            else:
-                                st.info("No results found")
-                        except Exception as e:
-                            st.error(f"Query failed: {str(e)}")
+            #### ✅ Node Types:
+            - **Case**: A toddler who was screened.
+            - **BehaviorQuestion**: A question from the Q-Chat-10 questionnaire:
+                - **A1**: Does your child look at you when you call his/her name?
+                - **A2**: How easy is it for you to get eye contact with your child?
+                - **A3**: Does your child point to indicate that s/he wants something?
+                - **A4**: Does your child point to share interest with you?
+                - **A5**: Does your child pretend?
+                - **A6**: Does your child follow where you’re looking?
+                - **A7**: If you or someone else in the family is visibly upset, does your child show signs of wanting to comfort them?
+                - **A8**: Would you describe your child's first words as normal in their development?
+                - **A9**: Does your child use simple gestures such as waving to say goodbye?
+                - **A10**: Does your child stare at nothing with no apparent purpose?
+
+            - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
+            - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
+            - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
+
+            #### 🔗 Relationships:
+            - `HAS_ANSWER`: A case’s answer to a behavioral question.
+            - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes.
+            - `SUBMITTED_BY`: Who submitted the test.
+            - `SCREENED_FOR`: Final ASD classification.
+            """)
+
+            st.markdown("### 🧠 Example Questions (Click to use)")
+            example_questions = [
+                "How many male toddlers have ASD traits?",
+                "Show cases where A1 was answered with 1 and ASD is Yes.",
+                "What is the average score of A3 for cases submitted by parents?",
+                "List all ethnicities with more than 5 cases.",
+                "How many cases answered '1' for both A1 and A2?"
+            ]
+
+        for q in example_questions:
+            if st.button(q, key=q):
+                st.session_state["preset_question"] = q
+
+    # Prefill text input if example was clicked
+    default_question = st.session_state.get("preset_question", "")
+    question = st.text_input("Ask about the data:", value=default_question)
+
+    if question:
+        cypher = nl_to_cypher(question)
+        if cypher:
+            st.code(cypher, language="cypher")
+
+            if st.button("▶️ Execute Query"):
+                with neo4j_service.session() as session:
+                    try:
+                        results = session.run(cypher).data()
+                        if results:
+                            st.dataframe(pd.DataFrame(results))
+                        else:
+                            st.info("No results found")
+                    except Exception as e:
+                        st.error(f"Query failed: {str(e)}")
 
 if __name__ == "__main__":
     main()
