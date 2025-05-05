@@ -677,6 +677,10 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         if uploaded_file:
             try:
                 df = pd.read_csv(uploaded_file, delimiter=";")
+                df = pd.read_csv(uploaded_file, delimiter=";")
+
+                st.subheader("👁️ Preview Uploaded CSV")
+                st.dataframe(df)
                 required_cols = [
                     "Case_No", "A1", "A2", "A3", "A4", "A5", 
                     "A6", "A7", "A8", "A9", "A10",
