@@ -580,7 +580,7 @@ def main():
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
         <i>Autism Spectrum Disorder detection using graph embeddings</i>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
     st.sidebar.markdown(f"🔗 Connected to: `{os.getenv('NEO4J_URI')}`")
     st.sidebar.markdown("""
@@ -598,24 +598,10 @@ by Dr. Georgios Bouchouras.
 
 ---
 
-### 🧪 What This App Does
-
-This interactive app allows you to:
-
-- 🧠 Train a machine learning model to detect ASD traits using graph embeddings.
-- 📤 Upload your own toddler screening data from the Q-Chat-10 questionnaire and other demographics.
-- 🔗 Automatically connect the uploaded case to a knowledge graph.
-- 🌐 Generate a graph-based embedding for the new case.
-- 🔍 Predict whether the case shows signs of Autism Spectrum Disorder (ASD).
-- 🕵️ Run anomaly detection to check for anomalies.
-- 💬 Ask natural language questions and receive Cypher queries with results, using GPT4 based NLP-to-Cypher translation
-
----
-
 ### 📥 Download Example CSV
 
 To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)  
-to format your own screening case correctly.  
+to format your own screening case correctly. 
 Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
 """)
 
@@ -626,10 +612,18 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         "💬 NLP to Cypher"
     ])
 
-    # === Τα δικά σου υπάρχοντα blocks για tab1, tab2, tab3 μένουν όπως είναι ===
-    # Μπορείς να τα κρατήσεις χωρίς αλλαγή και απλώς να τα έχεις πριν το tab4.
+    with tab1:
+        st.header("📊 Model Training")
+        st.info("🧪 This is a placeholder for model training functionality.")
 
-    # === Tab 4: Natural Language to Cypher ===
+    with tab2:
+        st.header("🌐 Graph Embeddings")
+        st.info("🌍 This is a placeholder for graph embedding logic.")
+
+    with tab3:
+        st.header("📤 Upload New Case")
+        st.info("📁 This is a placeholder for uploading a new case.")
+
     with tab4:
         st.header("💬 Natural Language to Cypher")
 
@@ -640,9 +634,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
             #### ✅ Node Types:
             - **Case**: A toddler who was screened.
-            - **BehaviorQuestion**: A question from the Q-Chat-10 questionnaire:
-                - A1–A10 with behavioral questions
-            - **DemographicAttribute**: e.g. Sex, Ethnicity, etc.
+            - **BehaviorQuestion**: A question from the Q-Chat-10 questionnaire: A1–A10
+            - **DemographicAttribute**: Sex, Ethnicity, Jaundice, etc.
             - **SubmitterType**: Parent or Health Worker
             - **ASD_Trait**: Final classification (Yes or No)
 
@@ -659,11 +652,12 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             ]
 
             for q in example_questions:
-                if st.button(q, key=f"example_{q}"):
+                if st.button(q, key=q):
                     st.session_state["preset_question"] = q
 
-        # Text input only appears inside this tab
-        question = st.text_input("Ask about the data:", value=st.session_state.get("preset_question", ""))
+        # Prefill text input
+        default_question = st.session_state.get("preset_question", "")
+        question = st.text_input("Ask about the data:", value=default_question)
 
         if question.strip():
             cypher = nl_to_cypher(question)
@@ -681,7 +675,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                             st.error(f"Query failed: {str(e)}")
             else:
                 st.warning("❓ Unable to translate this question. Try a simpler one.")
-
 
 if __name__ == "__main__":
     main()
