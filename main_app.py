@@ -112,7 +112,19 @@ def safe_neo4j_operation(func):
 
 # === Data Insertion ===
 @safe_neo4j_operation
-def insert_user_case(row: pd.Series, upload_id: str) -> str:
+def insert_user_case(row: pd.Series, upload_id: str) -> Optional[str]:
+    with neo4j_service.session() as session:
+        # 🔍 Check for existing case with same Case_No
+        existing = session.run(
+            "MATCH (c:Case {id: $id}) RETURN count(c) > 0 AS exists",
+            id=int(row["Case_No"])
+        ).single()["exists"]
+
+        if existing:
+            st.warning(f"⚠️ A case with Case_No {row['Case_No']} already exists. Upload skipped.")
+            return None
+
+    # Proceed with insertion
     queries = []
 
     queries.append((
@@ -172,6 +184,12 @@ def remove_screened_for_labels():
             DELETE r
         """)
         logger.info("✅ SCREENED_FOR relationships removed to prevent leakage.")
+@safe_neo4j_operation
+def suggest_next_case_no() -> int:
+    with neo4j_service.session() as session:
+        result = session.run("MATCH (c:Case) RETURN MAX(c.id) AS max_id").single()
+        max_id = result["max_id"] or 0
+        return max_id + 1
 
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
@@ -580,7 +598,7 @@ by Dr. Georgios Bouchouras.
 This interactive app allows you to:
 
 - 🧠 Train a machine learning model to detect ASD traits using graph embeddings.
-- 📤 Upload your own toddler screening data from the Q-Chat-10 questionnaire.
+- 📤 Upload your own toddler screening data from the Q-Chat-10 questionnaire and other demographics.
 - 🔗 Automatically connect the uploaded case to a knowledge graph.
 - 🌐 Generate a graph-based embedding for the new case.
 - 🔍 Predict whether the case shows signs of Autism Spectrum Disorder (ASD).
@@ -633,6 +651,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
     with tab3:
         st.header("📄 Upload New Case")
+            # Suggest next Case_No
+        suggested_id = suggest_next_case_no()
+        st.info(f"🧾 Suggested Case_No: `{suggested_id}` — Please use this number in your CSV to avoid duplication.")
         uploaded_file = st.file_uploader(
             "Upload CSV for single case prediction", 
             type="csv",
