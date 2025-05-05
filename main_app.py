@@ -678,40 +678,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("Please upload exactly one case")
                     st.stop()
 
-                row = df.iloc[0]
-                try:
-                    case_no = int(row["Case_No"])
-                except (ValueError, TypeError):
-                    case_no = None
-
-                with neo4j_service.session() as session:
-                    if case_no is not None:
-                        result = session.run("MATCH (c:Case {id: $id}) RETURN COUNT(c) AS count", id=case_no).single()
-                        if result["count"] > 0:
-                            max_result = session.run("MATCH (c:Case) RETURN max(c.id) AS max_id").single()
-                            suggested = (max_result["max_id"] or 1000) + 1
-
-                            st.error(f"❌ A case with Case_No `{case_no}` already exists.")
-                            st.info(f"ℹ️ Suggested new Case_No: `{suggested}`. The CSV will be updated accordingly.")
-
-                            df.at[0, "Case_No"] = suggested
-                            st.subheader("📄 Updated CSV Preview")
-                            st.dataframe(df)
-
-                            import io
-                            csv_buffer = io.StringIO()
-                            df.to_csv(csv_buffer, sep=";", index=False)
-                            csv_bytes = csv_buffer.getvalue().encode("utf-8")
-
-                            st.download_button(
-                                label="💾 Download Updated CSV with New Case_No",
-                                data=csv_bytes,
-                                file_name=f"updated_case_{suggested}.csv",
-                                mime="text/csv"
-                            )
-                            st.stop()
-
                 upload_id = str(uuid.uuid4())
+                row = df.iloc[0]
 
                 with st.spinner("Inserting case into graph..."):
                     upload_id = insert_user_case(row, upload_id)
@@ -720,7 +688,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 with st.spinner("Generating graph embedding for new case..."):
                     if not generate_embedding_for_case(upload_id):
                         st.error("❌ Failed to generate embedding. The case may be too isolated in the graph.")
-                        st.stop()
+                        st.stop()           
 
                 with st.spinner("Extracting case embedding..."):
                     embedding = extract_user_embedding(upload_id)
@@ -728,7 +696,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         st.stop()
                     st.session_state.current_embedding = embedding
 
-                st.subheader("🧐 Case Embedding")
+                st.subheader("🧠 Case Embedding")
                 st.write(embedding)
 
                 st.subheader("🧪 Embedding Diagnostics")
@@ -747,11 +715,11 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     degree_result = session.run("""
                         MATCH (c:Case {upload_id: $upload_id})--(n)
                         RETURN count(n) AS degree
-                """, upload_id=upload_id)
-                degree = degree_result.single()["degree"]
-                st.text(f"🔗 Number of connected nodes: {degree}")
-                if degree < 5:
-                    st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
+                    """, upload_id=upload_id)
+                    degree = degree_result.single()["degree"]
+                    st.text(f"🔗 Number of connected nodes: {degree}")
+                    if degree < 5:
+                        st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
 
                 if "model_results" in st.session_state:
                     X_train = st.session_state.model_results["X_test"]
