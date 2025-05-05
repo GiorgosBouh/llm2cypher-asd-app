@@ -355,7 +355,7 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
             return
 
         if len(X) != len(df):
-            st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
+            #st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
 
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
         df = df[features]
@@ -794,21 +794,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         else:
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
                         
-                        # Histogram of anomaly scores
-                        X_train = st.session_state.model_results["X_train"]
-                        X_train_scaled = scaler.transform(X_train)
-                        all_scores = iso_forest.decision_function(X_train_scaled)
-
-                        fig, ax = plt.subplots()
-                        ax.hist(all_scores, bins=30, alpha=0.7, edgecolor='black')
-                        ax.axvline(anomaly_score, color='red', linestyle='--', label='This Case')
-                        ax.set_title("Distribution of Anomaly Scores")
-                        ax.set_xlabel("Anomaly Score")
-                        ax.set_ylabel("Frequency")
-                        ax.legend()
-
-                        st.pyplot(fig)       
-
+                    
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
                 logger.error(f"Upload error: {str(e)}", exc_info=True)
