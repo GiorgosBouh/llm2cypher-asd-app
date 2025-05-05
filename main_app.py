@@ -584,7 +584,7 @@ This interactive app allows you to:
 - 🔗 Automatically connect the uploaded case to a knowledge graph.
 - 🌐 Generate a graph-based embedding for the new case.
 - 🔍 Predict whether the case shows signs of Autism Spectrum Disorder (ASD).
-- 🕵️ Run anomaly detection to check for outliers.
+- 🕵️ Run anomaly detection to check for anomalies.
 
 ---
 
@@ -592,7 +592,7 @@ This interactive app allows you to:
 
 To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)  
 to format your own screening case correctly. 
-Also [read this description] (https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
+Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
 
 """)
 
