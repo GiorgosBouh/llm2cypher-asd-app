@@ -336,8 +336,8 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
             st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
             return
 
-        if len(X) != len(df):
-            st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
+        #if len(X) != len(df):
+            #st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
 
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
         df = df[features]
@@ -805,7 +805,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             st.markdown("### 🧠 Example Questions (Click to use)")
             example_questions = [
                 "How many male toddlers have ASD traits?",
-                "Show cases where A1 was answered with 1 and ASD is Yes.",
                 "List all ethnicities with more than 5 cases.",
                 "How many cases answered '1' for both A1 and A2?"
             ]
