@@ -561,19 +561,39 @@ def main():
 
     st.sidebar.markdown(f"🔗 Connected to: `{os.getenv('NEO4J_URI')}`")
     st.sidebar.markdown("""
-    <hr>
-    <p style='font-size: 12px; line-height: 1.4em'>
-    This project was developed by <b><a href='https://giorgosbouh.github.io/github-portfolio/' target='_blank'>Dr. Georgios Bouchouras</a></b>,
-    in collaboration with <b>Dimitrios Doumanas</b> and <b>Dr. Konstantinos Kotis</b> from the 
-        <a href='https://i-lab.aegean.gr/' target='_blank'>Intelligent Systems Research Laboratory</a>, 
-    University of the Aegean.
+---
 
-    <br><br>
-    It is part of the postdoctoral research project:<br>
-    <i>"Development of Intelligent Systems for Early Detection and Support of Neurodevelopmental Disorders:
-    Combining Biomechanics and Artificial Intelligence"</i> by Dr. Bouchouras.
-    </p>
-    """, unsafe_allow_html=True)
+### 📘 About This Project
+
+This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), Dimitrios Doumanas, and Dr. Konstantinos Kotis  
+at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegean](https://i-lab.aegean.gr/).
+
+It is part of the postdoctoral research project:
+
+**"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"**  
+by Dr. Georgios Bouchouras.
+
+---
+
+### 🧪 What This App Does
+
+This interactive app allows you to:
+
+- 🧠 Train a machine learning model to detect ASD traits using graph embeddings.
+- 📤 Upload your own toddler screening data from the Q-Chat-10 questionnaire.
+- 🔗 Automatically connect the uploaded case to a knowledge graph.
+- 🌐 Generate a graph-based embedding for the new case.
+- 🔍 Predict whether the case shows signs of Autism Spectrum Disorder (ASD).
+- 🕵️ Run anomaly detection to check for outliers.
+
+---
+
+### 📥 Download Example CSV
+
+To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)  
+to format your own screening case correctly.
+
+""")
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Model Training", 
