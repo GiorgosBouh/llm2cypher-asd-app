@@ -649,129 +649,152 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         if st.button("🔁 Recalculate All Embeddings"):
             st.info("this function is for the developer only")
 
+
     with tab3:
         st.header("📄 Upload New Case")
+
+        st.markdown("""
+        ### 📋 Instructions for Uploading Your Case
+
+        To predict ASD traits for a new toddler case:
+
+        1. Download this [🧾 example CSV file](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)
+        2. Open it in Excel or Google Sheets and replace values with your own
+        3. Ensure all fields are filled:
+            - `A1`–`A10`: 0 or 1
+            - `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`, `Who_completed_the_test`
+            - `Case_No`: must be unique – if unsure, leave it empty and we will suggest one
+        4. Save as CSV with **semicolon (;)** delimiter
+        5. Upload below 👇
+        """)
+
         uploaded_file = st.file_uploader(
             "Upload CSV for single case prediction", 
             type="csv",
             key="case_uploader"
         )
 
-    if uploaded_file:
-        try:
-            df = pd.read_csv(uploaded_file, delimiter=";")
-            required_cols = [
-                "Case_No", "A1", "A2", "A3", "A4", "A5", 
-                "A6", "A7", "A8", "A9", "A10",
-                "Sex", "Ethnicity", "Jaundice", 
-                "Family_mem_with_ASD", "Who_completed_the_test"
-            ]
+        if uploaded_file:
+            try:
+                df = pd.read_csv(uploaded_file, delimiter=";")
+                required_cols = [
+                    "Case_No", "A1", "A2", "A3", "A4", "A5", 
+                    "A6", "A7", "A8", "A9", "A10",
+                    "Sex", "Ethnicity", "Jaundice", 
+                    "Family_mem_with_ASD", "Who_completed_the_test"
+                ]
 
-            if not all(col in df.columns for col in required_cols):
-                st.error("❌ Missing required columns in CSV")
-                st.stop()
-
-            if len(df) != 1:
-                st.error("Please upload exactly one case")
-                st.stop()
-
-            row = df.iloc[0]
-            case_no = int(row["Case_No"])
-
-            # ✅ Check if Case_No already exists
-            with neo4j_service.session() as session:
-                result = session.run(
-                    "MATCH (c:Case {id: $id}) RETURN COUNT(c) AS count",
-                    id=case_no
-                ).single()
-                if result["count"] > 0:
-                    suggested = suggest_next_case_no()
-                    st.error(f"❌ Case_No `{case_no}` already exists in the graph.")
-                    st.info(f"🧾 Suggested new Case_No: `{suggested}` — Please update your CSV and try again.")
+                if not all(col in df.columns for col in required_cols):
+                    st.error("❌ Missing required columns in CSV")
                     st.stop()
 
-            upload_id = str(uuid.uuid4())
-
-            with st.spinner("Inserting case into graph..."):
-                upload_id = insert_user_case(row, upload_id)
-                st.session_state.last_upload_id = upload_id
-
-            with st.spinner("Generating graph embedding for new case..."):
-                if not generate_embedding_for_case(upload_id):
-                    st.error("❌ Failed to generate embedding. The case may be too isolated in the graph.")
+                if len(df) != 1:
+                    st.error("❌ Please upload exactly one case")
                     st.stop()
 
-            with st.spinner("Extracting case embedding..."):
-                embedding = extract_user_embedding(upload_id)
-                if embedding is None:
-                    st.stop()
-                st.session_state.current_embedding = embedding
+                row = df.iloc[0]
 
-            st.subheader("🧠 Case Embedding")
-            st.write(embedding)
+                # Auto-assign Case_No if missing
+                try:
+                    case_no = int(row["Case_No"])
+                except (ValueError, TypeError):
+                    case_no = suggest_next_case_no()
+                    st.warning(f"⚠️ No Case_No found. Suggested and using Case_No: `{case_no}`")
+                    row["Case_No"] = case_no
 
-            st.subheader("🧪 Embedding Diagnostics")
-            st.text("📦 Embedding vector:")
-            st.write(embedding.tolist())
+                # Check for duplicates
+                with neo4j_service.session() as session:
+                    result = session.run(
+                        "MATCH (c:Case {id: $id}) RETURN COUNT(c) AS count",
+                        id=case_no
+                    ).single()
+                    if result["count"] > 0:
+                        suggested = suggest_next_case_no()
+                        st.error(f"❌ Case_No `{case_no}` already exists in the graph.")
+                        st.info(f"🧾 Suggested new Case_No: `{suggested}` — Please update your CSV and try again.")
+                        st.stop()
 
-            st.text("✅ Embedding integrity check:")
-            if np.isnan(embedding).any():
-                st.error("❌ Embedding contains NaN values.")
-            else:
-                st.success("✅ Embedding is valid (no NaNs)")
+                upload_id = str(uuid.uuid4())
 
-            with neo4j_service.session() as session:
-                degree_result = session.run("""
-                    MATCH (c:Case {upload_id: $upload_id})--(n)
-                    RETURN count(n) AS degree
-                """, upload_id=upload_id)
-                degree = degree_result.single()["degree"]
-                st.text(f"🔗 Number of connected nodes: {degree}")
-                if degree < 5:
-                    st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
+                with st.spinner("Inserting case into graph..."):
+                    insert_user_case(row, upload_id)
+                    st.session_state.last_upload_id = upload_id
 
-            if "model_results" in st.session_state:
-                X_train = st.session_state.model_results["X_test"]
-                train_mean = X_train.mean().values
-                dist = np.linalg.norm(embedding - train_mean)
-                st.text(f"📏 Distance from train mean: {dist:.4f}")
-                if dist > 5.0:
-                    st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
+                with st.spinner("Generating graph embedding for new case..."):
+                    if not generate_embedding_for_case(upload_id):
+                        st.error("❌ Failed to generate embedding. The case may be too isolated in the graph.")
+                        st.stop()
 
-            if "model_results" in st.session_state:
-                model = st.session_state.model_results["model"]
-                proba = model.predict_proba(embedding)[0][1]
-                prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
+                with st.spinner("Extracting case embedding..."):
+                    embedding = extract_user_embedding(upload_id)
+                    if embedding is None:
+                        st.stop()
+                    st.session_state.current_embedding = embedding
 
-                st.subheader("🔍 Prediction Result")
-                col1, col2 = st.columns(2)
-                col1.metric("Prediction", prediction)
-                col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
+                st.subheader("🧠 Case Embedding")
+                st.write(embedding)
 
-                fig = px.bar(
-                    x=["Typical", "ASD Traits"],
-                    y=[1-proba, proba],
-                    title="Prediction Probabilities"
-                )
-                st.plotly_chart(fig)
+                st.subheader("🧪 Embedding Diagnostics")
+                st.text("📦 Embedding vector:")
+                st.write(embedding.tolist())
 
-            with st.spinner("Running anomaly detection..."):
-                iso_result = train_isolation_forest()
-                if iso_result:
-                    iso_forest, scaler = iso_result
-                    embedding_scaled = scaler.transform(embedding)
-                    anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-                    is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+                st.text("✅ Embedding integrity check:")
+                if np.isnan(embedding).any():
+                    st.error("❌ Embedding contains NaN values.")
+                else:
+                    st.success("✅ Embedding is valid (no NaNs)")
 
-                    st.subheader("🕵️ Anomaly Detection")
-                    if is_anomaly:
-                        st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
-                    else:
-                        st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+                with neo4j_service.session() as session:
+                    degree_result = session.run("""
+                        MATCH (c:Case {upload_id: $upload_id})--(n)
+                        RETURN count(n) AS degree
+                    """, upload_id=upload_id)
+                    degree = degree_result.single()["degree"]
+                    st.text(f"🔗 Number of connected nodes: {degree}")
+                    if degree < 5:
+                        st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
 
-        except Exception as e:
-            st.error(f"❌ Error processing file: {str(e)}")
-            logger.error(f"Upload error: {str(e)}", exc_info=True)
+                if "model_results" in st.session_state:
+                    X_train = st.session_state.model_results["X_test"]
+                    train_mean = X_train.mean().values
+                    dist = np.linalg.norm(embedding - train_mean)
+                    st.text(f"📏 Distance from train mean: {dist:.4f}")
+                    if dist > 5.0:
+                        st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
+
+                    model = st.session_state.model_results["model"]
+                    proba = model.predict_proba(embedding)[0][1]
+                    prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
+
+                    st.subheader("🔍 Prediction Result")
+                    col1, col2 = st.columns(2)
+                    col1.metric("Prediction", prediction)
+                    col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
+
+                    fig = px.bar(
+                        x=["Typical", "ASD Traits"],
+                        y=[1-proba, proba],
+                        title="Prediction Probabilities"
+                    )
+                    st.plotly_chart(fig)
+
+                with st.spinner("Running anomaly detection..."):
+                    iso_result = train_isolation_forest()
+                    if iso_result:
+                        iso_forest, scaler = iso_result
+                        embedding_scaled = scaler.transform(embedding)
+                        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+
+                        st.subheader("🕵️ Anomaly Detection")
+                        if is_anomaly:
+                            st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+                        else:
+                            st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+
+            except Exception as e:
+                st.error(f"❌ Error processing file: {str(e)}")
+                logger.error(f"Upload error: {str(e)}", exc_info=True)
 
     with tab4:
         st.header("💬 Natural Language to Cypher")
@@ -789,7 +812,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 - **A3**: Does your child point to indicate that s/he wants something?
                 - **A4**: Does your child point to share interest with you?
                 - **A5**: Does your child pretend?
-                - **A6**: Does your child follow where you’re looking?
+                - **A6**: Does your child follow where you're looking?
                 - **A7**: If you or someone else in the family is visibly upset, does your child show signs of wanting to comfort them?
                 - **A8**: Would you describe your child's first words as normal in their development?
                 - **A9**: Does your child use simple gestures such as waving to say goodbye?
@@ -800,7 +823,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
 
             #### 🔗 Relationships:
-            - `HAS_ANSWER`: A case’s answer to a behavioral question.
+            - `HAS_ANSWER`: A case's answer to a behavioral question.
             - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes.
             - `SUBMITTED_BY`: Who submitted the test.
             - `SCREENED_FOR`: Final ASD classification.
@@ -818,25 +841,25 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             if st.button(q, key=q):
                 st.session_state["preset_question"] = q
 
-    # Prefill text input if example was clicked
-    default_question = st.session_state.get("preset_question", "")
-    question = st.text_input("Ask about the data:", value=default_question)
+        # Prefill text input if example was clicked
+        default_question = st.session_state.get("preset_question", "")
+        question = st.text_input("Ask about the data:", value=default_question)
 
-    if question:
-        cypher = nl_to_cypher(question)
-        if cypher:
-            st.code(cypher, language="cypher")
+        if question:
+            cypher = nl_to_cypher(question)
+            if cypher:
+                st.code(cypher, language="cypher")
 
-            if st.button("▶️ Execute Query"):
-                with neo4j_service.session() as session:
-                    try:
-                        results = session.run(cypher).data()
-                        if results:
-                            st.dataframe(pd.DataFrame(results))
-                        else:
-                            st.info("No results found")
-                    except Exception as e:
-                        st.error(f"Query failed: {str(e)}")
+                if st.button("▶️ Execute Query"):
+                    with neo4j_service.session() as session:
+                        try:
+                            results = session.run(cypher).data()
+                            if results:
+                                st.dataframe(pd.DataFrame(results))
+                            else:
+                                st.info("No results found")
+                        except Exception as e:
+                            st.error(f"Query failed: {str(e)}")
 
 if __name__ == "__main__":
     main()
