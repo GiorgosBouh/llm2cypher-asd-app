@@ -628,7 +628,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab2:
         st.header("🌐 Graph Embeddings")
         if st.button("🔁 Recalculate All Embeddings"):
-            st.info("Αυτή η λειτουργία έχει απενεργοποιηθεί. Για embeddings, τρέξε το kg_builder_2.py.")
+            st.info("this function is for the developer only")
 
     with tab3:
         st.header("📄 Upload New Case")
