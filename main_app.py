@@ -560,6 +560,20 @@ def main():
         """, unsafe_allow_html=True)
 
     st.sidebar.markdown(f"🔗 Connected to: `{os.getenv('NEO4J_URI')}`")
+    st.sidebar.markdown("""
+    <hr>
+    <p style='font-size: 12px; line-height: 1.4em'>
+    This project was developed by <b><a href='https://giorgosbouh.github.io/github-portfolio/' target='_blank'>Dr. Georgios Bouchouras</a></b>,
+    in collaboration with <b>Dimitrios Doumanas</b> and <b>Dr. Konstantinos Kotis</b> from the 
+        <a href='https://i-lab.aegean.gr/' target='_blank'>Intelligent Systems Research Laboratory</a>, 
+    University of the Aegean.
+
+    <br><br>
+    It is part of the postdoctoral research project:<br>
+    <i>"Development of Intelligent Systems for Early Detection and Support of Neurodevelopmental Disorders:
+    Combining Biomechanics and Artificial Intelligence"</i> by Dr. Bouchouras.
+    </p>
+    """, unsafe_allow_html=True)
 
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Model Training", 
@@ -744,7 +758,6 @@ def main():
             example_questions = [
                 "How many male toddlers have ASD traits?",
                 "Show cases where A1 was answered with 1 and ASD is Yes.",
-                "What is the average score of A3 for cases submitted by parents?",
                 "List all ethnicities with more than 5 cases.",
                 "How many cases answered '1' for both A1 and A2?"
             ]
