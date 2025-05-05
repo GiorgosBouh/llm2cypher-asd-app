@@ -793,6 +793,21 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                             st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
                         else:
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+                        
+                        # Histogram of anomaly scores
+                        X_train = st.session_state.model_results["X_train"]
+                        X_train_scaled = scaler.transform(X_train)
+                        all_scores = iso_forest.decision_function(X_train_scaled)
+
+                        fig, ax = plt.subplots()
+                        ax.hist(all_scores, bins=30, alpha=0.7, edgecolor='black')
+                        ax.axvline(anomaly_score, color='red', linestyle='--', label='This Case')
+                        ax.set_title("Distribution of Anomaly Scores")
+                        ax.set_xlabel("Anomaly Score")
+                        ax.set_ylabel("Frequency")
+                        ax.legend()
+
+                        st.pyplot(fig)       
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
