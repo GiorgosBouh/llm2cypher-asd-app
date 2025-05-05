@@ -654,12 +654,40 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.stop()
 
                 if len(df) != 1:
-                    st.error("Please upload exactly one case")
+                    st.error("❌ Please upload exactly one case")
                     st.stop()
 
-                upload_id = str(uuid.uuid4())
                 row = df.iloc[0]
+                try:
+                    case_no = int(row["Case_No"])
+                except (ValueError, TypeError):
+                    case_no = None
 
+                with neo4j_service.session() as session:
+                    if case_no is not None:
+                        result = session.run("MATCH (c:Case {id: $id}) RETURN COUNT(c) AS count", id=case_no).single()
+                        if result["count"] > 0:
+                            max_result = session.run("MATCH (c:Case) RETURN max(c.id) AS max_id").single()
+                            suggested = (max_result["max_id"] or 1000) + 1
+                            st.error(f"❌ A case with Case_No `{case_no}` already exists.")
+                            st.info(f"ℹ️ Please use a different Case_No. Suggested: `{suggested}`")
+
+                            df.at[0, "Case_No"] = suggested
+                            st.subheader("📄 Updated CSV Preview")
+                            st.dataframe(df)
+
+                            import io
+                            csv_buffer = io.StringIO()
+                            df.to_csv(csv_buffer, sep=";", index=False)
+                            st.download_button(
+                                label="💾 Download Updated CSV with New Case_No",
+                                data=csv_buffer.getvalue(),
+                                file_name=f"updated_case_{suggested}.csv",
+                                mime="text/csv"
+                            )
+                            st.stop()
+
+                upload_id = str(uuid.uuid4())
                 with st.spinner("Inserting case into graph..."):
                     upload_id = insert_user_case(row, upload_id)
                     st.session_state.last_upload_id = upload_id
@@ -667,7 +695,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 with st.spinner("Generating graph embedding for new case..."):
                     if not generate_embedding_for_case(upload_id):
                         st.error("❌ Failed to generate embedding. The case may be too isolated in the graph.")
-                        st.stop()           
+                        st.stop()
 
                 with st.spinner("Extracting case embedding..."):
                     embedding = extract_user_embedding(upload_id)
@@ -683,9 +711,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.write(embedding.tolist())
 
                 st.text("✅ Embedding integrity check:")
-                if embedding is None:
-                    st.error("❌ Embedding is None.")
-                elif np.isnan(embedding).any():
+                if np.isnan(embedding).any():
                     st.error("❌ Embedding contains NaN values.")
                 else:
                     st.success("✅ Embedding is valid (no NaNs)")
@@ -708,7 +734,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     if dist > 5.0:
                         st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
 
-                if "model_results" in st.session_state:
                     model = st.session_state.model_results["model"]
                     proba = model.predict_proba(embedding)[0][1]
                     prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
@@ -742,6 +767,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
                 logger.error(f"Upload error: {str(e)}", exc_info=True)
+
 
     with tab4:
         st.header("💬 Natural Language to Cypher")
