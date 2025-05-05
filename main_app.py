@@ -585,6 +585,7 @@ This interactive app allows you to:
 - 🌐 Generate a graph-based embedding for the new case.
 - 🔍 Predict whether the case shows signs of Autism Spectrum Disorder (ASD).
 - 🕵️ Run anomaly detection to check for anomalies.
+- 💬 Ask natural language questions and receive Cypher queries with results, using GPT4 based NLP-to-Cypher translation
 
 ---
 
