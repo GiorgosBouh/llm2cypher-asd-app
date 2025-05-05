@@ -843,25 +843,25 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             if st.button(q, key=q):
                 st.session_state["preset_question"] = q
 
-    # Prefill text input if example was clicked
-    default_question = st.session_state.get("preset_question", "")
-    question = st.text_input("Ask about the data:", value=default_question)
+        # Prefill text input if example was clicked
+        default_question = st.session_state.get("preset_question", "")
+        question = st.text_input("Ask about the data:", value=default_question)
 
-    if question:
-        cypher = nl_to_cypher(question)
-        if cypher:
-            st.code(cypher, language="cypher")
+        if question:
+            cypher = nl_to_cypher(question)
+            if cypher:
+                st.code(cypher, language="cypher")
 
-            if st.button("▶️ Execute Query"):
-                with neo4j_service.session() as session:
-                    try:
-                        results = session.run(cypher).data()
-                        if results:
-                            st.dataframe(pd.DataFrame(results))
-                        else:
-                            st.info("No results found")
-                    except Exception as e:
-                        st.error(f"Query failed: {str(e)}")
+                if st.button("▶️ Execute Query"):
+                    with neo4j_service.session() as session:
+                        try:
+                            results = session.run(cypher).data()
+                            if results:
+                                st.dataframe(pd.DataFrame(results))
+                            else:
+                                st.info("No results found")
+                        except Exception as e:
+                            st.error(f"Query failed: {str(e)}")
         else:
             st.warning("❓ Unable to translate this question. Try a simpler one.")
 if __name__ == "__main__":
