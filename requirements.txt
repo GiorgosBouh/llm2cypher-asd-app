@@ -11,3 +11,6 @@ scikit-learn>=1.1
 networkx>=2.6
 node2vec==0.4.6
 imbalanced-learn
+matplotlib
+seaborn
+plotly>=5.0
