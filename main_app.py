@@ -677,8 +677,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         if uploaded_file:
             try:
                 df = pd.read_csv(uploaded_file, delimiter=";")
-                df = pd.read_csv(uploaded_file, delimiter=";")
-
                 st.subheader("👁️ Preview Uploaded CSV")
                 st.dataframe(df)
                 required_cols = [
