@@ -112,19 +112,7 @@ def safe_neo4j_operation(func):
 
 # === Data Insertion ===
 @safe_neo4j_operation
-def insert_user_case(row: pd.Series, upload_id: str) -> Optional[str]:
-    with neo4j_service.session() as session:
-        # 🔍 Check for existing case with same Case_No
-        existing = session.run(
-            "MATCH (c:Case {id: $id}) RETURN count(c) > 0 AS exists",
-            id=int(row["Case_No"])
-        ).single()["exists"]
-
-        if existing:
-            st.warning(f"⚠️ A case with Case_No {row['Case_No']} already exists. Upload skipped.")
-            return None
-
-    # Proceed with insertion
+def insert_user_case(row: pd.Series, upload_id: str) -> str:
     queries = []
 
     queries.append((
@@ -184,12 +172,6 @@ def remove_screened_for_labels():
             DELETE r
         """)
         logger.info("✅ SCREENED_FOR relationships removed to prevent leakage.")
-@safe_neo4j_operation
-def suggest_next_case_no() -> int:
-    with neo4j_service.session() as session:
-        result = session.run("MATCH (c:Case) RETURN MAX(c.id) AS max_id").single()
-        max_id = result["max_id"] or 0
-        return max_id + 1
 
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
@@ -354,10 +336,8 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
             st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
             return
 
-        # Προαιρετικός έλεγχος μήκους
         if len(X) != len(df):
-            pass
-            # st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
+            st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
 
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
         df = df[features]
@@ -573,7 +553,6 @@ def reinsert_labels_from_csv(csv_url: str):
                 """, case_id=case_id, label=label.capitalize())
 
 # === Streamlit UI ===
-# === Streamlit UI ===
 def main():
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
@@ -763,7 +742,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
                 logger.error(f"Upload error: {str(e)}", exc_info=True)
-    
 
     with tab4:
         st.header("💬 Natural Language to Cypher")
@@ -810,25 +788,25 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             if st.button(q, key=q):
                 st.session_state["preset_question"] = q
 
-        # Prefill text input if example was clicked
-        default_question = st.session_state.get("preset_question", "")
-        question = st.text_input("Ask about the data:", value=default_question)
+    # Prefill text input if example was clicked
+    default_question = st.session_state.get("preset_question", "")
+    question = st.text_input("Ask about the data:", value=default_question)
 
-        if question:
-            cypher = nl_to_cypher(question)
-            if cypher:
-                st.code(cypher, language="cypher")
+    if question:
+        cypher = nl_to_cypher(question)
+        if cypher:
+            st.code(cypher, language="cypher")
 
-                if st.button("▶️ Execute Query"):
-                    with neo4j_service.session() as session:
-                        try:
-                            results = session.run(cypher).data()
-                            if results:
-                                st.dataframe(pd.DataFrame(results))
-                            else:
-                                st.info("No results found")
-                        except Exception as e:
-                            st.error(f"Query failed: {str(e)}")
+            if st.button("▶️ Execute Query"):
+                with neo4j_service.session() as session:
+                    try:
+                        results = session.run(cypher).data()
+                        if results:
+                            st.dataframe(pd.DataFrame(results))
+                        else:
+                            st.info("No results found")
+                    except Exception as e:
+                        st.error(f"Query failed: {str(e)}")
 
 if __name__ == "__main__":
     main()
