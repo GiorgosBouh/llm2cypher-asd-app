@@ -10,3 +10,4 @@ scikit-learn>=1.1
 # Required for graph embedding
 networkx>=2.6
 node2vec==0.4.6
+imbalanced-learn
