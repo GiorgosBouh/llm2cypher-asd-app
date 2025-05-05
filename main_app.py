@@ -354,8 +354,10 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
             st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
             return
 
-        #if len(X) != len(df):
-            #st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
+        # Προαιρετικός έλεγχος μήκους
+        if len(X) != len(df):
+            pass
+            # st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
 
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
         df = df[features]
