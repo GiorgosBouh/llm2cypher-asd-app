@@ -565,13 +565,13 @@ def main():
 
 ### 📘 About This Project
 
-This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), Dimitrios Doumanas, and Dr. Konstantinos Kotis  
+This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration wiht Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis  
 at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegean](https://i-lab.aegean.gr/).
 
 It is part of the postdoctoral research project:
 
 **"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"**  
-by Dr. Georgios Bouchouras.
+by Dr. Bouchouras under the supervision of Dr. Kotis.
 
 ---
 
