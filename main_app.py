@@ -38,7 +38,7 @@ import subprocess
 # === Configuration ===
 class Config:
     EMBEDDING_DIM = 128
-    RANDOM_STATE = 42
+    RANDOM_STATE = np.random.randint(0, 1000)
     TEST_SIZE = 0.3
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
@@ -610,7 +610,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         st.header("🤖 ASD Detection Model")
 
         if st.button("🔁 Full Graph Rebuild + Train Model"):
-            with st.spinner("Rebuilding graph and generating embeddings..."):
+            with st.spinner("Rebuilding graph and generating embeddings...this will take 3-5 minutes"):
                 result = subprocess.run(
                     [sys.executable, "kg_builder_2.py"],
                     capture_output=True,
