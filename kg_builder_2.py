@@ -71,29 +71,46 @@ def create_relationships(tx, df):
         MERGE (c)-[:SUBMITTED_BY]->(s)
     """, data=submitter_data)
 
-def create_similarity_relationships(tx, df, max_pairs=1000):
-    pairs = []
+def create_similarity_relationships(tx, df, max_pairs=5000):
+    pairs = set()
+
+    # 1. Δημογραφική και υποβολή (όπως πριν)
     for col in ["Ethnicity", "Who_completed_the_test"]:
         grouped = df.groupby(col)["Case_No"].apply(list)
         for ids in grouped:
             for i in range(len(ids)):
-                for j in range(i+1, len(ids)):
-                    pairs.append((int(ids[i]), int(ids[j])))
+                for j in range(i + 1, len(ids)):
+                    pairs.add((int(ids[i]), int(ids[j])))
 
+    # 2. Παρόμοιο Qchat-10-Score
     for i, row1 in df.iterrows():
         for j, row2 in df.iloc[i + 1:].iterrows():
             if pd.notnull(row1["Qchat-10-Score"]) and pd.notnull(row2["Qchat-10-Score"]):
                 if abs(row1["Qchat-10-Score"] - row2["Qchat-10-Score"]) <= 1:
-                    pairs.append((int(row1["Case_No"]), int(row2["Case_No"])))
+                    pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
 
-    shuffle(pairs)
-    pairs = pairs[:max_pairs]
+    # ✅ 3. Παρόμοιες απαντήσεις σε ερωτήσεις (>= 7 κοινές τιμές)
+    behavior_cols = [f"A{i}" for i in range(1, 11)]
+    for i, row1 in df.iterrows():
+        for j, row2 in df.iloc[i + 1:].iterrows():
+            common_answers = sum(
+                row1[q] == row2[q] for q in behavior_cols
+                if pd.notnull(row1[q]) and pd.notnull(row2[q])
+            )
+            if common_answers >= 7:
+                pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
 
+    # Περικοπή για να μην είναι υπερβολικά μεγάλος
+    pair_list = list(pairs)
+    shuffle(pair_list)
+    pair_list = pair_list[:max_pairs]
+
+    # Εισαγωγή σχέσεων
     tx.run("""
     UNWIND $batch AS pair
     MATCH (c1:Case {id: pair.id1}), (c2:Case {id: pair.id2})
     MERGE (c1)-[:GRAPH_SIMILARITY]->(c2)
-    """, batch=[{"id1": i, "id2": j} for i, j in pairs])
+    """, batch=[{"id1": i, "id2": j} for i, j in pair_list])
 
 def generate_embeddings(driver):
     G = nx.Graph()
