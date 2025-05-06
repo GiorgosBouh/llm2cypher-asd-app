@@ -81,11 +81,7 @@ def create_similarity_relationships(tx, df, max_pairs=5000):
                 for j in range(i + 1, len(ids)):
                     pairs.add((int(ids[i]), int(ids[j])))
 
-    for i, row1 in df.iterrows():
-        for j, row2 in df.iloc[i + 1:].iterrows():
-            if pd.notnull(row1["Qchat-10-Score"]) and pd.notnull(row2["Qchat-10-Score"]):
-                if abs(row1["Qchat-10-Score"] - row2["Qchat-10-Score"]) <= 1:
-                    pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
+    
 
     behavior_cols = [f"A{i}" for i in range(1, 11)]
     for i, row1 in df.iterrows():
