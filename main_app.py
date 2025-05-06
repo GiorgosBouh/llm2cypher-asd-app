@@ -32,6 +32,8 @@ from sklearn.inspection import permutation_importance
 import subprocess
 import sys
 from sklearn.impute import SimpleImputer
+import subprocess
+
 
 # === Configuration ===
 class Config:
@@ -651,7 +653,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 if st.session_state.get("model_trained"):
                     st.success("✅ Model trained successfully!")
-        import subprocess
 
     with tab2:
         st.header("🌐 Graph Embeddings")
