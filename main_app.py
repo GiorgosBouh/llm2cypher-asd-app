@@ -35,15 +35,15 @@ from sklearn.impute import SimpleImputer
 
 # === Configuration ===
 class Config:
-    EMBEDDING_DIM = 64
+    EMBEDDING_DIM = 128
     RANDOM_STATE = 42
     TEST_SIZE = 0.3
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
     NODE2VEC_WALK_LENGTH = 20
-    NODE2VEC_NUM_WALKS = 50
-    NODE2VEC_WORKERS = 1
+    NODE2VEC_NUM_WALKS = 100
+    NODE2VEC_WORKERS = 2
     NODE2VEC_P = 1
     NODE2VEC_Q = 1
     EMBEDDING_BATCH_SIZE = 50
