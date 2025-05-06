@@ -99,6 +99,19 @@ def create_similarity_relationships(tx, df, max_pairs=5000):
             )
             if common_answers >= 7:
                 pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
+    # Ίδιο φύλο
+    grouped = df.groupby("Sex")["Case_No"].apply(list)
+    for ids in grouped:
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                pairs.add((int(ids[i]), int(ids[j])))
+
+    # Παρόμοια ηλικία (±1 μήνας)
+    for i, row1 in df.iterrows():
+        for j, row2 in df.iloc[i + 1:].iterrows():
+            if pd.notnull(row1["Age_Mons"]) and pd.notnull(row2["Age_Mons"]):
+                if abs(row1["Age_Mons"] - row2["Age_Mons"]) <= 1:
+                    pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
 
     # Περικοπή για να μην είναι υπερβολικά μεγάλος
     pair_list = list(pairs)
