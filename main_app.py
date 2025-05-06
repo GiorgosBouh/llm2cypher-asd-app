@@ -633,13 +633,14 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         if st.button("🔁 Recalculate All Embeddings"):
             st.info("this function is for the developer only")
             st.warning("⚠️ Don’t push this button unless you are the developer!")
-            with st.spinner("Generating new graph embeddings..."):
-                from kg_builder_2 import generate_embeddings  # βεβαιώσου ότι αυτή είναι η σωστή διαδρομή
-                try:
-                    generate_embeddings(neo4j_service.driver)
-                    st.success("✅ Embeddings recalculated and updated in the graph!")
-                except Exception as e:
-                    st.error(f"❌ Failed to generate embeddings: {str(e)}")
+
+        with st.spinner("Generating new graph embeddings..."):
+            try:
+                from kg_builder_2 import generate_embeddings  # or correct path to your function
+                generate_embeddings(neo4j_service.driver)
+                st.success("✅ Embeddings recalculated and updated in the graph!")
+            except Exception as e:
+                st.error(f"❌ Failed to generate embeddings: {str(e)}")
 
     with tab3:
         st.header("📄 Upload New Case")
