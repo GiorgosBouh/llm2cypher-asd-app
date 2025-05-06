@@ -40,7 +40,7 @@ def create_relationships(tx, df):
 
     for _, row in df.iterrows():
         case_id = int(row["Case_No"])
-        upload_id = str(case_id)  # χρήση του case_id ως upload_id
+        upload_id = str(case_id)
         case_data.append({"id": case_id, "upload_id": upload_id})
 
         for q in [f"A{i}" for i in range(1, 11)]:
@@ -74,7 +74,6 @@ def create_relationships(tx, df):
 def create_similarity_relationships(tx, df, max_pairs=5000):
     pairs = set()
 
-    # 1. Δημογραφική και υποβολή (όπως πριν)
     for col in ["Ethnicity", "Who_completed_the_test"]:
         grouped = df.groupby(col)["Case_No"].apply(list)
         for ids in grouped:
@@ -82,14 +81,12 @@ def create_similarity_relationships(tx, df, max_pairs=5000):
                 for j in range(i + 1, len(ids)):
                     pairs.add((int(ids[i]), int(ids[j])))
 
-    # 2. Παρόμοιο Qchat-10-Score
     for i, row1 in df.iterrows():
         for j, row2 in df.iloc[i + 1:].iterrows():
             if pd.notnull(row1["Qchat-10-Score"]) and pd.notnull(row2["Qchat-10-Score"]):
                 if abs(row1["Qchat-10-Score"] - row2["Qchat-10-Score"]) <= 1:
                     pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
 
-    # ✅ 3. Παρόμοιες απαντήσεις σε ερωτήσεις (>= 7 κοινές τιμές)
     behavior_cols = [f"A{i}" for i in range(1, 11)]
     for i, row1 in df.iterrows():
         for j, row2 in df.iloc[i + 1:].iterrows():
@@ -99,26 +96,11 @@ def create_similarity_relationships(tx, df, max_pairs=5000):
             )
             if common_answers >= 7:
                 pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
-    # Ίδιο φύλο
-    grouped = df.groupby("Sex")["Case_No"].apply(list)
-    for ids in grouped:
-        for i in range(len(ids)):
-            for j in range(i + 1, len(ids)):
-                pairs.add((int(ids[i]), int(ids[j])))
 
-    # Παρόμοια ηλικία (±1 μήνας)
-    for i, row1 in df.iterrows():
-        for j, row2 in df.iloc[i + 1:].iterrows():
-            if pd.notnull(row1["Age_Mons"]) and pd.notnull(row2["Age_Mons"]):
-                if abs(row1["Age_Mons"] - row2["Age_Mons"]) <= 1:
-                    pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
-
-    # Περικοπή για να μην είναι υπερβολικά μεγάλος
     pair_list = list(pairs)
     shuffle(pair_list)
     pair_list = pair_list[:max_pairs]
 
-    # Εισαγωγή σχέσεων
     tx.run("""
     UNWIND $batch AS pair
     MATCH (c1:Case {id: pair.id1}), (c2:Case {id: pair.id2})
@@ -163,15 +145,25 @@ def build_graph():
         print("🧠 First row:", df.iloc[0].to_dict(), flush=True)
 
         with driver.session() as session:
+            # 🔁 OPTIONAL FULL RESET
+            # print("🧨 Διαγραφή όλου του γράφου...", flush=True)
+            # session.run("MATCH (n) DETACH DELETE n")
+
+            print("🧹 Διαγραφή παλιών embeddings...", flush=True)
+            session.run("MATCH (c:Case) REMOVE c.embedding")
+
             print("⏳ Δημιουργία κόμβων...", flush=True)
             session.execute_write(create_nodes, df)
+
             print("⏳ Δημιουργία σχέσεων...", flush=True)
             session.execute_write(create_relationships, df)
+
             print("⏳ Δημιουργία σχέσεων ομοιότητας...", flush=True)
             session.execute_write(create_similarity_relationships, df)
 
         print("⏳ Δημιουργία embeddings...", flush=True)
         generate_embeddings(driver)
+
         print("✅ Ολοκληρώθηκε επιτυχώς!", flush=True)
         sys.exit(0)
 
