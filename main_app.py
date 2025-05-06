@@ -656,7 +656,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab2:
         st.header("🌐 Graph Embeddings")
         st.warning("⚠️ Don’t push this button unless you are the developer!")
-        st.info("ℹ️ This function is for the developer only"
+        st.info("ℹ️ This function is for the developer only")
         if st.button("🔁 Recalculate All Embeddings"):
             with st.spinner("Running full graph rebuild and embedding generation..."):
                 result = subprocess.run(
