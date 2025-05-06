@@ -565,7 +565,7 @@ def main():
 
 ### 📘 About This Project
 
-This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration wiht Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis  
+This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration with Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis  
 at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegean](https://i-lab.aegean.gr/).
 
 It is part of the postdoctoral research project:
@@ -607,6 +607,29 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab1:
         st.header("🤖 ASD Detection Model")
 
+        if st.button("🔁 Full Graph Rebuild + Train Model"):
+            with st.spinner("Rebuilding graph and generating embeddings..."):
+                result = subprocess.run(
+                    [sys.executable, "kg_builder_2.py"],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    st.success("✅ Embeddings generated!")
+
+                    results = train_asd_detection_model()
+                    if results:
+                        st.session_state.model_results = results
+                        st.session_state.model_trained = True
+                        evaluate_model(
+                            results["model"],
+                            results["X_test"],
+                            results["y_test"]
+                        )
+                else:
+                    st.error("❌ Failed to rebuild graph")
+                    st.code(result.stderr)
+
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):
                 results = train_asd_detection_model()
@@ -625,17 +648,16 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                         reinsert_labels_from_csv(csv_url)
                         st.success("🎯 Labels reinserted automatically after training!")
- # Εμφάνισε επιτυχία *εκτός* του spinner
+
                 if st.session_state.get("model_trained"):
                     st.success("✅ Model trained successfully!")
-    import subprocess
+        import subprocess
 
     with tab2:
         st.header("🌐 Graph Embeddings")
+        st.warning("⚠️ Don’t push this button unless you are the developer!")
+        st.info("ℹ️ This function is for the developer only"
         if st.button("🔁 Recalculate All Embeddings"):
-            st.info("this function is for the developer only")
-            st.warning("⚠️ Don’t push this button unless you are the developer!")
-
             with st.spinner("Running full graph rebuild and embedding generation..."):
                 result = subprocess.run(
                     [sys.executable, "kg_builder_2.py"],  # Προσαρμόσέ το path αν χρειάζεται
