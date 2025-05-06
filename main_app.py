@@ -654,6 +654,31 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 if st.session_state.get("model_trained"):
                     st.success("✅ Model trained successfully!")
 
+        with st.expander("🧪 Compare old vs new embeddings (Case 1)"):
+            if st.button("📤 Save current embedding of Case 1"):
+                with neo4j_service.session() as session:
+                    result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
+                    if result and result["emb"]:
+                        st.session_state.saved_embedding_case1 = result["emb"]
+                        st.success("✅ Saved current embedding of Case 1")
+
+            if st.button("📥 Compare to current embedding of Case 1"):
+                with neo4j_service.session() as session:
+                    result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
+                    if result and result["emb"]:
+                        new_emb = result["emb"]
+                        old_emb = st.session_state.get("saved_embedding_case1")
+                        if old_emb:
+                            from numpy.linalg import norm
+                            diff = norm(np.array(old_emb) - np.array(new_emb))
+                            st.write(f"📏 Difference (L2 norm) between saved and current embedding: `{diff:.4f}`")
+                            if diff < 1e-3:
+                                st.warning("⚠️ Embedding is (almost) identical — rebuild had no effect.")
+                            else:
+                                st.success("✅ Embedding changed — rebuild updated the graph.")
+                        else:
+                            st.error("❌ No saved embedding found. Click 'Save current embedding' first.")
+
     with tab2:
         st.header("🌐 Graph Embeddings")
         st.warning("⚠️ Don’t push this button unless you are the developer!")
