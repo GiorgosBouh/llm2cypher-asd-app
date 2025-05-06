@@ -71,7 +71,7 @@ def create_relationships(tx, df):
         MERGE (c)-[:SUBMITTED_BY]->(s)
     """, data=submitter_data)
 
-def create_similarity_relationships(tx, df, max_pairs=3000):
+def create_similarity_relationships(tx, df, max_pairs=1000):
     pairs = []
     for col in ["Ethnicity", "Who_completed_the_test"]:
         grouped = df.groupby(col)["Case_No"].apply(list)
