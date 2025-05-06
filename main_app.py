@@ -613,7 +613,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 if results:
                     st.session_state.model_results = results
-                    st.success("✅ Model trained successfully!")
+                    st.session_state.model_trained = True  # ✅ flag για επιτυχία
 
                     evaluate_model(
                         results["model"],
@@ -625,7 +625,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                         reinsert_labels_from_csv(csv_url)
                         st.success("🎯 Labels reinserted automatically after training!")
-
+ # Εμφάνισε επιτυχία *εκτός* του spinner
+                if st.session_state.get("model_trained"):
+                    st.success("✅ Model trained successfully!")
     with tab2:
         st.header("🌐 Graph Embeddings")
         if st.button("🔁 Recalculate All Embeddings"):
