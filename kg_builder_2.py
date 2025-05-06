@@ -145,12 +145,8 @@ def build_graph():
         print("🧠 First row:", df.iloc[0].to_dict(), flush=True)
 
         with driver.session() as session:
-            # 🔁 OPTIONAL FULL RESET
-            # print("🧨 Διαγραφή όλου του γράφου...", flush=True)
-            # session.run("MATCH (n) DETACH DELETE n")
-
-            print("🧹 Διαγραφή παλιών embeddings...", flush=True)
-            session.run("MATCH (c:Case) REMOVE c.embedding")
+            print("🧹 Διαγραφή όλων των κόμβων και σχέσεων...", flush=True)
+            session.run("MATCH (n) DETACH DELETE n")
 
             print("⏳ Δημιουργία κόμβων...", flush=True)
             session.execute_write(create_nodes, df)
