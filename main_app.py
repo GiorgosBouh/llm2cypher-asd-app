@@ -34,6 +34,8 @@ import sys
 from sklearn.impute import SimpleImputer
 import subprocess
 import uuid
+from xgboost import XGBClassifier
+
 
 
 # === Configuration ===
@@ -477,13 +479,15 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             random_state=Config.RANDOM_STATE
         )
 
+
         pipeline = Pipeline([
             ('imputer', SimpleImputer(strategy='mean')),
             ('smote', SMOTE(random_state=Config.RANDOM_STATE)),
-            ('classifier', RandomForestClassifier(
+            ('classifier', XGBClassifier(
                 n_estimators=Config.N_ESTIMATORS,
-                random_state=Config.RANDOM_STATE,
-                class_weight='balanced'
+                use_label_encoder=False,
+                eval_metric='logloss',
+                random_state=Config.RANDOM_STATE
             ))
         ])
 
