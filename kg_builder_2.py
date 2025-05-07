@@ -86,9 +86,8 @@ def create_similarity_relationships(tx, df, max_pairs=10000):
     demo_cols = ['Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD']
     for col in demo_cols:
         # Σωστή χρήση groupby με ένα μόνο κριτήριο
-        grouped = df.group_by(col).agg({"Case_No": lambda x: list(x)})
-        for _, row in grouped.iterrows():
-            case_list = row["Case_No"]
+        grouped = df.groupby(col)['Case_No'].apply(list)
+        for case_list in grouped:
             for i in range(len(case_list)):
                 for j in range(i+1, len(case_list)):
                     pairs.add((int(case_list[i]), int(case_list[j])))
