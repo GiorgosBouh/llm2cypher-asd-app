@@ -130,8 +130,9 @@ def generate_embeddings(driver):
 
     print(f"⏳ Εκπαίδευση Node2Vec... ({len(G.nodes)} nodes, {len(G.edges)} edges)", flush=True)
 
-    random_seed = randint(1, 1_000_000)
+    model = None
     try:
+        random_seed = randint(1, 1_000_000)
         node2vec = Node2Vec(
             G,
             dimensions=128,
@@ -143,6 +144,10 @@ def generate_embeddings(driver):
         model = node2vec.fit(window=10, min_count=1)
     except Exception as e:
         print(f"❌ Node2Vec training failed: {e}")
+        return
+
+    if model is None:
+        print("❌ Model δεν εκπαιδεύτηκε – ακύρωση αποθήκευσης embeddings.")
         return
 
     with driver.session() as session:
