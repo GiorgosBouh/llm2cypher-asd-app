@@ -33,6 +33,7 @@ import subprocess
 import sys
 from sklearn.impute import SimpleImputer
 import subprocess
+import uuid
 
 
 # === Configuration ===
@@ -454,8 +455,9 @@ def evaluate_model(model, X_test, y_test):
 
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
-def train_asd_detection_model() -> Optional[dict]:
-    """Trains the ASD detection model with leakage protection"""
+def train_asd_detection_model(cache_key: str) -> Optional[dict]:
+    logger.info(f"Cache key used for training model: {cache_key}")
+
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
 
@@ -500,6 +502,7 @@ def train_asd_detection_model() -> Optional[dict]:
         logger.error(f"Training error: {e}", exc_info=True)
         return None
 
+
 # === Anomaly Detection ===
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
@@ -514,7 +517,7 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
         return np.array(embeddings) if embeddings else None
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
-def train_isolation_forest() -> Optional[Tuple[IsolationForest, StandardScaler]]:
+def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, StandardScaler]]:
     """Trains anomaly detection model"""
     embeddings = get_existing_embeddings()
     if embeddings is None or len(embeddings) < Config.MIN_CASES_FOR_ANOMALY_DETECTION:
@@ -619,7 +622,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 if result.returncode == 0:
                     st.success("✅ Embeddings generated!")
 
-                    results = train_asd_detection_model()
+                    # 🔁 Force retraining bypassing the Streamlit cache
+                    results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
+
                     if results:
                         st.session_state.model_results = results
                         st.session_state.model_trained = True
