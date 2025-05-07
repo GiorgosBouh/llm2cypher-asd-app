@@ -6,6 +6,8 @@ from node2vec import Node2Vec
 from random import shuffle
 import traceback
 import sys
+from random import randint
+
 
 def connect_to_neo4j(uri="neo4j+s://1f5f8a14.databases.neo4j.io", user="neo4j", password="3xhy4XKQSsSLIT7NI-w9m4Z7Y_WcVnL1hDQkWTMIoMQ"):
     print(f"🌐 Connecting to Neo4j Aura: {uri}", flush=True)
@@ -124,8 +126,17 @@ def generate_embeddings(driver):
         return
 
     print(f"⏳ Εκπαίδευση Node2Vec... ({len(G.nodes)} nodes, {len(G.edges)} edges)", flush=True)
-    node2vec = Node2Vec(G, dimensions=128, walk_length=20, num_walks=100, workers=2, seed=42)
-    model = node2vec.fit(window=10, min_count=1)
+    random_seed = randint(1, 1_000_000)
+    print(f"🎲 Χρησιμοποιείται τυχαίο seed: {random_seed}", flush=True)
+
+    node2vec = Node2Vec(
+        G,
+        dimensions=128,
+        walk_length=20,
+        num_walks=100,
+        workers=2,
+        seed=random_seed
+)
 
     with driver.session() as session:
         for node_id in G.nodes():
