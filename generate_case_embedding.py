@@ -1,3 +1,5 @@
+from dotenv import load_dotenv
+load_dotenv()
 import numpy as np
 import networkx as nx
 from node2vec import Node2Vec
@@ -5,6 +7,7 @@ from neo4j import GraphDatabase
 import sys
 import os
 from tqdm import tqdm  # Για progress bars
+
 
 def generate_embedding_for_case(driver, upload_id):
     try:
