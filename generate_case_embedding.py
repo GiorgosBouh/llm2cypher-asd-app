@@ -4,101 +4,112 @@ from node2vec import Node2Vec
 from neo4j import GraphDatabase
 import sys
 import os
+from tqdm import tqdm  # Για progress bars
 
 def generate_embedding_for_case(driver, upload_id):
     try:
         G = nx.Graph()
+        case_id = None
 
+        # Βελτιστοποίηση: Single query για φόρτωση όλων των απαραίτητων δεδομένων
         with driver.session() as session:
-            # 🔎 Ανάκτηση του upload_id-based Case
-            result = session.run(
-                "MATCH (c:Case {upload_id: $upload_id}) RETURN c.id AS case_id",
-                upload_id=upload_id
-            ).single()
+            result = session.run("""
+                MATCH (c:Case {upload_id: $upload_id}) 
+                OPTIONAL MATCH (c)-[r]->(neighbor)
+                WHERE c.id IS NOT NULL AND neighbor.id IS NOT NULL
+                RETURN c.id AS case_id, 
+                       collect(DISTINCT neighbor.id) AS neighbors,
+                       count(r) AS degree
+            """, upload_id=upload_id).single()
 
-            if not result or result["case_id"] is None:
-                print("❌ Case not found in graph.")
+            if not result or not result["case_id"]:
+                print("❌ Case not found or has no ID")
                 return False
 
-            case_id = result["case_id"]
+            case_id = str(result["case_id"])
+            degree = result["degree"]
+            
+            if degree < 3:  # Ελάχιστο όριο συνδέσεων
+                print(f"⚠️ Case has too few connections ({degree}) for meaningful embedding")
+                return False
 
-            # 🔄 Φόρτωση κόμβων
-            nodes = session.run("MATCH (n) RETURN n.id AS id")
-            for node in nodes:
-                if node["id"] is not None:
-                    G.add_node(str(node["id"]))
+            # Φόρτωση ολόκληρου του υπογραφήματος
+            graph_result = session.run("""
+                MATCH (c:Case {id: $case_id})-[:GRAPH_SIMILARITY*..2]-(other)
+                WHERE other.id IS NOT NULL
+                RETURN DISTINCT other.id AS node_id
+                LIMIT 500  # Όριο για απόδοση
+            """, case_id=int(case_id))
 
-            # 🔗 Φόρτωση σχέσεων με έλεγχο βάρους
-            edges = session.run("""
-                MATCH (n1)-[r]->(n2)
-                WHERE n1.id IS NOT NULL AND n2.id IS NOT NULL
-                RETURN n1.id AS source, n2.id AS target,
-                       CASE WHEN r.value IS NOT NULL THEN toFloat(r.value) ELSE 1.0 END AS weight
-            """)
+            G.add_node(case_id)
+            for record in graph_result:
+                G.add_edge(case_id, str(record["node_id"]))
 
-            for edge in edges:
-                weight = edge["weight"]
-                if weight is None or not np.isfinite(weight):
-                    continue
-                G.add_edge(str(edge["source"]), str(edge["target"]), weight=weight)
+        # Επαύξηση με κοινά γειτονικά nodes
+        if len(G.edges) < 10:
+            print("⚠️ Augmenting with behavioral similarities")
+            with driver.session() as session:
+                similar_cases = session.run("""
+                    MATCH (c1:Case {id: $case_id})
+                    MATCH (c2:Case)
+                    WHERE c1 <> c2 AND
+                    size([q IN ['A1','A2','A3','A4','A5','A6','A7','A8','A9','A10'] 
+                         WHERE (c1)-[:HAS_ANSWER {value: (c2)-[:HAS_ANSWER {name: q}]->value}]->q]) >= 7
+                    RETURN c2.id LIMIT 20
+                """, case_id=int(case_id))
 
-        # ⚠️ Έλεγχος ελάχιστων κόμβων
-        if len(G.nodes) < 2:
-            print("⚠️ Not enough nodes to build graph.")
-            return False
+                for record in similar_cases:
+                    G.add_edge(case_id, str(record["c2.id"]))
 
-        print(f"✅ Graph built: {len(G.nodes)} nodes, {len(G.edges)} edges")
-
-        # 🧠 Εκπαίδευση Node2Vec
+        # Δημιουργία embeddings με τις ίδιες παραμέτρους όπως στο κύριο γράφημα
         node2vec = Node2Vec(
             G,
             dimensions=128,
-            walk_length=20,
-            num_walks=100,
+            walk_length=30,
+            num_walks=200,
             workers=2,
-            seed=42
+            p=1.0,
+            q=0.5,
+            quiet=True  # Απενεργοποίηση verbose output
         )
-        model = node2vec.fit(window=5, min_count=1)
 
-        # ✅ Ανάκτηση embedding
-        if str(case_id) not in model.wv:
-            print(f"❌ Node {case_id} not found in embedding space.")
-            return False
+        model = node2vec.fit(
+            window=10,
+            min_count=1
+        )
 
-        vector = model.wv[str(case_id)]
-        if not np.all(np.isfinite(vector)):
-            print("❌ Embedding contains non-finite values.")
-            return False
-
-        embedding = vector.tolist()
-
-        # 💾 Αποθήκευση στο Neo4j
+        embedding = model.wv[case_id].tolist()
+        
+        # Ενημέρωση Neo4j
         with driver.session() as session:
-            session.run(
-                "MATCH (c:Case {upload_id: $upload_id}) SET c.embedding = $embedding",
-                upload_id=upload_id,
-                embedding=embedding
-            )
+            session.run("""
+                MATCH (c:Case {upload_id: $upload_id})
+                SET c.embedding = $embedding,
+                    c.embedding_generated_at = datetime()
+            """, upload_id=upload_id, embedding=embedding)
 
-        print("✅ Embedding generated and stored successfully.")
+        print(f"✅ Generated embedding for case {case_id} (Dimension: {len(embedding)})")
         return True
 
     except Exception as e:
-        print(f"❌ Error during embedding generation: {e}")
+        print(f"❌ Error during embedding generation: {str(e)}")
         return False
 
 if __name__ == "__main__":
-    uri = os.getenv("NEO4J_URI")
-    user = os.getenv("NEO4J_USER")
-    password = os.getenv("NEO4J_PASSWORD")
-    upload_id = sys.argv[1] if len(sys.argv) > 1 else None
+    # Βελτιστοποιημένο error handling
+    try:
+        uri = os.getenv("NEO4J_URI")
+        user = os.getenv("NEO4J_USER")
+        password = os.getenv("NEO4J_PASSWORD")
+        upload_id = sys.argv[1] if len(sys.argv) > 1 else None
 
-    if not upload_id:
-        print("❌ Missing upload_id parameter")
+        if not upload_id:
+            raise ValueError("Missing upload_id parameter")
+
+        driver = GraphDatabase.driver(uri, auth=(user, password))
+        success = generate_embedding_for_case(driver, upload_id)
+        sys.exit(0 if success else 1)
+        
+    except Exception as e:
+        print(f"❌ Fatal error: {str(e)}")
         sys.exit(1)
-
-    driver = GraphDatabase.driver(uri, auth=(user, password))
-    success = generate_embedding_for_case(driver, upload_id)
-    driver.close()
-
-    sys.exit(0 if success else 1)
