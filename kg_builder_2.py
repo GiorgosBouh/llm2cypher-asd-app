@@ -122,8 +122,8 @@ def generate_embeddings(driver):
         return
 
     print(f"⏳ Εκπαίδευση Node2Vec... ({len(G.nodes)} nodes, {len(G.edges)} edges)", flush=True)
-    node2vec = Node2Vec(G, dimensions=64, walk_length=10, num_walks=50, workers=1, seed=42)
-    model = node2vec.fit(window=5, min_count=1)
+    node2vec = Node2Vec(G, dimensions=128, walk_length=20, num_walks=100, workers=2, seed=42)
+    model = node2vec.fit(window=10, min_count=1)
 
     with driver.session() as session:
         for node_id in G.nodes():
