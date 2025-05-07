@@ -50,12 +50,10 @@ def call_embedding_generator(upload_id: str) -> bool:
     try:
         result = subprocess.run(
             ["python", "generate_case_embedding.py", upload_id],
-            cwd="llm2cypher-asd-app",
             env=env_vars,
             capture_output=True,
             text=True
         )
-
         if result.returncode == 0:
             st.success("✅ Embedding generated successfully!")
             return True
