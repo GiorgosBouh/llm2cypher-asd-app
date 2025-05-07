@@ -456,6 +456,7 @@ def evaluate_model(model, X_test, y_test):
     csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
     analyze_embedding_correlations(X_test, csv_url)
 
+
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
@@ -480,17 +481,16 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             random_state=Config.RANDOM_STATE
         )
 
-
-        pipeline = make_pipeline(
-            SimpleImputer(strategy='mean'),
-            SMOTE(random_state=Config.RANDOM_STATE),
-            XGBClassifier(
+        pipeline = Pipeline([
+            ('imputer', SimpleImputer(strategy='mean')),
+            ('smote', SMOTE(random_state=Config.RANDOM_STATE)),
+            ('classifier', XGBClassifier(
                 n_estimators=Config.N_ESTIMATORS,
                 use_label_encoder=False,
                 eval_metric='logloss',
                 random_state=Config.RANDOM_STATE
-            )
-        )
+            ))
+        ])
 
         pipeline.fit(X_train, y_train)
 
@@ -506,8 +506,6 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         st.error(f"❌ Error training model: {e}")
         logger.error(f"Training error: {e}", exc_info=True)
         return None
-
-
 # === Anomaly Detection ===
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
