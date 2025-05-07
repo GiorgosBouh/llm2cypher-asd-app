@@ -108,11 +108,9 @@ def create_similarity_relationships(tx, df, max_pairs=10000):
     """, batch=[{"id1": i, "id2": j} for i, j in pair_list])
 
 def generate_embeddings(driver):
-    import random
-    from random import randint
-
     G = nx.Graph()
     with driver.session() as session:
+        # Φόρτωση κόμβων και ακμών
         for r in session.run("MATCH (c:Case) RETURN c.id AS id"):
             G.add_node(str(r["id"]))
 
@@ -124,49 +122,45 @@ def generate_embeddings(driver):
             if r["source"] and r["target"]:
                 G.add_edge(str(r["source"]), str(r["target"]))
 
-    if len(G.nodes) == 0:
-        print("⚠️ Δεν βρέθηκαν κόμβοι!", flush=True)
-        return
+    # Έλεγχος γραφήματος
+    if len(G.nodes) < 2:
+        raise ValueError("❌ Δεν υπάρχουν αρκετοί κόμβοι για embeddings (χρειάζονται τουλάχιστον 2)")
+    if len(G.edges) == 0:
+        raise ValueError("❌ Δεν υπάρχουν ακμές στο γράφημα - οι embeddings θα είναι τυχαίες")
 
-    print(f"⏳ Εκπαίδευση Node2Vec... ({len(G.nodes)} nodes, {len(G.edges)} edges)", flush=True)
-
+    # Δημιουργία embeddings με σταθερό seed για debugging
     try:
-        random_seed = randint(1, 1_000_000)
         node2vec = Node2Vec(
             G,
             dimensions=128,
             walk_length=20,
             num_walks=100,
             workers=2,
-            seed=random_seed
+            seed=42  # Προσωρινά σταθερό
         )
         model = node2vec.fit(window=10, min_count=1)
+        
+        if not hasattr(model, 'wv'):
+            raise ValueError("Node2Vec model has no word vectors")
     except Exception as e:
-        print(f"❌ Node2Vec training failed: {e}")
-        return  # Early return, do not proceed if model is not created
-
-    if "model" not in locals():
-        print("❌ Embedding model not created. Aborting.")
+        print(f"❌ Node2Vec failed: {e}")
         return
 
+    # Αποθήκευση embeddings
+    success_count = 0
     with driver.session() as session:
         for node_id in G.nodes():
             try:
                 vec = model.wv[str(node_id)].tolist()
-                if vec and all(np.isfinite(vec)):
-                    session.run(
-                        "MATCH (c:Case {id: toInteger($id)}) SET c.embedding = $embedding",
-                        id=node_id, embedding=vec
-                    )
-                else:
-                    print(f"⚠️ Invalid embedding for node {node_id}")
-            except KeyError:
-                print(f"❌ Node {node_id} not found in model.wv")
+                session.run(
+                    "MATCH (c:Case {id: toInteger($id)}) SET c.embedding = $embedding",
+                    id=node_id, embedding=vec
+                )
+                success_count += 1
             except Exception as e:
-                print(f"❌ Error saving embedding for node {node_id}: {e}")
+                print(f"⚠️ Failed to save embedding for node {node_id}: {e}")
 
-    print("✅ Embeddings αποθηκεύτηκαν!", flush=True)
-
+    print(f"✅ Saved {success_count}/{len(G.nodes)} embeddings")
 def build_graph():
     driver = connect_to_neo4j()
     file_path = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
