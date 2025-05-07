@@ -480,16 +480,16 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         )
 
 
-        pipeline = Pipeline([
-            ('imputer', SimpleImputer(strategy='mean')),
-            ('smote', SMOTE(random_state=Config.RANDOM_STATE)),
-            ('classifier', XGBClassifier(
+        pipeline = make_pipeline(
+            SimpleImputer(strategy='mean'),
+            SMOTE(random_state=Config.RANDOM_STATE),
+            XGBClassifier(
                 n_estimators=Config.N_ESTIMATORS,
                 use_label_encoder=False,
                 eval_metric='logloss',
                 random_state=Config.RANDOM_STATE
-            ))
-        ])
+            )
+        )
 
         pipeline.fit(X_train, y_train)
 
