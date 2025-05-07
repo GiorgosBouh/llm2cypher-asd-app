@@ -75,39 +75,33 @@ def create_relationships(tx, df):
     """, data=submitter_data)
 def create_similarity_relationships(tx, df, max_pairs=10000):
     pairs = set()
-    behavior_cols = [f"A{i}" for i in range(1, 11)]
-
-    # 🧠 Βασική συμπεριφορική ομοιότητα (τουλάχιστον 7 ίδιες απαντήσεις)
+    
+    # 1. Συμπεριφορική ομοιότητα (A1-A10)
     for i, row1 in df.iterrows():
-        for j, row2 in df.iloc[i + 1:].iterrows():
-            common_answers = sum(
-                row1[q] == row2[q] for q in behavior_cols
-                if pd.notnull(row1[q]) and pd.notnull(row2[q])
-            )
-            if common_answers >= 7:
-                pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
+        for j, row2 in df.iloc[i+1:].iterrows():
+            if sum(row1[f'A{k}'] == row2[f'A{k}'] for k in range(1,11)) >= 7:
+                pairs.add((int(row1['Case_No']), int(row2['Case_No'])))
 
-    # 👤 Ομοιότητα σε δημογραφικά
-    demo_cols = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
+    # 2. Δημογραφική ομοιότητα (διορθωμένο groupby)
+    demo_cols = ['Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD']
     for col in demo_cols:
-        grouped = df.groupby(col)["Case_No"].apply(list)
-        for ids in grouped:
-            for i in range(len(ids)):
-                for j in range(i + 1, len(ids)):
-                    pairs.add((int(ids[i]), int(ids[j])))
+        # Σωστή χρήση groupby με ένα μόνο κριτήριο
+        grouped = df.groupby(col)['Case_No'].apply(list)
+        for case_list in grouped:
+            for i in range(len(case_list)):
+                for j in range(i+1, len(case_list)):
+                    pairs.add((int(case_list[i]), int(case_list[j])))
 
-    # ⚠️ Δεν συμπεριλαμβάνουμε Qchat-10-Score — μπορεί να προκαλέσει data leakage
-
-    pair_list = list(pairs)
+    # Εφαρμογή ορίου και τυχαιοποίηση
+    pair_list = list(pairs)[:max_pairs]
     shuffle(pair_list)
-    pair_list = pair_list[:max_pairs]
 
+    # Εισαγωγή σχέσεων στη Neo4j
     tx.run("""
-    UNWIND $batch AS pair
-    MATCH (c1:Case {id: pair.id1}), (c2:Case {id: pair.id2})
-    MERGE (c1)-[:GRAPH_SIMILARITY]->(c2)
-    """, batch=[{"id1": i, "id2": j} for i, j in pair_list])
-# ... (οι υπόλοιπες συναρτήσεις παραμένουν ίδιες)
+        UNWIND $batch AS pair
+        MATCH (c1:Case {id: pair.id1}), (c2:Case {id: pair.id2})
+        MERGE (c1)-[:SIMILAR_TO]->(c2)
+    """, batch=[{'id1':x, 'id2':y} for x,y in pair_list])
 
 def generate_embeddings(driver):
     temp_folder_path = os.path.join(os.getcwd(), 'node2vec_temp')
