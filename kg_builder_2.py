@@ -7,6 +7,7 @@ from random import shuffle
 import traceback
 import sys
 from random import randint
+import os
 
 
 def connect_to_neo4j(uri="neo4j+s://1f5f8a14.databases.neo4j.io", user="neo4j", password="3xhy4XKQSsSLIT7NI-w9m4Z7Y_WcVnL1hDQkWTMIoMQ"):
