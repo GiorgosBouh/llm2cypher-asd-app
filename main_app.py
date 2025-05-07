@@ -36,6 +36,8 @@ import subprocess
 import uuid
 from xgboost import XGBClassifier
 from imblearn.pipeline import make_pipeline
+import pandas as pd
+
 
 def call_embedding_generator(upload_id: str) -> bool:
     env_vars = os.environ.copy()
@@ -844,12 +846,24 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     col1.metric("Prediction", prediction)
                     col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
 
-                    fig = px.bar(
-                        x=["Typical", "ASD Traits"],
-                        y=[1-proba, proba],
-                        title="Prediction Probabilities"
-                    )
-                    st.plotly_chart(fig)
+                df_bar = pd.DataFrame({
+                    "Category": ["Typical", "ASD Traits"],
+                    "Probability": [1 - proba, proba]
+                })
+
+                fig = px.bar(
+                    df_bar,
+                    x="Category",
+                    y="Probability",
+                    title="Prediction Probabilities"
+                )
+                fig.update_traces(texttemplate='%{text:.1%}', textposition='outside')
+                fig.update_layout(
+                    yaxis_range=[0, 1],
+                    uniformtext_minsize=8,
+                    uniformtext_mode='hide'
+                )
+                st.plotly_chart(fig)
 
                 with st.spinner("Running anomaly detection..."):
                     iso_result = train_isolation_forest()
