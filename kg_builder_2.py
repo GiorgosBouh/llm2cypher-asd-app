@@ -70,12 +70,11 @@ def create_relationships(tx, df):
         MATCH (c:Case {upload_id: row.upload_id})
         MERGE (c)-[:SUBMITTED_BY]->(s)
     """, data=submitter_data)
-
 def create_similarity_relationships(tx, df, max_pairs=10000):
     pairs = set()
     behavior_cols = [f"A{i}" for i in range(1, 11)]
 
-    # 🧠 Βασική συμπεριφορική ομοιότητα
+    # 🧠 Βασική συμπεριφορική ομοιότητα (τουλάχιστον 7 ίδιες απαντήσεις)
     for i, row1 in df.iterrows():
         for j, row2 in df.iloc[i + 1:].iterrows():
             common_answers = sum(
@@ -85,7 +84,7 @@ def create_similarity_relationships(tx, df, max_pairs=10000):
             if common_answers >= 7:
                 pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
 
-    # 👤 Ομοιότητα σε Demographics
+    # 👤 Ομοιότητα σε δημογραφικά
     demo_cols = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
     for col in demo_cols:
         grouped = df.groupby(col)["Case_No"].apply(list)
@@ -94,13 +93,7 @@ def create_similarity_relationships(tx, df, max_pairs=10000):
                 for j in range(i + 1, len(ids)):
                     pairs.add((int(ids[i]), int(ids[j])))
 
-    # 📊 Παρόμοιο Qchat score (διαφορά ≤ 1)
-    if "Qchat-10-Score" in df.columns:
-        for i, row1 in df.iterrows():
-            for j, row2 in df.iloc[i + 1:].iterrows():
-                if pd.notnull(row1["Qchat-10-Score"]) and pd.notnull(row2["Qchat-10-Score"]):
-                    if abs(row1["Qchat-10-Score"] - row2["Qchat-10-Score"]) <= 1:
-                        pairs.add((int(row1["Case_No"]), int(row2["Case_No"])))
+    # ⚠️ Δεν συμπεριλαμβάνουμε Qchat-10-Score — μπορεί να προκαλέσει data leakage
 
     pair_list = list(pairs)
     shuffle(pair_list)
