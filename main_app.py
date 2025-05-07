@@ -40,30 +40,49 @@ import pandas as pd
 
 
 def call_embedding_generator(upload_id: str) -> bool:
-    env_vars = os.environ.copy()
-    env_vars.update({
-        "NEO4J_URI": os.getenv("NEO4J_URI"),
-        "NEO4J_USER": os.getenv("NEO4J_USER"),
-        "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD")
-    })
-
+    """Generate embedding for a single case using subprocess with enhanced error handling"""
     try:
-        result = subprocess.run(
-            ["python", "generate_case_embedding.py", upload_id],
-            env=env_vars,
-            capture_output=True,
-            text=True
-        )
-        if result.returncode == 0:
-            st.success("✅ Embedding generated successfully!")
-            return True
-        else:
-            st.error(f"❌ Embedding generation failed:\n\n{result.stderr}")
-            print(result.stderr)
+        # Get the absolute path to the script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        builder_path = os.path.join(script_dir, "generate_case_embedding.py")
+        
+        if not os.path.exists(builder_path):
+            st.error(f"❌ Embedding generator script not found at: {builder_path}")
             return False
 
+        # Prepare environment variables
+        env = os.environ.copy()
+        env.update({
+            "NEO4J_URI": os.getenv("NEO4J_URI"),
+            "NEO4J_USER": os.getenv("NEO4J_USER"),
+            "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD"),
+            "PYTHONPATH": os.path.dirname(script_dir)  # Add project root to PYTHONPATH
+        })
+
+        # Run the process with timeout
+        result = subprocess.run(
+            [sys.executable, builder_path, upload_id],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=Config.EMBEDDING_GENERATION_TIMEOUT
+        )
+        
+        if result.returncode != 0:
+            error_msg = result.stderr or "Unknown error (no stderr output)"
+            st.error(f"❌ Embedding generation failed with error:\n{error_msg}")
+            logger.error(f"Embedding generation failed for {upload_id}: {error_msg}")
+            return False
+            
+        return True
+        
+    except subprocess.TimeoutExpired:
+        st.error("❌ Embedding generation timed out")
+        logger.error(f"Embedding generation timeout for {upload_id}")
+        return False
     except Exception as e:
         st.error(f"❌ Fatal error calling embedding script: {str(e)}")
+        logger.exception(f"Fatal error generating embedding for {upload_id}")
         return False
 
 # === Configuration ===
