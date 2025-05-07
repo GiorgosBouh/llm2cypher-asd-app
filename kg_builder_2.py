@@ -130,8 +130,8 @@ def generate_embeddings(driver):
 
     print(f"⏳ Εκπαίδευση Node2Vec... ({len(G.nodes)} nodes, {len(G.edges)} edges)", flush=True)
 
+    random_seed = randint(1, 1_000_000)
     try:
-        random_seed = randint(1, 1_000_000)
         node2vec = Node2Vec(
             G,
             dimensions=128,
@@ -150,8 +150,10 @@ def generate_embeddings(driver):
             try:
                 vec = model.wv[str(node_id)].tolist()
                 if vec and all(np.isfinite(vec)):
-                    session.run("MATCH (c:Case {id: toInteger($id)}) SET c.embedding = $embedding",
-                                id=node_id, embedding=vec)
+                    session.run(
+                        "MATCH (c:Case {id: toInteger($id)}) SET c.embedding = $embedding",
+                        id=node_id, embedding=vec
+                    )
                 else:
                     print(f"⚠️ Invalid embedding for node {node_id}")
             except KeyError:
