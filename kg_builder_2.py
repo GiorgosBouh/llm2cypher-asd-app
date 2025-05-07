@@ -129,23 +129,35 @@ def generate_embeddings(driver):
         return
 
     print(f"⏳ Εκπαίδευση Node2Vec... ({len(G.nodes)} nodes, {len(G.edges)} edges)", flush=True)
-    
-    random_seed = randint(1, 1_000_000)
-    node2vec = Node2Vec(
-        G,
-        dimensions=128,
-        walk_length=20,
-        num_walks=100,
-        workers=2,
-        seed=random_seed
-    )
-    model = node2vec.fit(window=10, min_count=1)
+
+    try:
+        random_seed = randint(1, 1_000_000)
+        node2vec = Node2Vec(
+            G,
+            dimensions=128,
+            walk_length=20,
+            num_walks=100,
+            workers=2,
+            seed=random_seed
+        )
+        model = node2vec.fit(window=10, min_count=1)
+    except Exception as e:
+        print(f"❌ Node2Vec training failed: {e}")
+        return
 
     with driver.session() as session:
         for node_id in G.nodes():
-            vec = model.wv[str(node_id)].tolist()
-            session.run("MATCH (c:Case {id: toInteger($id)}) SET c.embedding = $embedding",
-                        id=node_id, embedding=vec)
+            try:
+                vec = model.wv[str(node_id)].tolist()
+                if vec and all(np.isfinite(vec)):
+                    session.run("MATCH (c:Case {id: toInteger($id)}) SET c.embedding = $embedding",
+                                id=node_id, embedding=vec)
+                else:
+                    print(f"⚠️ Invalid embedding for node {node_id}")
+            except KeyError:
+                print(f"❌ Node {node_id} not found in model.wv")
+            except Exception as e:
+                print(f"❌ Error saving embedding for node {node_id}: {e}")
 
     print("✅ Embeddings αποθηκεύτηκαν!", flush=True)
 
