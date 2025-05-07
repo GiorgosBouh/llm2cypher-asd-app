@@ -639,7 +639,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):
-                results = train_asd_detection_model()
+                results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
 
                 if results:
                     st.session_state.model_results = results
