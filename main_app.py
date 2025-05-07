@@ -122,6 +122,8 @@ class Neo4jService:
 # === Initialize Services ===
 @st.cache_resource
 def get_neo4j_service():
+    if 'neo4j_driver' in st.session_state:
+        st.session_state.neo4j_driver.close()
     return Neo4jService(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
 
 @st.cache_resource
@@ -792,8 +794,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.session_state.last_upload_id = upload_id
 
                 with st.spinner("Generating graph embedding for new case..."):
-                    if not generate_embedding_for_case(upload_id):
-                        st.error("❌ Failed to generate embedding. The case may be too isolated in the graph.")
+                    if not call_embedding_generator(str(upload_id)):
+                        st.error("❌ Failed to generate embedding. Check connection or logs.")
                         st.stop()
 
                 with st.spinner("Extracting case embedding..."):
@@ -865,7 +867,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
-                logger.error(f"Upload error: {str(e)}", exc_info=True)
+                logger.exception("Upload case error:")
 
 
     with tab4:
