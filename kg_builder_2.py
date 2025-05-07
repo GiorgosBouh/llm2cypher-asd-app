@@ -108,6 +108,9 @@ def create_similarity_relationships(tx, df, max_pairs=10000):
     """, batch=[{"id1": i, "id2": j} for i, j in pair_list])
 
 def generate_embeddings(driver):
+    import random
+    from random import randint
+
     G = nx.Graph()
     with driver.session() as session:
         for r in session.run("MATCH (c:Case) RETURN c.id AS id"):
@@ -126,9 +129,8 @@ def generate_embeddings(driver):
         return
 
     print(f"⏳ Εκπαίδευση Node2Vec... ({len(G.nodes)} nodes, {len(G.edges)} edges)", flush=True)
+    
     random_seed = randint(1, 1_000_000)
-    print(f"🎲 Χρησιμοποιείται τυχαίο seed: {random_seed}", flush=True)
-
     node2vec = Node2Vec(
         G,
         dimensions=128,
@@ -136,13 +138,15 @@ def generate_embeddings(driver):
         num_walks=100,
         workers=2,
         seed=random_seed
-)
+    )
+    model = node2vec.fit(window=10, min_count=1)
 
     with driver.session() as session:
         for node_id in G.nodes():
             vec = model.wv[str(node_id)].tolist()
             session.run("MATCH (c:Case {id: toInteger($id)}) SET c.embedding = $embedding",
                         id=node_id, embedding=vec)
+
     print("✅ Embeddings αποθηκεύτηκαν!", flush=True)
 
 def build_graph():
