@@ -37,7 +37,34 @@ import uuid
 from xgboost import XGBClassifier
 from imblearn.pipeline import make_pipeline
 
+def call_embedding_generator(upload_id: str) -> bool:
+    env_vars = os.environ.copy()
+    env_vars.update({
+        "NEO4J_URI": os.getenv("NEO4J_URI"),
+        "NEO4J_USER": os.getenv("NEO4J_USER"),
+        "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD")
+    })
 
+    try:
+        result = subprocess.run(
+            ["python", "generate_case_embedding.py", upload_id],
+            cwd="llm2cypher-asd-app",
+            env=env_vars,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            st.success("✅ Embedding generated successfully!")
+            return True
+        else:
+            st.error(f"❌ Embedding generation failed:\n\n{result.stderr}")
+            print(result.stderr)
+            return False
+
+    except Exception as e:
+        st.error(f"❌ Fatal error calling embedding script: {str(e)}")
+        return False
 
 # === Configuration ===
 class Config:

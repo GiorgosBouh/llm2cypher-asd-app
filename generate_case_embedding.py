@@ -8,7 +8,6 @@ import sys
 import os
 from tqdm import tqdm  # Για progress bars
 
-
 def generate_embedding_for_case(driver, upload_id):
     try:
         G = nx.Graph()
