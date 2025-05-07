@@ -110,6 +110,8 @@ def create_similarity_relationships(tx, df, max_pairs=10000):
 # ... (οι υπόλοιπες συναρτήσεις παραμένουν ίδιες)
 
 def generate_embeddings(driver):
+    temp_folder_path = os.path.join(os.getcwd(), 'node2vec_temp')
+    os.makedirs(temp_folder_path, exist_ok=True)
     G = nx.Graph()
     
     # Επιτάχυνση φόρτωσης γραφήματος με single query
