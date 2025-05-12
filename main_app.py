@@ -651,7 +651,8 @@ to format your own screening case correctly.
 Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
 
 """)
-
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = 0
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Model Training", 
         "🌐 Graph Embeddings", 
@@ -902,6 +903,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                             st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
                         else:
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+                        st.success("✅ Case processed successfully! Redirecting to NLP to Cypher tab...")
+                        st.session_state.active_tab = 3  # tab4 index
+                        st.experimental_rerun()    
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
@@ -910,7 +914,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
     with tab4:
         st.header("💬 Natural Language to Cypher1")
-
+        st.session_state.active_tab = 3  # Track that user is inside tab4
         with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
             st.markdown("""
             ### 📚 Dataset Overview
