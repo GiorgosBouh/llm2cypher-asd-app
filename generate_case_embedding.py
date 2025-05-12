@@ -5,7 +5,7 @@ from neo4j import GraphDatabase
 import sys
 import os
 import time
-from tqdm import tqdm
+import tempfile  # <-- Missing import added here
 import logging
 from typing import List, Optional
 
@@ -100,6 +100,9 @@ class EmbeddingGenerator:
     def generate_embedding(self, G: nx.Graph, case_id: str) -> Optional[List[float]]:
         """Generate node2vec embedding with validation"""
         try:
+            # Create temp directory safely
+            temp_dir = tempfile.mkdtemp()
+            
             node2vec = Node2Vec(
                 G,
                 dimensions=self.EMBEDDING_DIM,
@@ -107,7 +110,7 @@ class EmbeddingGenerator:
                 num_walks=100,
                 workers=2,
                 quiet=True,
-                temp_folder=tempfile.mkdtemp()  # Avoid filesystem issues
+                temp_folder=temp_dir
             )
             
             model = node2vec.fit(
@@ -117,6 +120,12 @@ class EmbeddingGenerator:
             )
             
             embedding = model.wv[case_id].tolist()
+            
+            # Clean up temp directory
+            try:
+                shutil.rmtree(temp_dir)
+            except Exception as e:
+                logger.warning(f"Could not remove temp directory: {str(e)}")
             
             if not self.validate_embedding(embedding):
                 logger.error("Generated invalid embedding")
