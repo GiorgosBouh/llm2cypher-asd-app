@@ -905,7 +905,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
                         st.success("✅ Case processed successfully! Redirecting to NLP to Cypher tab...")
                         st.session_state.active_tab = 3  # tab4 index
-                        st.experimental_rerun()    
+                        st.rerun()    
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
