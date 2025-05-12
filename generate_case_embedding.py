@@ -7,113 +7,193 @@ import os
 import time
 from tqdm import tqdm
 import logging
+from typing import List, Optional
 
-# Ρύθμιση logging
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
 
-def generate_embedding_for_case(upload_id: str) -> bool:
-    # Ρύθμιση παραμέτρων
-    EMBEDDING_DIM = 128
-    MIN_CONNECTIONS = 3
-    MAX_RETRIES = 3
-    
-    try:
-        # Αρχικοποίηση Neo4j driver με ανθεκτικότητα
-        driver = GraphDatabase.driver(
+class EmbeddingGenerator:
+    def __init__(self):
+        self.EMBEDDING_DIM = 128
+        self.MIN_CONNECTIONS = 3
+        self.MAX_RETRIES = 3
+        self.MIN_SIMILARITY = 5  # Minimum shared answers for similarity
+        self.EMBEDDING_NORMALIZATION = True
+
+    def get_driver(self):
+        """Create a Neo4j driver with robust settings"""
+        return GraphDatabase.driver(
             os.getenv("NEO4J_URI"),
             auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD")),
             connection_timeout=30,
-            max_connection_lifetime=7200
+            max_connection_lifetime=7200,
+            max_connection_pool_size=50
         )
-        
-        for attempt in range(MAX_RETRIES):
-            try:
-                G = nx.Graph()
-                case_id = None
 
-                # Βήμα 1: Φόρτωση βασικού γραφήματος
-                with driver.session() as session:
-                    # Ανακτήστε το case_id και βασικές συνδέσεις
-                    result = session.run("""
-                        MATCH (c:Case {upload_id: $upload_id})
-                        OPTIONAL MATCH (c)-[r]->(neighbor)
-                        RETURN c.id AS case_id, 
-                               collect(DISTINCT neighbor.id) AS neighbors
-                    """, upload_id=upload_id).single()
+    def validate_embedding(self, embedding: List[float]) -> bool:
+        """Ensure embedding is valid and normalized"""
+        if not embedding or len(embedding) != self.EMBEDDING_DIM:
+            return False
+            
+        if any(np.isnan(x) for x in embedding):
+            logger.warning("Embedding contains NaN values")
+            return False
+            
+        if np.all(np.array(embedding) == 0):
+            logger.warning("Embedding is all zeros")
+            return False
+            
+        if self.EMBEDDING_NORMALIZATION:
+            norm = np.linalg.norm(embedding)
+            if norm == 0:
+                return False
+            embedding = [x/norm for x in embedding]
+            
+        return True
 
-                    if not result or not result["case_id"]:
-                        logger.error("Case not found or missing ID")
-                        return False
+    def build_base_graph(self, driver, upload_id: str) -> Optional[tuple]:
+        """Construct the initial graph structure"""
+        with driver.session() as session:
+            result = session.run("""
+                MATCH (c:Case {upload_id: $upload_id})
+                OPTIONAL MATCH (c)-[r]->(neighbor)
+                WHERE neighbor.id IS NOT NULL
+                RETURN c.id AS case_id, 
+                       collect(DISTINCT neighbor.id) AS neighbors
+            """, upload_id=upload_id).single()
 
-                    case_id = str(result["case_id"])
-                    G.add_node(case_id)
-                    
-                    # Προσθήκη αρχικών συνδέσεων
-                    for neighbor in result["neighbors"]:
-                        if neighbor:
-                            G.add_edge(case_id, str(neighbor))
+            if not result or not result["case_id"]:
+                logger.error("Case not found or missing ID")
+                return None
 
-                # Βήμα 2: Επαύξηση με similarity relationships
-                if len(G.edges(case_id)) < MIN_CONNECTIONS:
-                    with driver.session() as session:
-                        similar = session.run("""
-                            MATCH (c:Case {id: $case_id})
-                            MATCH (similar:Case)
-                            WHERE c <> similar AND
-                            size([(c)-[:HAS_ANSWER]->(q)<-[:HAS_ANSWER]-(similar) | q]) >= 5
-                            RETURN similar.id LIMIT 20
-                        """, case_id=int(case_id))
+            case_id = str(result["case_id"])
+            G = nx.Graph()
+            G.add_node(case_id)
+            
+            # Add initial connections with validation
+            for neighbor in result["neighbors"]:
+                if neighbor:
+                    G.add_edge(case_id, str(neighbor))
+            
+            return G, case_id
 
-                        for record in similar:
-                            G.add_edge(case_id, str(record["similar.id"]))
+    def augment_with_similarity(self, driver, G: nx.Graph, case_id: str) -> None:
+        """Enhance graph with similarity-based connections"""
+        with driver.session() as session:
+            similar = session.run("""
+                MATCH (c:Case {id: $case_id})-[:HAS_ANSWER]->(q)<-[:HAS_ANSWER]-(similar:Case)
+                WHERE c <> similar
+                WITH similar, count(q) AS shared_answers
+                WHERE shared_answers >= $min_similarity
+                RETURN similar.id 
+                ORDER BY shared_answers DESC 
+                LIMIT 20
+            """, case_id=int(case_id), min_similarity=self.MIN_SIMILARITY)
 
-                # Έλεγχος επάρκειας συνδέσεων
-                if len(G.edges(case_id)) < MIN_CONNECTIONS:
-                    logger.warning(f"Insufficient connections ({len(G.edges(case_id))})")
-                    return False
+            for record in similar:
+                G.add_edge(case_id, str(record["similar.id"]))
 
-                # Βήμα 3: Δημιουργία embeddings
-                node2vec = Node2Vec(
-                    G,
-                    dimensions=EMBEDDING_DIM,
-                    walk_length=20,
-                    num_walks=100,
-                    workers=2,
-                    quiet=True
-                )
+    def generate_embedding(self, G: nx.Graph, case_id: str) -> Optional[List[float]]:
+        """Generate node2vec embedding with validation"""
+        try:
+            node2vec = Node2Vec(
+                G,
+                dimensions=self.EMBEDDING_DIM,
+                walk_length=20,
+                num_walks=100,
+                workers=2,
+                quiet=True,
+                temp_folder=tempfile.mkdtemp()  # Avoid filesystem issues
+            )
+            
+            model = node2vec.fit(
+                window=5,
+                min_count=1,
+                batch_words=1000
+            )
+            
+            embedding = model.wv[case_id].tolist()
+            
+            if not self.validate_embedding(embedding):
+                logger.error("Generated invalid embedding")
+                return None
                 
-                model = node2vec.fit(window=5, min_count=1)
-                embedding = model.wv[case_id].tolist()
+            return embedding
+            
+        except Exception as e:
+            logger.error(f"Embedding generation failed: {str(e)}")
+            return None
 
-                # Βήμα 4: Αποθήκευση
-                with driver.session() as session:
-                    session.run("""
-                        MATCH (c:Case {upload_id: $upload_id})
-                        SET c.embedding = $embedding,
-                            c.last_embedding_update = timestamp()
-                    """, upload_id=upload_id, embedding=embedding)
+    def store_embedding(self, driver, upload_id: str, embedding: List[float]) -> bool:
+        """Safely store embedding in Neo4j"""
+        try:
+            with driver.session() as session:
+                result = session.run("""
+                    MATCH (c:Case {upload_id: $upload_id})
+                    SET c.embedding = $embedding,
+                        c.embedding_version = 2.0,
+                        c.last_embedding_update = timestamp()
+                    RETURN count(c) AS updated
+                """, upload_id=upload_id, embedding=embedding).single()
+                
+                return result["updated"] > 0
+        except Exception as e:
+            logger.error(f"Failed to store embedding: {str(e)}")
+            return False
 
-                logger.info(f"Successfully generated embedding for case {case_id}")
-                return True
+    def generate_embedding_for_case(self, upload_id: str) -> bool:
+        """Main embedding generation workflow"""
+        driver = None
+        try:
+            driver = self.get_driver()
+            
+            for attempt in range(self.MAX_RETRIES):
+                try:
+                    # Step 1: Build base graph
+                    graph_result = self.build_base_graph(driver, upload_id)
+                    if not graph_result:
+                        return False
+                        
+                    G, case_id = graph_result
+                    
+                    # Step 2: Augment with similarity if needed
+                    if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
+                        self.augment_with_similarity(driver, G, case_id)
+                        
+                        if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
+                            logger.warning(f"Insufficient connections ({len(G.edges(case_id))})")
+                            return False
 
-            except Exception as e:
-                if attempt == MAX_RETRIES - 1:
-                    raise
-                wait_time = 2 ** attempt
-                logger.warning(f"Attempt {attempt + 1} failed, retrying in {wait_time}s...")
-                time.sleep(wait_time)
+                    # Step 3: Generate embedding
+                    embedding = self.generate_embedding(G, case_id)
+                    if not embedding:
+                        return False
+                        
+                    # Step 4: Store embedding
+                    if not self.store_embedding(driver, upload_id, embedding):
+                        return False
+                        
+                    logger.info(f"Successfully generated embedding for case {case_id}")
+                    return True
 
-    except Exception as e:
-        logger.error(f"Embedding generation failed: {str(e)}")
-        return False
+                except Exception as e:
+                    if attempt == self.MAX_RETRIES - 1:
+                        raise
+                    wait_time = 2 ** attempt
+                    logger.warning(f"Attempt {attempt + 1} failed, retrying in {wait_time}s...")
+                    time.sleep(wait_time)
 
-    finally:
-        if 'driver' in locals():
-            driver.close()
+        except Exception as e:
+            logger.error(f"Embedding generation failed: {str(e)}")
+            return False
+
+        finally:
+            if driver:
+                driver.close()
 
 if __name__ == "__main__":
     try:
@@ -121,7 +201,8 @@ if __name__ == "__main__":
             raise ValueError("Missing upload_id parameter")
         
         upload_id = sys.argv[1]
-        success = generate_embedding_for_case(upload_id)
+        generator = EmbeddingGenerator()
+        success = generator.generate_embedding_for_case(upload_id)
         sys.exit(0 if success else 1)
         
     except Exception as e:
