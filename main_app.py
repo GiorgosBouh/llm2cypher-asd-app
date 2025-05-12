@@ -867,6 +867,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     "Category": ["Typical", "ASD Traits"],
                     "Probability": [1 - proba, proba]
                 })
+                df_bar["Label"] = df_bar["Probability"].apply(lambda x: f"{x:.1%}")  # 🔥 Add this
 
                 fig = px.bar(
                     df_bar,
@@ -874,7 +875,11 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     y="Probability",
                     title="Prediction Probabilities"
                 )
-                fig.update_traces(texttemplate='%{text:.1%}', textposition='outside')
+                fig.update_traces(
+                    text=df_bar["Label"],                # ✅ provide actual values
+                    texttemplate="%{text}",              # ✅ use them
+                    textposition="outside"
+                )
                 fig.update_layout(
                     yaxis_range=[0, 1],
                     uniformtext_minsize=8,
