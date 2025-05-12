@@ -883,7 +883,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.plotly_chart(fig)
 
                 with st.spinner("Running anomaly detection..."):
-                    iso_result = train_isolation_forest()
+                     # Generate a unique cache key (using the upload_id if available)
+                    cache_key = st.session_state.get("last_upload_id", str(uuid.uuid4()))
+                    iso_result = train_isolation_forest(cache_key=cache_key)
                     if iso_result:
                         iso_forest, scaler = iso_result
                         embedding_scaled = scaler.transform(embedding)
@@ -902,7 +904,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
 
     with tab4:
-        st.header("💬 Natural Language to Cypher")
+        st.header("💬 Natural Language to Cypher1")
 
         with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
             st.markdown("""
