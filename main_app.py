@@ -754,6 +754,14 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
     with tab3:
         st.header("📄 Upload New Case")
+
+        if "case_inserted" not in st.session_state:
+            st.session_state.case_inserted = False
+
+        if st.session_state.case_inserted:
+            st.info("ℹ️ Case already processed. Switch to NLP tab to continue.")
+            st.stop()
+
         uploaded_file = st.file_uploader(
             "Upload CSV for single case prediction", 
             type="csv",
@@ -810,6 +818,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                                 mime="text/csv"
                             )
                             st.stop()
+
                 upload_id = str(uuid.uuid4())
                 with st.spinner("Inserting case into graph..."):
                     upload_id = insert_user_case(row, upload_id)
@@ -870,7 +879,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     "Category": ["Typical", "ASD Traits"],
                     "Probability": [1 - proba, proba]
                 })
-                df_bar["Label"] = df_bar["Probability"].apply(lambda x: f"{x:.1%}")  # 🔥 Add this
+                df_bar["Label"] = df_bar["Probability"].apply(lambda x: f"{x:.1%}")
 
                 fig = px.bar(
                     df_bar,
@@ -879,8 +888,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     title="Prediction Probabilities"
                 )
                 fig.update_traces(
-                    text=df_bar["Label"],                # ✅ provide actual values
-                    texttemplate="%{text}",              # ✅ use them
+                    text=df_bar["Label"],
+                    texttemplate="%{text}",
                     textposition="outside"
                 )
                 fig.update_layout(
@@ -891,7 +900,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.plotly_chart(fig)
 
                 with st.spinner("Running anomaly detection..."):
-                     # Generate a unique cache key (using the upload_id if available)
                     cache_key = st.session_state.get("last_upload_id", str(uuid.uuid4()))
                     iso_result = train_isolation_forest(cache_key=cache_key)
                     if iso_result:
@@ -905,9 +913,12 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                             st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
                         else:
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
-                        st.success("✅ Case processed successfully! Redirecting to NLP to Cypher tab...")
-                        st.session_state.active_tab = 3  # tab4 index
-                        st.rerun()    
+
+                # ✅ Flag processed and rerun to tab4
+                st.session_state.case_inserted = True
+                st.success("✅ Case processed successfully! Redirecting to NLP to Cypher tab...")
+                st.session_state.active_tab = 3
+                st.rerun()
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
