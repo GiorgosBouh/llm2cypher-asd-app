@@ -617,7 +617,6 @@ def main():
     st.sidebar.markdown(f"🔗 Connected to: `{os.getenv('NEO4J_URI')}`")
     st.sidebar.markdown("""
 ---
-
 ### 📘 About This Project
 
 This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration with Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis  
@@ -629,7 +628,6 @@ It is part of the postdoctoral research project:
 by Dr. Bouchouras under the supervision of Dr. Kotis.
 
 ---
-
 ### 🧪 What This App Does
 
 This interactive app allows you to:
@@ -643,18 +641,20 @@ This interactive app allows you to:
 - 💬 Ask natural language questions and receive Cypher queries with results, using GPT4 based NLP-to-Cypher translation
 
 ---
-
 ### 📥 Download Example CSV
 
 To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)  
 to format your own screening case correctly. 
 Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
-
 """)
+
+    # Initialize session state
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Model Training"
     if "case_inserted" not in st.session_state:
         st.session_state.case_inserted = False
+
+    # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Model Training", 
         "🌐 Graph Embeddings", 
@@ -674,10 +674,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 )
                 if result.returncode == 0:
                     st.success("✅ Embeddings generated!")
-
-                    # 🔁 Force retraining bypassing the Streamlit cache
                     results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
-
                     if results:
                         st.session_state.model_results = results
                         st.session_state.model_trained = True
@@ -693,22 +690,18 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):
                 results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
-
                 if results:
                     st.session_state.model_results = results
-                    st.session_state.model_trained = True  # ✅ flag για επιτυχία
-
+                    st.session_state.model_trained = True
                     evaluate_model(
                         results["model"],
                         results["X_test"],
                         results["y_test"]
                     )
-
                     with st.spinner("Reattaching labels to cases..."):
                         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                         reinsert_labels_from_csv(csv_url)
                         st.success("🎯 Labels reinserted automatically after training!")
-
                 if st.session_state.get("model_trained"):
                     st.success("✅ Model trained successfully!")
 
@@ -739,12 +732,12 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
     with tab2:
         st.header("🌐 Graph Embeddings")
-        st.warning("⚠️ Don’t push this button unless you are the developer!")
+        st.warning("⚠️ Don't push this button unless you are the developer!")
         st.info("ℹ️ This function is for the developer only")
         if st.button("🔁 Recalculate All Embeddings"):
             with st.spinner("Running full graph rebuild and embedding generation..."):
                 result = subprocess.run(
-                    [sys.executable, "kg_builder_2.py"],  # Προσαρμόσέ το path αν χρειάζεται
+                    [sys.executable, "kg_builder_2.py"],
                     capture_output=True,
                     text=True
                 )
@@ -754,14 +747,15 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("❌ Failed to run kg_builder_2.py")
                     st.code(result.stderr)
 
-     with tab3:
+    with tab3:
         st.header("📄 Upload New Case")
         
-        st.session_state.case_inserted = True
-                st.success("✅ Case processed successfully!")
-                if st.button("Go to NLP to Cypher"):
-                    st.session_state.active_tab = "💬 NLP to Cypher"
-                    st.rerun()
+        if st.session_state.case_inserted:
+            st.info("ℹ️ Case already processed. Switch to NLP tab to continue.")
+            if st.button("Go to NLP to Cypher"):
+                st.session_state.active_tab = "💬 NLP to Cypher"
+                st.rerun()
+            st.stop()
 
         uploaded_file = st.file_uploader(
             "Upload CSV for single case prediction", 
@@ -915,23 +909,18 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         else:
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
 
-                # ✅ Flag processed and rerun to tab4
                 st.session_state.case_inserted = True
                 st.success("✅ Case processed successfully!")
                 if st.button("Go to NLP to Cypher"):
-                    st.session_state.active_tab = 3
+                    st.session_state.active_tab = "💬 NLP to Cypher"
                     st.rerun()
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
                 logger.exception("Upload case error:")
 
-
-
     with tab4:
-        st.session_state.active_tab = 3
         st.header("💬 Natural Language to Cypher")
-        st.session_state.active_tab = 3  # Track that user is inside tab4
         with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
             st.markdown("""
             ### 📚 Dataset Overview
@@ -945,7 +934,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 - **A3**: Does your child point to indicate that s/he wants something?
                 - **A4**: Does your child point to share interest with you?
                 - **A5**: Does your child pretend?
-                - **A6**: Does your child follow where you’re looking?
+                - **A6**: Does your child follow where you're looking?
                 - **A7**: If you or someone else in the family is visibly upset, does your child show signs of wanting to comfort them?
                 - **A8**: Would you describe your child's first words as normal in their development?
                 - **A9**: Does your child use simple gestures such as waving to say goodbye?
@@ -956,7 +945,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
 
             #### 🔗 Relationships:
-            - `HAS_ANSWER`: A case’s answer to a behavioral question.
+            - `HAS_ANSWER`: A case's answer to a behavioral question.
             - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes.
             - `SUBMITTED_BY`: Who submitted the test.
             - `SCREENED_FOR`: Final ASD classification.
@@ -973,7 +962,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             if st.button(q, key=q):
                 st.session_state["preset_question"] = q
 
-        # Prefill text input if example was clicked
         default_question = st.session_state.get("preset_question", "")
         question = st.text_input("Ask about the data:", value=default_question)
 
@@ -981,7 +969,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             cypher = nl_to_cypher(question)
             if cypher:
                 st.code(cypher, language="cypher")
-
                 if st.button("▶️ Execute Query"):
                     with neo4j_service.session() as session:
                         try:
