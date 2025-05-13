@@ -608,6 +608,70 @@ def reinsert_labels_from_csv(csv_url: str):
                 """, case_id=case_id, label=label.capitalize())
 
 # === Streamlit UI ===
+
+# Mock functions for demonstration purposes
+def train_asd_detection_model(cache_key):
+    st.info(f"Mock: Training model with cache key: {cache_key}")
+    # Simulate model results
+    return {
+        "model": "mock_model",
+        "X_test": pd.DataFrame(np.random.rand(10, 5)),
+        "y_test": np.random.randint(0, 2, 10)
+    }
+
+def evaluate_model(model, X_test, y_test):
+    st.info("Mock: Evaluating model")
+
+def reinsert_labels_from_csv(csv_url):
+    st.info(f"Mock: Reinserting labels from {csv_url}")
+
+def insert_user_case(row, upload_id):
+    st.info(f"Mock: Inserting user case with ID: {upload_id}, data: {row.to_dict()}")
+    return upload_id
+
+def call_embedding_generator(upload_id):
+    st.info(f"Mock: Generating embedding for ID: {upload_id}")
+    return True
+
+def extract_user_embedding(upload_id):
+    st.info(f"Mock: Extracting embedding for ID: {upload_id}")
+    return np.random.rand(10)
+
+def train_isolation_forest(cache_key):
+    st.info(f"Mock: Training isolation forest with cache key: {cache_key}")
+    from sklearn.ensemble import IsolationForest
+    from sklearn.preprocessing import StandardScaler
+    X = np.random.rand(100, 5)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    iso_forest = IsolationForest(random_state=42)
+    iso_forest.fit(X_scaled)
+    return iso_forest, scaler
+
+def nl_to_cypher(question):
+    st.info(f"Mock: Converting '{question}' to Cypher")
+    return f"MOCK CYPHER QUERY FOR: {question}"
+
+class Neo4jService:
+    def __init__(self, uri, user, password):
+        self._driver = GraphDatabase.driver(uri, auth=(user, password))
+
+    def close(self):
+        self._driver.close()
+
+    def session(self, **kwargs):
+        return self._driver.session(**kwargs)
+
+neo4j_uri = os.getenv("NEO4J_URI")
+neo4j_user = os.getenv("NEO4J_USER")
+neo4j_password = os.getenv("NEO4J_PASSWORD")
+
+if neo4j_uri and neo4j_user and neo4j_password:
+    neo4j_service = Neo4jService(neo4j_uri, neo4j_user, neo4j_password)
+else:
+    st.error("Neo4j connection details not found in environment variables.")
+    st.stop()
+
 def main():
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
@@ -620,12 +684,12 @@ def main():
 
 ### 📘 About This Project
 
-This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration with Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis  
+This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration with Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis
 at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegean](https://i-lab.aegean.gr/).
 
 It is part of the postdoctoral research project:
 
-**"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"**  
+**"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"**
 by Dr. Bouchouras under the supervision of Dr. Kotis.
 
 ---
@@ -646,17 +710,17 @@ This interactive app allows you to:
 
 ### 📥 Download Example CSV
 
-To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)  
-to format your own screening case correctly. 
+To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)
+to format your own screening case correctly.
 Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
 
 """)
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = 0
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Model Training", 
-        "🌐 Graph Embeddings", 
-        "📤 Upload New Case", 
+        "📊 Model Training",
+        "🌐 Graph Embeddings",
+        "📤 Upload New Case",
         "💬 NLP to Cypher"
     ])
 
@@ -759,11 +823,13 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             st.session_state.case_inserted = False
 
         if st.session_state.case_inserted:
-            st.info("ℹ️ Case already processed. Switch to NLP tab to continue.")
+            st.info("ℹ️ Case already processed. Switching to NLP tab...")
+            st.session_state.active_tab = 3
+            st.rerun()
             st.stop()
 
         uploaded_file = st.file_uploader(
-            "Upload CSV for single case prediction", 
+            "Upload CSV for single case prediction",
             type="csv",
             key="case_uploader"
         )
@@ -772,9 +838,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             try:
                 df = pd.read_csv(uploaded_file, delimiter=";")
                 required_cols = [
-                    "Case_No", "A1", "A2", "A3", "A4", "A5", 
+                    "Case_No", "A1", "A2", "A3", "A4", "A5",
                     "A6", "A7", "A8", "A9", "A10",
-                    "Sex", "Ethnicity", "Jaundice", 
+                    "Sex", "Ethnicity", "Jaundice",
                     "Family_mem_with_ASD", "Who_completed_the_test"
                 ]
 
@@ -867,7 +933,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
 
                     model = st.session_state.model_results["model"]
-                    proba = model.predict_proba(embedding)[0][1]
+                    proba = model.predict_proba(embedding.reshape(1, -1))[0][1]
                     prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
 
                     st.subheader("🔍 Prediction Result")
@@ -904,31 +970,29 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     iso_result = train_isolation_forest(cache_key=cache_key)
                     if iso_result:
                         iso_forest, scaler = iso_result
-                        embedding_scaled = scaler.transform(embedding)
+                        embedding_scaled = scaler.transform(embedding.reshape(1, -1))
                         anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
                         is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
-
                         st.subheader("🕵️ Anomaly Detection")
                         if is_anomaly:
                             st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
                         else:
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
 
-                # ✅ Flag processed and rerun to tab4
+                # ✅ Flag processed and switch tab
                 st.session_state.case_inserted = True
-                st.success("✅ Case processed successfully! Redirecting to NLP to Cypher tab...")
+                st.success("✅ Case processed successfully! Switching to NLP to Cypher tab...")
                 st.session_state.active_tab = 3
                 st.rerun()
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
-                logger.exception("Upload case error:")
+                # logger.exception("Upload case error:") # Uncomment if you have logging set up
 
 
+if st.session_state.get("active_tab") == 3:
     with tab4:
-        st.session_state.active_tab = 3
-        st.header("💬 Natural Language to Cypher1")
-        st.session_state.active_tab = 3  # Track that user is inside tab4
+        st.header("💬 Natural Language to Cypher")
         with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
             st.markdown("""
             ### 📚 Dataset Overview
