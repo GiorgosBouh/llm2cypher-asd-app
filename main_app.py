@@ -780,15 +780,18 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 row = df.iloc[0]
                 try:
-                    case_no = int(row["Case_No"])
+                    case_no = int(str(row["Case_No"]).strip())
                 except (ValueError, TypeError):
                     case_no = None
 
                 with neo4j_service.session() as session:
                     if case_no is not None:
-                        result = session.run("MATCH (c:Case {id: $id}) RETURN COUNT(c) AS count", id=case_no).single()
+                        result = session.run(
+                            "MATCH (c:Case {Case_No: $id}) RETURN COUNT(c) AS count",
+                            id=case_no
+                        ).single()
                         if result["count"] > 0:
-                            max_result = session.run("MATCH (c:Case) RETURN max(c.id) AS max_id").single()
+                            max_result = session.run("MATCH (c:Case) RETURN max(c.Case_No) AS max_id").single()
                             suggested = (max_result["max_id"] or 1000) + 1
                             st.error(f"❌ A case with Case_No `{case_no}` already exists.")
                             st.info(f"ℹ️ Please use a different Case_No. Suggested: `{suggested}`")
@@ -807,7 +810,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                                 mime="text/csv"
                             )
                             st.stop()
-
                 upload_id = str(uuid.uuid4())
                 with st.spinner("Inserting case into graph..."):
                     upload_id = insert_user_case(row, upload_id)
@@ -913,6 +915,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
 
     with tab4:
+        st.session_state.active_tab = 3
         st.header("💬 Natural Language to Cypher1")
         st.session_state.active_tab = 3  # Track that user is inside tab4
         with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
