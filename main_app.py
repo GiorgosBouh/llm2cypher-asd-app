@@ -982,8 +982,32 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
             st.markdown("""
             ### 📚 Dataset Overview
-            [Previous dataset description remains exactly the same...]
-            """)
+            This knowledge graph contains screening data for toddlers to help detect potential signs of Autism Spectrum Disorder (ASD).
+
+            #### ✅ Node Types:
+            - **Case**: A toddler who was screened.
+            - **BehaviorQuestion**: A question from the Q-Chat-10 questionnaire:
+                - **A1**: Does your child look at you when you call his/her name?
+                - **A2**: How easy is it for you to get eye contact with your child?
+                - **A3**: Does your child point to indicate that s/he wants something?
+                - **A4**: Does your child point to share interest with you?
+                - **A5**: Does your child pretend?
+                - **A6**: Does your child follow where you're looking?
+                - **A7**: If you or someone else in the family is visibly upset, does your child show signs of wanting to comfort them?
+                - **A8**: Would you describe your child's first words as normal in their development?
+                - **A9**: Does your child use simple gestures such as waving to say goodbye?
+                - **A10**: Does your child stare at nothing with no apparent purpose?
+
+            - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
+            - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
+            - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
+
+            #### 🔗 Relationships:
+            - `HAS_ANSWER`: A case's answer to a behavioral question.
+            - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes.
+            - `SUBMITTED_BY`: Who submitted the test.
+            - `SCREENED_FOR`: Final ASD classification.
+            """))
 
             st.markdown("### 🧠 Example Questions (Click to use)")
             example_questions = [
