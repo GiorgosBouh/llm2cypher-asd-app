@@ -1007,7 +1007,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes.
             - `SUBMITTED_BY`: Who submitted the test.
             - `SCREENED_FOR`: Final ASD classification.
-            """))
+            """)
 
             st.markdown("### 🧠 Example Questions (Click to use)")
             example_questions = [
