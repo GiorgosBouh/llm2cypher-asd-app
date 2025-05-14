@@ -756,7 +756,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab3:
         st.header("📄 Upload New Case")
         
-        # ========== NEW INSTRUCTIONS SECTION ==========
+        # ========== INSTRUCTIONS SECTION ==========
         with st.container(border=True):
             st.subheader("📝 Before You Upload", anchor=False)
             
@@ -779,26 +779,13 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 with st.container(border=True):
                     st.markdown("**📥 Example CSV Template**")
                     st.markdown("Download and use this template to format your data:")
-                    st.download_button(
-                        label="Download Example CSV",
-                        data=requests.get(
-                            "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv"
-                        ).content,
-                        file_name="ASD_Screening_Template.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        type="primary"
-                    )
+                    st.markdown("[Download Example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)")
             
             with col2:
                 with st.container(border=True):
                     st.markdown("**📋 Data Format Instructions**")
                     st.markdown("Read the detailed documentation:")
-                    st.link_button(
-                        label="View Instructions Document",
-                        url="https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx",
-                        use_container_width=True
-                    )
+                    st.markdown("[View Instructions Document](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)")
             
             st.markdown("---")
             st.markdown("""
@@ -808,7 +795,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             - Only upload one case at a time
             - Values must match the specified formats
             """)
-        # ========== END NEW SECTION ==========
+        # ========== END INSTRUCTIONS SECTION ==========
 
         # Reset case_inserted if a new file is uploaded
         if "uploaded_file" in st.session_state and st.session_state.uploaded_file is not None:
@@ -816,7 +803,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.session_state.case_inserted = False
                 st.session_state.last_uploaded_file = st.session_state.uploaded_file
 
-        # File uploader with more prominent styling
+        # File uploader
         uploaded_file = st.file_uploader(
             "**Upload your prepared CSV file**", 
             type="csv",
@@ -854,11 +841,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 # Check for duplicate Case_No
                 with neo4j_service.session() as session:
-                    # Get all existing case numbers
                     result = session.run("MATCH (c:Case) RETURN c.id AS case_id")
                     existing_case_nos = {record["case_id"] for record in result}
                     
-                    # Get the maximum case number
                     max_case_no = max(existing_case_nos) if existing_case_nos else 0
                     suggested_case_no = max_case_no + 1
                     
@@ -866,7 +851,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         st.error(f"❌ Case No. {case_no} already exists in the system!")
                         st.warning("⚠️ Using duplicate case numbers will cause data integrity issues")
                         
-                        # Show existing case details
                         st.subheader("📌 Existing Case Details")
                         existing_case = session.run("""
                             MATCH (c:Case {id: $case_no})
@@ -880,7 +864,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         if existing_case:
                             st.json(existing_case[0])
                         
-                        # Provide correction options
                         st.subheader("🛠️ How to Proceed")
                         col1, col2 = st.columns(2)
                         
@@ -926,16 +909,15 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         
                         st.stop()
                     else:
-                        # Case number is unique, proceed with processing
                         st.session_state.last_case_no = case_no
 
-                # If we get here, case number is unique
+                # Process unique case
                 upload_id = str(uuid.uuid4())
                 with st.spinner("Inserting case into graph..."):
                     upload_id = insert_user_case(row, upload_id)
                     st.session_state.last_upload_id = upload_id
 
-                with st.spinner("Generating graph embedding for new case..."):
+                with st.spinner("Generating graph embedding..."):
                     if not call_embedding_generator(str(upload_id)):
                         st.error("❌ Failed to generate embedding. Check connection or logs.")
                         st.stop()
