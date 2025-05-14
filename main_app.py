@@ -753,19 +753,75 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("❌ Failed to run kg_builder_2.py")
                     st.code(result.stderr)
 
-    with tab3:
+        with tab3:
         st.header("📄 Upload New Case")
         
+        # ========== NEW INSTRUCTIONS SECTION ==========
+        with st.container(border=True):
+            st.subheader("📝 Before You Upload", anchor=False)
+            
+            cols = st.columns([1, 3])
+            with cols[0]:
+                st.image("https://cdn-icons-png.flaticon.com/512/2965/2965300.png", width=80)
+            with cols[1]:
+                st.markdown("""
+                **Please follow these steps carefully:**
+                1. Download the example CSV template
+                2. Review the data format instructions
+                3. Prepare your case data accordingly
+                """)
+            
+            st.markdown("---")
+            st.markdown("### 🛠️ Required Resources")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                with st.container(border=True):
+                    st.markdown("**📥 Example CSV Template**")
+                    st.markdown("Download and use this template to format your data:")
+                    st.download_button(
+                        label="Download Example CSV",
+                        data=requests.get(
+                            "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv"
+                        ).content,
+                        file_name="ASD_Screening_Template.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        type="primary"
+                    )
+            
+            with col2:
+                with st.container(border=True):
+                    st.markdown("**📋 Data Format Instructions**")
+                    st.markdown("Read the detailed documentation:")
+                    st.link_button(
+                        label="View Instructions Document",
+                        url="https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx",
+                        use_container_width=True
+                    )
+            
+            st.markdown("---")
+            st.markdown("""
+            **❗ Important Notes:**
+            - Ensure all required columns are present
+            - Case numbers must be unique
+            - Only upload one case at a time
+            - Values must match the specified formats
+            """)
+        # ========== END NEW SECTION ==========
+
         # Reset case_inserted if a new file is uploaded
         if "uploaded_file" in st.session_state and st.session_state.uploaded_file is not None:
             if st.session_state.uploaded_file != st.session_state.get("last_uploaded_file"):
                 st.session_state.case_inserted = False
                 st.session_state.last_uploaded_file = st.session_state.uploaded_file
 
+        # File uploader with more prominent styling
         uploaded_file = st.file_uploader(
-            "Upload CSV for single case prediction", 
+            "**Upload your prepared CSV file**", 
             type="csv",
-            key="case_uploader"
+            key="case_uploader",
+            help="Ensure your file follows the template format before uploading"
         )
 
         if uploaded_file:
