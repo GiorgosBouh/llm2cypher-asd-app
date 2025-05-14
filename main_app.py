@@ -653,6 +653,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         st.session_state.active_tab = "Model Training"
     if "case_inserted" not in st.session_state:
         st.session_state.case_inserted = False
+    if "last_upload_id" not in st.session_state:
+        st.session_state.last_upload_id = None
 
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -750,12 +752,11 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab3:
         st.header("📄 Upload New Case")
         
-        if st.session_state.case_inserted:
-            st.info("ℹ️ Case already processed. Switch to NLP tab to continue.")
-            if st.button("Go to NLP to Cypher"):
-                st.session_state.active_tab = "💬 NLP to Cypher"
-                st.rerun()
-            st.stop()
+        # Reset case_inserted if a new file is uploaded
+        if "uploaded_file" in st.session_state and st.session_state.uploaded_file is not None:
+            if st.session_state.uploaded_file != st.session_state.get("last_uploaded_file"):
+                st.session_state.case_inserted = False
+                st.session_state.last_uploaded_file = st.session_state.uploaded_file
 
         uploaded_file = st.file_uploader(
             "Upload CSV for single case prediction", 
@@ -764,6 +765,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         )
 
         if uploaded_file:
+            st.session_state.uploaded_file = uploaded_file
             try:
                 df = pd.read_csv(uploaded_file, delimiter=";")
                 required_cols = [
@@ -911,9 +913,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 st.session_state.case_inserted = True
                 st.success("✅ Case processed successfully!")
-                if st.button("Go to NLP to Cypher"):
-                    st.session_state.active_tab = "💬 NLP to Cypher"
-                    st.rerun()
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
@@ -958,9 +957,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 "How many cases answered '1' for both A1 and A2?"
             ]
 
-        for q in example_questions:
-            if st.button(q, key=q):
-                st.session_state["preset_question"] = q
+            for q in example_questions:
+                if st.button(q, key=q):
+                    st.session_state["preset_question"] = q
 
         default_question = st.session_state.get("preset_question", "")
         question = st.text_input("Ask about the data:", value=default_question)
