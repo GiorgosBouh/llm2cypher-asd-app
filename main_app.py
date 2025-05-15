@@ -818,9 +818,11 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.subheader("📊 Uploaded CSV Preview")
                 df = pd.read_csv(uploaded_file, delimiter=";")
                 st.dataframe(
-                    df.style.format({
+                    df.style.format(
+                        {
                         "Case_No": "{:.0f}",
                         **{f"A{i}": "{:.0f}" for i in range(1,11)}
+                        }
                     ),
                     use_container_width=True,
                     hide_index=True
