@@ -486,15 +486,15 @@ def evaluate_model(model, X_test, y_test):
     ax.set_ylabel('Actual')
     st.pyplot(fig)
 
-    st.subheader("🔍 Feature Importance (Gini)")
-    try:
-        importances = pd.Series(
-            model.named_steps['classifier'].feature_importances_,
-            index=[f"Dim_{i}" for i in range(X_test.shape[1])]
-        ).sort_values(ascending=False)
-        st.bar_chart(importances.head(15))
-    except Exception as e:
-        st.warning(f"Could not plot feature importance: {str(e)}")
+    #st.subheader("🔍 Feature Importance (Gini)")
+    #try:
+    #    importances = pd.Series(
+    #        model.named_steps['classifier'].feature_importances_,
+    #        index=[f"Dim_{i}" for i in range(X_test.shape[1])]
+    #    ).sort_values(ascending=False)
+    #    st.bar_chart(importances.head(15))
+    #except Exception as e:
+    #    st.warning(f"Could not plot feature importance: {str(e)}")
 
     st.subheader("📈 Performance Curves")
     plot_combined_curves(y_test, y_proba)
