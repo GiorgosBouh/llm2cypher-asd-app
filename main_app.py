@@ -671,27 +671,27 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab1:
         st.header("🤖 ASD Detection Model")
 
-        if st.button("🔁 Full Graph Rebuild + Train Model"):
-            with st.spinner("Rebuilding graph and generating embeddings...this will take 3-5 minutes"):
-                result = subprocess.run(
-                    [sys.executable, "kg_builder_2.py"],
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode == 0:
-                    st.success("✅ Embeddings generated!")
-                    results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
-                    if results:
-                        st.session_state.model_results = results
-                        st.session_state.model_trained = True
-                        evaluate_model(
-                            results["model"],
-                            results["X_test"],
-                            results["y_test"]
-                        )
-                else:
-                    st.error("❌ Failed to rebuild graph")
-                    st.code(result.stderr)
+        #if st.button("🔁 Full Graph Rebuild + Train Model"):
+        #    with st.spinner("Rebuilding graph and generating embeddings...this will take 3-5 minutes"):
+        #        result = subprocess.run(
+        #            [sys.executable, "kg_builder_2.py"],
+        #            capture_output=True,
+        #            text=True
+        #        )
+        #        if result.returncode == 0:
+        #            st.success("✅ Embeddings generated!")
+        #            results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
+        #            if results:
+        #                st.session_state.model_results = results
+        #                st.session_state.model_trained = True
+        #               evaluate_model(
+        #                    results["model"],
+        #                    results["X_test"],
+        #                    results["y_test"]
+        #                )
+        #        else:
+        #            st.error("❌ Failed to rebuild graph")
+        #            st.code(result.stderr)
 
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):
