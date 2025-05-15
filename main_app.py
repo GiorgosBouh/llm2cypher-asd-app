@@ -932,9 +932,11 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.subheader("📊 Uploaded Case Data Preview")
                 preview_df = df.copy()
                 st.dataframe(
-                    preview_df.style.format({
+                    preview_df.style.format(
+                        {
                         "Case_No": "{:.0f}",
                         **{f"A{i}": "{:.0f}" for i in range(1,11)}
+                        }
                     ),
                     use_container_width=True,
                     hide_index=True
