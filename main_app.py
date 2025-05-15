@@ -928,6 +928,29 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         st.stop()
                     st.session_state.current_embedding = embedding
 
+                # ========== ADDED CSV PREVIEW ==========
+                st.subheader("📊 Uploaded Case Data Preview")
+                preview_df = df.copy()
+                st.dataframe(
+                    preview_df.style.format({
+                        "Case_No": "{:.0f}",
+                        **{f"A{i}": "{:.0f}" for i in range(1,11)}
+                    ),
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Add download button for the processed data
+                csv_buffer = io.StringIO()
+                preview_df.to_csv(csv_buffer, sep=";", index=False)
+                st.download_button(
+                    label="💾 Download Processed CSV",
+                    data=csv_buffer.getvalue(),
+                    file_name=f"processed_case_{case_no}.csv",
+                    mime="text/csv"
+                )
+                # ========== END ADDED SECTION ==========
+
                 st.subheader("🧠 Case Embedding")
                 st.write(embedding)
 
