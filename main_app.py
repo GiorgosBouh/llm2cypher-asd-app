@@ -607,7 +607,7 @@ def reinsert_labels_from_csv(csv_url: str):
                     MERGE (c)-[:SCREENED_FOR]->(t)
                 """, case_id=case_id, label=label.capitalize())
 
- === Streamlit UI ===
+ #=== Streamlit UI ===
 def main():
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
