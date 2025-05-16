@@ -36,9 +36,7 @@ class GraphBuilder:
         return GraphDatabase.driver(
             uri,
             auth=(user, password),
-            connection_timeout=30,  # ✅ Χρήσιμο για Aura
-            max_connection_pool_size=50,
-            max_connection_lifetime=7200
+    
         )
 
     def parse_csv(self, file_path):
