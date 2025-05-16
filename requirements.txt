@@ -1,0 +1,17 @@
+streamlit==1.44.1
+openai>=1.0.0
+neo4j==5.20.0
+python-dotenv
+httpx==0.27.0
+
+# Required for ML & data handling
+pandas>=1.3
+scikit-learn>=1.1
+# Required for graph embedding
+networkx>=2.6
+node2vec==0.4.6
+imbalanced-learn
+matplotlib
+seaborn
+plotly>=5.0
+xgboost
