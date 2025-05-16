@@ -111,10 +111,19 @@ def generate_embeddings(driver):
     # Επιτάχυνση φόρτωσης γραφήματος με single query
     with driver.session() as session:
         result = session.run("""
-            MATCH (c:Case)-[r]->(n)
-            RETURN toString(c.id) AS node_id, collect(DISTINCT toString(id(n))) AS neighbors
+            MATCH (c:Case)-[:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY|SIMILAR_TO]->(n)
+            RETURN toString(c.id) AS node_id, collect(DISTINCT toString(c.id)) + collect(DISTINCT toString(id(n))) AS all_nodes, collect(DISTINCT toString(id(n))) AS neighbors
         """)
-        
+        for record in result:
+            node_id = record["node_id"]
+            neighbors = record["neighbors"]
+            print(f"📌 Node {node_id} has neighbors: {neighbors}", flush=True)
+
+            G.add_node(node_id)
+            for neighbor in neighbors:
+                if neighbor:
+                    G.add_node(str(neighbor))
+                    G.add_edge(node_id, str(neighbor))
         for record in result:
             node_id = str(record["node_id"])
             G.add_node(node_id)
