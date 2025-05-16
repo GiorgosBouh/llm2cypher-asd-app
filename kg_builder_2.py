@@ -119,7 +119,9 @@ def generate_embeddings(driver):
             node_id = str(record["node_id"])
             G.add_node(node_id)
             for neighbor in record["neighbors"]:
-                G.add_edge(node_id, str(neighbor))
+                if neighbor:  # 🔥 Αποκλείει τα None
+                    G.add_node(str(neighbor))
+                    G.add_edge(node_id, str(neighbor))
 
     # Έλεγχος γραφήματος
     if len(G.nodes) < 10:  # Αύξηση ελάχιστου ορίου για καλύτερα embeddings
