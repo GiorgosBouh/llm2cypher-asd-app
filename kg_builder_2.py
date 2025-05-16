@@ -64,28 +64,29 @@ class GraphBuilder:
             logger.error(f"Failed to parse CSV: {str(e)}")
             raise
 
-    def create_graph_structure(self, driver, df):
-        """Ολοκληρωμένη δημιουργία γράφου με transaction management"""
-        with driver.session() as session:
-            try:
-                # Διαγραφή παλιού γράφου
+   def create_graph_structure(self, driver, df):
+        try:
+            # Διαγραφή παλιού γράφου
+            with driver.session() as session:
                 session.run("MATCH (n) DETACH DELETE n")
-                
-                # Δημιουργία κόμβων
+
+            # Δημιουργία κόμβων
+            with driver.session() as session:
                 self._create_base_nodes(session, df)
-                
-                # Δημιουργία σχέσεων
+
+            # Δημιουργία σχέσεων
+            with driver.session() as session:
                 self._create_case_relationships(session, df)
-                
-                # Ενισχυμένες σχέσεις ομοιότητας
+
+            with driver.session() as session:
                 self._create_enhanced_similarity_relations(session, df)
-                
-                logger.info("✅ Graph structure created successfully")
-                return True
-                
-            except Exception as e:
-                logger.error(f"Graph creation failed: {str(e)}")
-                return False
+
+            logger.info("✅ Graph structure created successfully")
+            return True
+
+        except Exception as e:
+            logger.error(f"Graph creation failed: {str(e)}")
+            return False
 
     def _create_base_nodes(self, session, df):
         """Δημιουργία βασικών κόμβων"""
