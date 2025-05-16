@@ -112,9 +112,9 @@ def generate_embeddings(driver):
     with driver.session() as session:
         result = session.run("""
             MATCH (c:Case)
-            OPTIONAL MATCH (c)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY|GRAPH_SIMILARITY]->(other)
-            WHERE c.id IS NOT NULL AND other.id IS NOT NULL
-            RETURN c.id AS node_id, collect(DISTINCT other.id) AS neighbors
+            OPTIONAL MATCH (c)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY|SIMILAR_TO]->(other)
+            WHERE c.id IS NOT NULL
+            RETURN toString(c.id) AS node_id, collect(DISTINCT toString(id(other))) AS neighbors
         """)
         
         for record in result:
