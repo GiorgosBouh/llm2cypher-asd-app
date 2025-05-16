@@ -1,3 +1,6 @@
+from neo4j import GraphDatabase
+from dotenv import load_dotenv
+import os
 import sys
 import pandas as pd
 import numpy as np
@@ -25,13 +28,17 @@ class GraphBuilder:
         self.BATCH_SIZE = 500  # Βελτιστοποίηση batch processing
 
     def connect_to_neo4j(self):
-        """Βελτιωμένη σύνδεση με επιπλέον παραμέτρους"""
+        """Ασφαλής σύνδεση με Neo4j Aura χρησιμοποιώντας .env"""
+        uri = os.getenv("NEO4J_URI")
+        user = os.getenv("NEO4J_USER")
+        password = os.getenv("NEO4J_PASSWORD")
+
         return GraphDatabase.driver(
-            os.getenv("NEO4J_URI"),
-            auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD")),
-            max_connection_lifetime=7200,
+            uri,
+            auth=(user, password),
+            connection_timeout=30,  # ✅ Χρήσιμο για Aura
             max_connection_pool_size=50,
-            connection_timeout=30
+            max_connection_lifetime=7200
         )
 
     def parse_csv(self, file_path):
