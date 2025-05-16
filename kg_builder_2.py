@@ -64,7 +64,8 @@ class GraphBuilder:
             logger.error(f"Failed to parse CSV: {str(e)}")
             raise
 
-   def create_graph_structure(self, driver, df):
+    def create_graph_structure(self, driver, df):
+        """Ολοκληρωμένη δημιουργία γράφου με σωστό indentation και split sessions"""
         try:
             # Διαγραφή παλιού γράφου
             with driver.session() as session:
@@ -78,6 +79,7 @@ class GraphBuilder:
             with driver.session() as session:
                 self._create_case_relationships(session, df)
 
+            # Δημιουργία enhanced similarity
             with driver.session() as session:
                 self._create_enhanced_similarity_relations(session, df)
 
