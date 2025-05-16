@@ -273,28 +273,41 @@ class GraphBuilder:
             logger.error(f"Embedding generation failed: {str(e)}")
             return False
 
-    def build_complete_graph(self):
-        """Ολοκληρωμένη διαδικασία δημιουργίας γράφου"""
-        driver = self.connect_to_neo4j()
+    def build_graph():
+        driver = connect_to_neo4j()
+        file_path = os.getenv("DATA_URL", "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv")
+
         try:
-            # Φόρτωση δεδομένων
-            file_path = os.getenv("DATA_URL", "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv")
-            df = self.parse_csv(file_path)
-            
-            # Δημιουργία γράφου
-            if not self.create_graph_structure(driver, df):
-                raise RuntimeError("Failed to create graph structure")
-            
-            # Δημιουργία embeddings
-            if not self.generate_graph_embeddings(driver):
-                raise RuntimeError("Failed to generate embeddings")
-            
-            logger.info("🎉 Graph construction completed successfully!")
-            return True
-            
+            df = parse_csv(file_path)
+            print("🧠 First row:", df.iloc[0].to_dict(), flush=True)
+
+            print("🧹 Διαγραφή όλων των κόμβων και σχέσεων...", flush=True)
+            with driver.session() as session:
+                session.run("MATCH (n) DETACH DELETE n")
+
+            print("⏳ Δημιουργία κόμβων...", flush=True)
+            with driver.session() as session:
+                session.execute_write(create_nodes, df)
+
+            print("⏳ Δημιουργία σχέσεων...", flush=True)
+            with driver.session() as session:
+                session.execute_write(create_relationships, df)
+
+            print("⏳ Δημιουργία σχέσεων ομοιότητας...", flush=True)
+            with driver.session() as session:
+                session.execute_write(create_similarity_relationships, df)
+
+            print("⏳ Δημιουργία embeddings...", flush=True)
+            generate_embeddings(driver)
+
+            print("✅ Ολοκληρώθηκε επιτυχώς!", flush=True)
+            sys.exit(0)
+
         except Exception as e:
-            logger.error(f"Graph build failed: {str(e)}")
-            return False
+            print(f"❌ Σφάλμα: {str(e)}", flush=True)
+            traceback.print_exc()
+            sys.exit(1)
+
         finally:
             driver.close()
 
