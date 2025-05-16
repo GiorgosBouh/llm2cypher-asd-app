@@ -11,7 +11,8 @@ from sklearn.metrics import (
     average_precision_score, classification_report, 
     precision_score, recall_score, f1_score, confusion_matrix
 )
-from sklearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+from sklearn.pipeline import Pipeline  # Αντικατάσταση του imblearn.pipeline
 from collections import Counter
 import uuid
 import numpy as np
@@ -34,17 +35,14 @@ from sklearn.impute import SimpleImputer
 import subprocess
 import uuid
 from xgboost import XGBClassifier
-from sklearn.pipeline import make_pipeline
+from imblearn.pipeline import make_pipeline
 import pandas as pd
-from scipy.spatial import ConvexHull
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from umap import UMAP
-from sklearn.feature_selection import SelectKBest, mutual_info_classif
+
 
 def call_embedding_generator(upload_id: str) -> bool:
     """Generate embedding for a single case using subprocess with enhanced error handling"""
     try:
+        # Get the absolute path to the script
         script_dir = os.path.dirname(os.path.abspath(__file__))
         builder_path = os.path.join(script_dir, "generate_case_embedding.py")
         
@@ -52,14 +50,16 @@ def call_embedding_generator(upload_id: str) -> bool:
             st.error(f"❌ Embedding generator script not found at: {builder_path}")
             return False
 
+        # Prepare environment variables
         env = os.environ.copy()
         env.update({
             "NEO4J_URI": os.getenv("NEO4J_URI"),
             "NEO4J_USER": os.getenv("NEO4J_USER"),
             "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD"),
-            "PYTHONPATH": os.path.dirname(script_dir)
+            "PYTHONPATH": os.path.dirname(script_dir)  # Add project root to PYTHONPATH
         })
 
+        # Run the process with timeout
         result = subprocess.run(
             [sys.executable, builder_path, upload_id],
             env=env,
@@ -87,15 +87,21 @@ def call_embedding_generator(upload_id: str) -> bool:
 
 # === Configuration ===
 class Config:
-    EMBEDDING_DIM = 256  # Αύξηση των διαστάσεων
-    RANDOM_STATE = 42
+    EMBEDDING_DIM = 128
+    RANDOM_STATE = np.random.randint(0, 1000)
     TEST_SIZE = 0.3
-    N_ESTIMATORS = 300  # Αύξηση των δέντρων
+    N_ESTIMATORS = 100
+    SMOTE_RATIO = 'auto'
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
+    NODE2VEC_WALK_LENGTH = 20
+    NODE2VEC_NUM_WALKS = 100
+    NODE2VEC_WORKERS = 2
+    NODE2VEC_P = 1
+    NODE2VEC_Q = 1
+    EMBEDDING_BATCH_SIZE = 50
+    MAX_RELATIONSHIPS = 100000
     EMBEDDING_GENERATION_TIMEOUT = 300
     LEAKAGE_CHECK = True
-    FEATURE_SELECTION = True
-    N_FEATURES = 30  # Αύξηση των επιλεγμένων features
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -107,6 +113,7 @@ logger = logging.getLogger(__name__)
 # === Environment Setup ===
 load_dotenv()
 
+# Validate Environment Variables
 required_env_vars = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "OPENAI_API_KEY"]
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
@@ -118,6 +125,7 @@ NEO4J_USER = os.getenv("NEO4J_USER")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+# === Neo4j Service Class ===
 class Neo4jService:
     def __init__(self, uri: str, user: str, password: str):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
@@ -130,6 +138,7 @@ class Neo4jService:
     def close(self):
         self.driver.close()
 
+# === Initialize Services ===
 @st.cache_resource
 def get_neo4j_service():
     if 'neo4j_driver' in st.session_state:
@@ -143,6 +152,7 @@ def get_openai_client():
 neo4j_service = get_neo4j_service()
 client = get_openai_client()
 
+# === Helper Functions ===
 def safe_neo4j_operation(func):
     """Decorator for Neo4j operations with error handling"""
     def wrapper(*args, **kwargs):
@@ -154,6 +164,7 @@ def safe_neo4j_operation(func):
             return None
     return wrapper
 
+# === Data Insertion ===
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
     queries = []
@@ -216,9 +227,12 @@ def remove_screened_for_labels():
         """)
         logger.info("✅ SCREENED_FOR relationships removed to prevent leakage.")
 
+# === Graph Embeddings Generation ===
 @safe_neo4j_operation
 def generate_embedding_for_case(upload_id: str) -> bool:
+    """Generate embedding for a single case using subprocess"""
     try:
+        # Get the directory of the current script
         script_dir = os.path.dirname(os.path.abspath(__file__))
         builder_path = os.path.join(script_dir, "generate_case_embedding.py")
         
@@ -226,6 +240,7 @@ def generate_embedding_for_case(upload_id: str) -> bool:
             st.error(f"❌ Embedding generator script not found at: {builder_path}")
             return False
 
+        # Run the embedding generator as a subprocess
         result = subprocess.run(
             [sys.executable, builder_path, upload_id],
             capture_output=True,
@@ -242,7 +257,9 @@ def generate_embedding_for_case(upload_id: str) -> bool:
         st.error(f"❌ Error generating embedding: {str(e)}")
         return False
 
+# === Natural Language to Cypher ===
 def nl_to_cypher(question: str) -> Optional[str]:
+    """Translates natural language to Cypher using OpenAI"""
     prompt = f"""
     You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
 
@@ -282,8 +299,10 @@ def nl_to_cypher(question: str) -> Optional[str]:
         logger.error(f"OpenAI API error: {e}")
         return None
 
+# === Embedding Extraction ===
 @safe_neo4j_operation
 def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
+    """Safely extracts embedding for a specific case"""
     with neo4j_service.session() as session:
         result = session.run(
             "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
@@ -306,8 +325,10 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
         
         return None
 
+# === Training Data Preparation ===
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
+    """Extracts training data with leakage protection and NaN handling"""
     try:
         df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
         df.columns = [col.strip().replace('\r', '') for col in df.columns]
@@ -358,104 +379,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         st.error(f"Data extraction failed: {str(e)}")
         return pd.DataFrame(), pd.Series()
 
-def perform_shape_analysis(X: pd.DataFrame, y: pd.Series):
-    """Perform shape analysis on the embeddings"""
-    st.subheader("📊 Shape Analysis of Embeddings")
-    
-    method = st.selectbox(
-        "Select dimensionality reduction method:",
-        ["PCA", "t-SNE", "UMAP"],
-        key="dim_reduction_method"
-    )
-    
-    if st.button("Run Shape Analysis", key="run_shape_analysis"):
-        with st.spinner(f"Running {method} dimensionality reduction..."):
-            if method == "PCA":
-                reducer = PCA(n_components=2, random_state=Config.RANDOM_STATE)
-                reduced_data = reducer.fit_transform(X)
-            elif method == "t-SNE":
-                reducer = TSNE(n_components=2, random_state=Config.RANDOM_STATE)
-                reduced_data = reducer.fit_transform(X)
-            else:  # UMAP
-                reducer = UMAP(n_components=2, random_state=Config.RANDOM_STATE)
-                reduced_data = reducer.fit_transform(X)
-            
-            plot_df = pd.DataFrame({
-                'x': reduced_data[:, 0],
-                'y': reduced_data[:, 1],
-                'label': y.map({0: 'Typical', 1: 'ASD'})
-            })
-            
-            fig = px.scatter(
-                plot_df, 
-                x='x', 
-                y='y', 
-                color='label',
-                title=f"{method} Visualization of Embeddings",
-                labels={'x': f'{method} 1', 'y': f'{method} 2'}
-            )
-            st.plotly_chart(fig)
-            
-            st.markdown("### 🏗️ Convex Hull Analysis")
-            
-            hulls = {}
-            areas = {}
-            for label in [0, 1]:
-                points = reduced_data[y == label]
-                if len(points) >= 3:
-                    hull = ConvexHull(points)
-                    hulls[label] = hull
-                    areas[label] = hull.volume
-                    
-                    hull_points = points[hull.vertices]
-                    hull_df = pd.DataFrame({
-                        'x': hull_points[:, 0],
-                        'y': hull_points[:, 1],
-                        'label': [label] * len(hull_points)
-                    })
-                    
-                    fig_hull = px.scatter(
-                        plot_df, 
-                        x='x', 
-                        y='y', 
-                        color='label',
-                        title=f"Convex Hull for {'ASD' if label else 'Typical'} Cases"
-                    )
-                    fig_hull.add_trace(px.line(
-                        hull_df, 
-                        x='x', 
-                        y='y', 
-                        line_shape='linear'
-                    ).data[0])
-                    st.plotly_chart(fig_hull)
-            
-            if hulls:
-                st.markdown("#### 📏 Convex Hull Areas")
-                col1, col2 = st.columns(2)
-                col1.metric("ASD Cases Area", f"{areas.get(1, 0):.2f}")
-                col2.metric("Typical Cases Area", f"{areas.get(0, 0):.2f}")
-                
-                if 1 in areas and 0 in areas:
-                    ratio = areas[1] / areas[0]
-                    st.metric("Area Ratio (ASD/Typical)", f"{ratio:.2f}")
-                    
-                    if ratio > 1.5:
-                        st.warning("ASD cases occupy significantly more space in the embedding space")
-                    elif ratio < 0.67:
-                        st.warning("Typical cases occupy significantly more space in the embedding space")
-                    else:
-                        st.success("Both classes have similar spatial distribution in the embedding space")
-            
-            st.markdown("### 📊 Density Analysis")
-            fig_density = px.density_contour(
-                plot_df, 
-                x='x', 
-                y='y', 
-                color='label',
-                title="Density Distribution of Embeddings"
-            )
-            st.plotly_chart(fig_density)
-
+# === Model Evaluation ===
 def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
     st.subheader("📌 Feature–Embedding Correlation Analysis")
     try:
@@ -465,6 +389,9 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
         if "Case_No" not in df.columns:
             st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
             return
+
+        #if len(X) != len(df):
+            #st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
 
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
         df = df[features]
@@ -527,11 +454,11 @@ def evaluate_model(model, X_test, y_test):
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
     
-    st.subheader("📉 Probability Distribution Forecast")
+    st.subheader("📉 probability distribution forecast")
     fig, ax = plt.subplots()
     ax.hist(y_proba, bins=20, color='skyblue', edgecolor='black')
-    ax.set_xlabel("ASD Traits Probability")
-    ax.set_ylabel("Number of Cases")
+    ax.set_xlabel("ASD Traits probability")
+    ax.set_ylabel("No of cases")
     st.pyplot(fig)
 
     if roc_auc_score(y_test, y_proba) > 0.98:
@@ -559,6 +486,16 @@ def evaluate_model(model, X_test, y_test):
     ax.set_ylabel('Actual')
     st.pyplot(fig)
 
+    #st.subheader("🔍 Feature Importance (Gini)")
+    #try:
+    #    importances = pd.Series(
+    #        model.named_steps['classifier'].feature_importances_,
+    #        index=[f"Dim_{i}" for i in range(X_test.shape[1])]
+    #    ).sort_values(ascending=False)
+    #    st.bar_chart(importances.head(15))
+    #except Exception as e:
+    #    st.warning(f"Could not plot feature importance: {str(e)}")
+
     st.subheader("📈 Performance Curves")
     plot_combined_curves(y_test, y_proba)
 
@@ -566,12 +503,13 @@ def evaluate_model(model, X_test, y_test):
 
     csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
     analyze_embedding_correlations(X_test, csv_url)
-    
-    # Perform shape analysis
-    perform_shape_analysis(X_test, y_test)
 
+
+# === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
+    from sklearn.pipeline import Pipeline  # Χρήση sklearn pipeline αντί για imblearn
+    
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
         remove_screened_for_labels()
@@ -584,18 +522,14 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             st.error("⚠️ No valid training data available")
             return None
 
-        # Feature selection
-        if Config.FEATURE_SELECTION:
-            selector = SelectKBest(mutual_info_classif, k=min(Config.N_FEATURES, X.shape[1]))
-            X_selected = selector.fit_transform(X, y)
-            selected_features = selector.get_support(indices=True)
-            X = pd.DataFrame(X_selected, columns=[f"Dim_{i}" for i in selected_features])
-            st.info(f"🔍 Selected top {len(selected_features)} most important features")
+        # Χρήση SMOTE ως ξεχωριστό βήμα (δεν είναι μέσα στο Pipeline)
+        smote = SMOTE(random_state=Config.RANDOM_STATE)
+        X_res, y_res = smote.fit_resample(X, y)
 
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
+            X_res, y_res,
             test_size=Config.TEST_SIZE,
-            stratify=y,
+            stratify=y_res,
             random_state=Config.RANDOM_STATE
         )
 
@@ -603,15 +537,14 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             n_estimators=Config.N_ESTIMATORS,
             use_label_encoder=False,
             eval_metric='logloss',
-            random_state=Config.RANDOM_STATE,
-            scale_pos_weight=len(y_train[y_train == 0])/len(y_train[y_train == 1])  # Handle class imbalance
+            random_state=Config.RANDOM_STATE
         )
         model.fit(X_train, y_train)
 
         reinsert_labels_from_csv(csv_url)
 
         return {
-            "model": model,
+            "model": model,  # Απλός εκτιμητής τώρα (όχι Pipeline)
             "X_test": X_test,
             "y_test": y_test
         }
@@ -620,9 +553,10 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         st.error(f"❌ Error training model: {e}")
         logger.error(f"Training error: {e}", exc_info=True)
         return None
-
+# === Anomaly Detection ===
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
+    """Returns all case embeddings for anomaly detection"""
     with neo4j_service.session() as session:
         result = session.run("""
             MATCH (c:Case)
@@ -634,6 +568,7 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
 
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, StandardScaler]]:
+    """Trains anomaly detection model"""
     embeddings = get_existing_embeddings()
     if embeddings is None or len(embeddings) < Config.MIN_CASES_FOR_ANOMALY_DETECTION:
         st.warning(f"⚠️ Need at least {Config.MIN_CASES_FOR_ANOMALY_DETECTION} cases for anomaly detection")
@@ -653,11 +588,12 @@ def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, St
 
 @safe_neo4j_operation
 def reinsert_labels_from_csv(csv_url: str):
+    """Επανατοποθέτηση SCREENED_FOR labels από CSV"""
     df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
     df.columns = [col.strip() for col in df.columns]
 
     if "Case_No" not in df.columns or "Class_ASD_Traits" not in df.columns:
-        st.error("❌ CSV does not contain 'Case_No' and 'Class_ASD_Traits' columns")
+        st.error("❌ Το CSV δεν περιέχει τις στήλες 'Case_No' και 'Class_ASD_Traits'")
         return
 
     with neo4j_service.session() as session:
@@ -671,7 +607,7 @@ def reinsert_labels_from_csv(csv_url: str):
                     MERGE (c)-[:SCREENED_FOR]->(t)
                 """, case_id=case_id, label=label.capitalize())
 
-###Streamlit UI####
+ #=== Streamlit UI ===
 def main():
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
@@ -682,9 +618,37 @@ def main():
     st.sidebar.markdown("""
 ---
 ### 📘 About This Project
-[Content unchanged from original]
+
+This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration with Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis  
+at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegean](https://i-lab.aegean.gr/).
+
+It is part of the postdoctoral research project:
+
+**"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"**  
+by Dr. Bouchouras under the supervision of Dr. Kotis.
+
+---
+### 🧪 What This App Does
+
+This interactive app allows you to:
+
+- 🧠 Train a machine learning model to detect ASD traits using graph embeddings.
+- 📤 Upload your own toddler screening data from the Q-Chat-10 questionnaire and other demographics.
+- 🔗 Automatically connect the uploaded case to a knowledge graph.
+- 🌐 Generate a graph-based embedding for the new case.
+- 🔍 Predict whether the case shows signs of Autism Spectrum Disorder (ASD).
+- 🕵️ Run anomaly detection to check for anomalies.
+- 💬 Ask natural language questions and receive Cypher queries with results, using GPT4 based NLP-to-Cypher translation
+
+---
+### 📥 Download Example CSV
+
+To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)  
+to format your own screening case correctly. 
+Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
 """)
 
+    # Initialize session state
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Model Training"
     if "case_inserted" not in st.session_state:
@@ -696,6 +660,7 @@ def main():
     if "model_trained" not in st.session_state:
         st.session_state.model_trained = False
 
+    # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Model Training", 
         "🌐 Graph Embeddings", 
@@ -705,6 +670,28 @@ def main():
 
     with tab1:
         st.header("🤖 ASD Detection Model")
+
+        #if st.button("🔁 Full Graph Rebuild + Train Model"):
+        #    with st.spinner("Rebuilding graph and generating embeddings...this will take 3-5 minutes"):
+        #        result = subprocess.run(
+        #            [sys.executable, "kg_builder_2.py"],
+        #            capture_output=True,
+        #            text=True
+        #        )
+        #        if result.returncode == 0:
+        #            st.success("✅ Embeddings generated!")
+        #            results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
+        #            if results:
+        #                st.session_state.model_results = results
+        #                st.session_state.model_trained = True
+        #               evaluate_model(
+        #                    results["model"],
+        #                    results["X_test"],
+        #                    results["y_test"]
+        #                )
+        #        else:
+        #            st.error("❌ Failed to rebuild graph")
+        #            st.code(result.stderr)
 
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):
@@ -766,11 +753,8 @@ def main():
                     st.error("❌ Failed to run kg_builder_2.py")
                     st.code(result.stderr)
 
-
-
     with tab3:
         st.header("📄 Upload New Case")
-        st.markdown("Once uploaded, the case will be embedded and predicted. Then, you can proceed to the NLP tab.")
         
         # ========== INSTRUCTIONS SECTION ==========
         with st.container(border=True):
@@ -1106,3 +1090,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
