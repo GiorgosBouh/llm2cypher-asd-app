@@ -5,9 +5,10 @@ from neo4j import GraphDatabase
 import sys
 import os
 import time
-import tempfile  # <-- Missing import added here
+import tempfile
 import logging
 from typing import List, Optional
+from sklearn.preprocessing import normalize
 
 # Configure logging
 logging.basicConfig(
@@ -18,52 +19,56 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingGenerator:
     def __init__(self):
-        self.EMBEDDING_DIM = 128
-        self.MIN_CONNECTIONS = 3
+        # Αυτά πρέπει να ταιριάζουν με το main script
+        self.EMBEDDING_DIM = 256  # Τώρα ταιριάζει με το main script
+        self.MIN_CONNECTIONS = 5  # Αυξημένο από 3
         self.MAX_RETRIES = 3
-        self.MIN_SIMILARITY = 5  # Minimum shared answers for similarity
+        self.MIN_SIMILARITY = 5
         self.EMBEDDING_NORMALIZATION = True
+        self.WALK_LENGTH = 30  # Αυξημένο από 20
+        self.NUM_WALKS = 200  # Αυξημένο από 100
 
     def get_driver(self):
-        """Create a Neo4j driver with robust settings"""
+        """Enhanced driver configuration"""
         return GraphDatabase.driver(
             os.getenv("NEO4J_URI"),
             auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD")),
-            connection_timeout=30,
+            connection_timeout=45,
             max_connection_lifetime=7200,
-            max_connection_pool_size=50
+            max_connection_pool_size=100,
+            max_retry_time=15
         )
 
     def validate_embedding(self, embedding: List[float]) -> bool:
-        """Ensure embedding is valid and normalized"""
+        """Enhanced validation with statistical checks"""
         if not embedding or len(embedding) != self.EMBEDDING_DIM:
             return False
             
-        if any(np.isnan(x) for x in embedding):
-            logger.warning("Embedding contains NaN values")
+        if any(np.isnan(x) or np.isinf(x) for x in embedding):
+            logger.warning("Embedding contains invalid values")
             return False
             
-        if np.all(np.array(embedding) == 0):
-            logger.warning("Embedding is all zeros")
+        if np.std(embedding) < 0.01:  # Check for variance
+            logger.warning("Embedding lacks variance")
             return False
-            
-        if self.EMBEDDING_NORMALIZATION:
-            norm = np.linalg.norm(embedding)
-            if norm == 0:
-                return False
-            embedding = [x/norm for x in embedding]
             
         return True
 
-    def build_base_graph(self, driver, upload_id: str) -> Optional[tuple]:
-        """Construct the initial graph structure"""
+    def build_enriched_graph(self, driver, upload_id: str) -> Optional[tuple]:
+        """Enhanced graph construction with more relationships"""
         with driver.session() as session:
+            # Get case and extended relationships
             result = session.run("""
                 MATCH (c:Case {upload_id: $upload_id})
-                OPTIONAL MATCH (c)-[r]->(neighbor)
-                WHERE neighbor.id IS NOT NULL
+                OPTIONAL MATCH (c)-[:HAS_ANSWER]->(q:BehaviorQuestion)
+                OPTIONAL MATCH (c)-[:HAS_DEMOGRAPHIC]->(d:DemographicAttribute)
+                OPTIONAL MATCH (c)-[:SUBMITTED_BY]->(s:SubmitterType)
+                OPTIONAL MATCH (c)-[:SIMILAR_TO]-(similar:Case)
                 RETURN c.id AS case_id, 
-                       collect(DISTINCT neighbor.id) AS neighbors
+                       collect(DISTINCT q.name) AS questions,
+                       collect(DISTINCT d.value) AS demographics,
+                       collect(DISTINCT s.type) AS submitters,
+                       collect(DISTINCT similar.id) AS similar_cases
             """, upload_id=upload_id).single()
 
             if not result or not result["case_id"]:
@@ -72,121 +77,145 @@ class EmbeddingGenerator:
 
             case_id = str(result["case_id"])
             G = nx.Graph()
-            G.add_node(case_id)
+            G.add_node(case_id, 
+                      questions=result["questions"],
+                      demographics=result["demographics"],
+                      submitters=result["submitters"])
             
-            # Add initial connections with validation
-            for neighbor in result["neighbors"]:
+            # Add relationships with weights
+            for neighbor in result["similar_cases"]:
                 if neighbor:
-                    G.add_edge(case_id, str(neighbor))
+                    G.add_edge(case_id, str(neighbor), weight=1.0)
             
             return G, case_id
 
-    def augment_with_similarity(self, driver, G: nx.Graph, case_id: str) -> None:
-        """Enhance graph with similarity-based connections"""
+    def augment_graph(self, driver, G: nx.Graph, case_id: str) -> None:
+        """Enhanced graph augmentation"""
         with driver.session() as session:
+            # Add similar cases based on multiple criteria
             similar = session.run("""
-                MATCH (c:Case {id: $case_id})-[:HAS_ANSWER]->(q)<-[:HAS_ANSWER]-(similar:Case)
-                WHERE c <> similar
-                WITH similar, count(q) AS shared_answers
-                WHERE shared_answers >= $min_similarity
-                RETURN similar.id 
-                ORDER BY shared_answers DESC 
-                LIMIT 20
+                MATCH (c:Case {id: $case_id})
+                OPTIONAL MATCH (c)-[:HAS_ANSWER]->(q)<-[:HAS_ANSWER]-(similar:Case)
+                WITH similar, count(q) AS answer_similarity
+                WHERE answer_similarity >= $min_similarity
+                
+                OPTIONAL MATCH (c)-[:HAS_DEMOGRAPHIC]->(d)<-[:HAS_DEMOGRAPHIC]-(similar)
+                WITH similar, answer_similarity, count(d) AS demo_similarity
+                
+                RETURN similar.id, 
+                       (answer_similarity * 0.6 + demo_similarity * 0.4) AS combined_score
+                ORDER BY combined_score DESC 
+                LIMIT 25
             """, case_id=int(case_id), min_similarity=self.MIN_SIMILARITY)
 
             for record in similar:
-                G.add_edge(case_id, str(record["similar.id"]))
+                G.add_edge(case_id, str(record["similar.id"]), 
+                          weight=float(record["combined_score"]))
 
     def generate_embedding(self, G: nx.Graph, case_id: str) -> Optional[List[float]]:
-        """Generate node2vec embedding with validation"""
+        """Enhanced embedding generation"""
         try:
-            # Create temp directory safely
             temp_dir = tempfile.mkdtemp()
             
+            # Enhanced Node2Vec parameters
             node2vec = Node2Vec(
                 G,
                 dimensions=self.EMBEDDING_DIM,
-                walk_length=20,
-                num_walks=100,
-                workers=2,
-                quiet=True,
+                walk_length=self.WALK_LENGTH,
+                num_walks=self.NUM_WALKS,
+                workers=4,  # Increased parallelism
+                weight_key='weight',  # Use edge weights
+                p=0.5,  # Adjusted parameters
+                q=2.0,
+                quiet=False,
                 temp_folder=temp_dir
             )
             
             model = node2vec.fit(
-                window=5,
+                window=10,  # Larger context window
                 min_count=1,
-                batch_words=1000
+                epochs=50,  # More training iterations
+                batch_words=2000
             )
             
             embedding = model.wv[case_id].tolist()
             
-            # Clean up temp directory
+            # Enhanced normalization
+            if self.EMBEDDING_NORMALIZATION:
+                embedding = normalize([embedding], norm='l2')[0].tolist()
+            
+            # Clean up
             try:
                 shutil.rmtree(temp_dir)
             except Exception as e:
-                logger.warning(f"Could not remove temp directory: {str(e)}")
+                logger.warning(f"Temp cleanup failed: {str(e)}")
             
             if not self.validate_embedding(embedding):
-                logger.error("Generated invalid embedding")
+                logger.error("Invalid embedding generated")
                 return None
                 
             return embedding
             
         except Exception as e:
-            logger.error(f"Embedding generation failed: {str(e)}")
+            logger.error(f"Embedding generation failed: {str(e)}", exc_info=True)
             return None
 
     def store_embedding(self, driver, upload_id: str, embedding: List[float]) -> bool:
-        """Safely store embedding in Neo4j"""
+        """Enhanced embedding storage"""
         try:
             with driver.session() as session:
                 result = session.run("""
                     MATCH (c:Case {upload_id: $upload_id})
                     SET c.embedding = $embedding,
-                        c.embedding_version = 2.0,
-                        c.last_embedding_update = timestamp()
-                    RETURN count(c) AS updated
+                        c.embedding_version = '3.0',
+                        c.last_embedding_update = datetime(),
+                        c.embedding_stats = {
+                            min: apoc.coll.min($embedding),
+                            max: apoc.coll.max($embedding),
+                            mean: apoc.coll.avg($embedding),
+                            std: apoc.coll.stdev($embedding)
+                        }
+                    RETURN c.id
                 """, upload_id=upload_id, embedding=embedding).single()
                 
-                return result["updated"] > 0
+                return bool(result)
         except Exception as e:
-            logger.error(f"Failed to store embedding: {str(e)}")
+            logger.error(f"Storage failed: {str(e)}")
             return False
 
     def generate_embedding_for_case(self, upload_id: str) -> bool:
-        """Main embedding generation workflow"""
+        """Robust generation workflow"""
         driver = None
         try:
             driver = self.get_driver()
             
             for attempt in range(self.MAX_RETRIES):
                 try:
-                    # Step 1: Build base graph
-                    graph_result = self.build_base_graph(driver, upload_id)
+                    # Enhanced graph construction
+                    graph_result = self.build_enriched_graph(driver, upload_id)
                     if not graph_result:
                         return False
                         
                     G, case_id = graph_result
                     
-                    # Step 2: Augment with similarity if needed
+                    # Smart augmentation
                     if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
-                        self.augment_with_similarity(driver, G, case_id)
+                        self.augment_graph(driver, G, case_id)
                         
                         if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
-                            logger.warning(f"Insufficient connections ({len(G.edges(case_id))})")
+                            logger.warning(f"Insufficient connections after augmentation")
                             return False
 
-                    # Step 3: Generate embedding
+                    # Generate and validate embedding
                     embedding = self.generate_embedding(G, case_id)
                     if not embedding:
                         return False
                         
-                    # Step 4: Store embedding
+                    # Store with enhanced metadata
                     if not self.store_embedding(driver, upload_id, embedding):
                         return False
                         
-                    logger.info(f"Successfully generated embedding for case {case_id}")
+                    logger.info(f"Successfully generated enhanced embedding for case {case_id}")
                     return True
 
                 except Exception as e:
@@ -197,7 +226,7 @@ class EmbeddingGenerator:
                     time.sleep(wait_time)
 
         except Exception as e:
-            logger.error(f"Embedding generation failed: {str(e)}")
+            logger.error(f"Embedding generation failed: {str(e)}", exc_info=True)
             return False
 
         finally:
@@ -215,5 +244,5 @@ if __name__ == "__main__":
         sys.exit(0 if success else 1)
         
     except Exception as e:
-        logger.critical(f"Fatal error: {str(e)}")
+        logger.critical(f"Fatal error: {str(e)}", exc_info=True)
         sys.exit(1)

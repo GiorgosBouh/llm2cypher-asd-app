@@ -87,22 +87,15 @@ def call_embedding_generator(upload_id: str) -> bool:
 
 # === Configuration ===
 class Config:
-    EMBEDDING_DIM = 128
-    RANDOM_STATE = 42  # Fixed for reproducibility
+    EMBEDDING_DIM = 256  # Αύξηση των διαστάσεων
+    RANDOM_STATE = 42
     TEST_SIZE = 0.3
-    N_ESTIMATORS = 200  # Increased number of trees
+    N_ESTIMATORS = 300  # Αύξηση των δέντρων
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
-    NODE2VEC_WALK_LENGTH = 20
-    NODE2VEC_NUM_WALKS = 100
-    NODE2VEC_WORKERS = 2
-    NODE2VEC_P = 1
-    NODE2VEC_Q = 1
-    EMBEDDING_BATCH_SIZE = 50
-    MAX_RELATIONSHIPS = 100000
     EMBEDDING_GENERATION_TIMEOUT = 300
     LEAKAGE_CHECK = True
-    FEATURE_SELECTION = True  # Added feature selection
-    N_FEATURES = 20  # Number of features to select
+    FEATURE_SELECTION = True
+    N_FEATURES = 30  # Αύξηση των επιλεγμένων features
 
 # === Logging Setup ===
 logging.basicConfig(
