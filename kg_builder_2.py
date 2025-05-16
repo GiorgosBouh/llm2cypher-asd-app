@@ -27,17 +27,21 @@ def parse_csv(file_path):
     return df.dropna()
 
 def create_nodes(tx, df):
+    # Δημιουργία κόμβων ερωτήσεων συμπεριφοράς (A1-A10)
     for q in [f"A{i}" for i in range(1, 11)]:
         tx.run("MERGE (:BehaviorQuestion {name: $q})", q=q)
 
+    # Δημιουργία δημογραφικών κόμβων
     for column in ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]:
         for val in df[column].dropna().unique():
             tx.run("MERGE (:DemographicAttribute {type: $type, value: $val})", type=column, val=val)
 
+    # Δημιουργία κόμβων υποβληθέντων από
     for val in df["Who_completed_the_test"].dropna().unique():
         tx.run("MERGE (:SubmitterType {type: $val})", val=val)
 
 def create_relationships(tx, df):
+    # Προετοιμασία δεδομένων για μαζική εισαγωγή
     case_data = []
     answer_data, demo_data, submitter_data = [], [], []
 
@@ -46,33 +50,48 @@ def create_relationships(tx, df):
         upload_id = str(case_id)
         case_data.append({"id": case_id, "upload_id": upload_id})
 
+        # Σχέσεις απαντήσεων (HAS_ANSWER)
         for q in [f"A{i}" for i in range(1, 11)]:
             answer_data.append({"upload_id": upload_id, "q": q, "val": int(row[q])})
 
+        # Σχέσεις δημογραφικών (HAS_DEMOGRAPHIC)
         for col in ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]:
             demo_data.append({"upload_id": upload_id, "type": col, "val": row[col]})
 
+        # Σχέσεις υποβληθέντων από (SUBMITTED_BY)
         submitter_data.append({"upload_id": upload_id, "val": row["Who_completed_the_test"]})
 
-    tx.run("UNWIND $data as row MERGE (c:Case {id: row.id}) SET c.upload_id = row.upload_id, c.embedding = null", data=case_data)
+    # Μαζική εισαγωγή Cases
+    tx.run("""
+        UNWIND $data as row 
+        MERGE (c:Case {id: row.id}) 
+        SET c.upload_id = row.upload_id, c.embedding = null
+    """, data=case_data)
+
+    # Μαζική εισαγωγή HAS_ANSWER σχέσεων
     tx.run("""
         UNWIND $data as row
         MATCH (q:BehaviorQuestion {name: row.q})
         MATCH (c:Case {upload_id: row.upload_id})
         MERGE (c)-[:HAS_ANSWER {value: row.val}]->(q)
     """, data=answer_data)
+
+    # Μαζική εισαγωγή HAS_DEMOGRAPHIC σχέσεων
     tx.run("""
         UNWIND $data as row
         MATCH (d:DemographicAttribute {type: row.type, value: row.val})
         MATCH (c:Case {upload_id: row.upload_id})
         MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)
     """, data=demo_data)
+
+    # Μαζική εισαγωγή SUBMITTED_BY σχέσεων
     tx.run("""
         UNWIND $data as row
         MATCH (s:SubmitterType {type: row.val})
         MATCH (c:Case {upload_id: row.upload_id})
         MERGE (c)-[:SUBMITTED_BY]->(s)
     """, data=submitter_data)
+
 def create_similarity_relationships(tx, df, max_pairs=10000):
     pairs = set()
     
@@ -82,10 +101,9 @@ def create_similarity_relationships(tx, df, max_pairs=10000):
             if sum(row1[f'A{k}'] == row2[f'A{k}'] for k in range(1,11)) >= 7:
                 pairs.add((int(row1['Case_No']), int(row2['Case_No'])))
 
-    # 2. Δημογραφική ομοιότητα (διορθωμένο groupby)
+    # 2. Δημογραφική ομοιότητα
     demo_cols = ['Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD']
     for col in demo_cols:
-        # Σωστή χρήση groupby με ένα μόνο κριτήριο
         grouped = df.groupby(col)['Case_No'].apply(list)
         for case_list in grouped:
             for i in range(len(case_list)):
@@ -108,46 +126,59 @@ def generate_embeddings(driver):
     os.makedirs(temp_folder_path, exist_ok=True)
     G = nx.Graph()
     
-    # Επιτάχυνση φόρτωσης γραφήματος με single query
+    print("⏳ Φόρτωση γραφήματος από τη Neo4j...", flush=True)
+    
+    # Βελτιστοποιημένο query για φόρτωση γραφήματος
     with driver.session() as session:
         result = session.run("""
-            MATCH (c:Case)-[:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY|SIMILAR_TO]->(n)
-            RETURN toString(c.id) AS node_id, collect(DISTINCT toString(c.id)) + collect(DISTINCT toString(id(n))) AS all_nodes, collect(DISTINCT toString(id(n))) AS neighbors
+            MATCH (c:Case)
+            OPTIONAL MATCH (c)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY|SIMILAR_TO]->(n)
+            WITH c, collect(DISTINCT n) AS neighbors
+            RETURN toString(c.id) AS node_id, 
+                   [n IN neighbors WHERE n IS NOT NULL | toString(id(n))] AS neighbors
         """)
-        for record in result:
+        
+        records = list(result)  # Μετατροπή σε λίστα για επανάχρηση
+        total_edges = 0
+        
+        for record in records:
             node_id = record["node_id"]
             neighbors = record["neighbors"]
-            print(f"📌 Node {node_id} has neighbors: {neighbors}", flush=True)
-
+            
             G.add_node(node_id)
             for neighbor in neighbors:
                 if neighbor:
-                    G.add_node(str(neighbor))
-                    G.add_edge(node_id, str(neighbor))
-        for record in result:
-            node_id = str(record["node_id"])
-            G.add_node(node_id)
-            for neighbor in record["neighbors"]:
-                if neighbor:  # 🔥 Αποκλείει τα None
-                    G.add_node(str(neighbor))
-                    G.add_edge(node_id, str(neighbor))
+                    G.add_node(neighbor)
+                    G.add_edge(node_id, neighbor)
+                    total_edges += 1
+            
+            if len(records) <= 10:  # Debug print για μικρά γραφήματα
+                print(f"📌 Node {node_id} has {len(neighbors)} neighbors", flush=True)
 
-    # Έλεγχος γραφήματος
-    if len(G.nodes) < 10:  # Αύξηση ελάχιστου ορίου για καλύτερα embeddings
-        raise ValueError(f"❌ Not enough nodes ({len(G.nodes)}) for meaningful embeddings")
-
-    print(f"📊 Graph stats: {len(G.nodes)} nodes, {len(G.edges)} edges")
+    print(f"📊 Graph stats: {len(G.nodes)} nodes, {total_edges} edges (before cleaning)")
     
-    # Βελτιστοποιημένοι παράμετροι Node2Vec
+    # Καθαρισμός μη συνδεδεμένων κόμβων
+    isolated_nodes = list(nx.isolates(G))
+    if isolated_nodes:
+        print(f"⚠️ Removing {len(isolated_nodes)} isolated nodes", flush=True)
+        G.remove_nodes_from(isolated_nodes)
+
+    print(f"📊 Final graph stats: {len(G.nodes)} nodes, {len(G.edges)} edges")
+    
+    if len(G.nodes) < 10:
+        raise ValueError(f"❌ Not enough connected nodes ({len(G.nodes)}) for meaningful embeddings")
+
+    # Δημιουργία Node2Vec embeddings
+    print("⏳ Δημιουργία Node2Vec embeddings...", flush=True)
     node2vec = Node2Vec(
         G,
-        dimensions=128,       # Συνέπεια με το generate_case_embedding.py
-        walk_length=30,       # Αυξημένο για καλύτερη εξερεύνηση γραφήματος
-        num_walks=200,        # Περισσότερα walks για σταθερότερα αποτελέσματα
-        workers=4,            # Αξιοποίηση πολυπύρηνων επεξεργαστών
-        p=1.0,                # Παράμετρος p για BFS
-        q=0.5,                # Παράμετρος q για DFS
-        temp_folder=os.path.join(os.getcwd(), 'node2vec_temp')  # Προσωρινός φάκελος
+        dimensions=128,
+        walk_length=30,
+        num_walks=200,
+        workers=4,
+        p=1.0,
+        q=0.5,
+        temp_folder=temp_folder_path
     )
 
     try:
@@ -157,64 +188,81 @@ def generate_embeddings(driver):
             batch_words=128
         )
         
-        # Επιτάχυνση αποθήκευσης με batch query
+        print("⏳ Αποθήκευση embeddings στη Neo4j...", flush=True)
+        
+        # Μαζική ενημέρωση embeddings
         with driver.session() as session:
             batch = []
             for node_id in G.nodes():
-                embedding = model.wv[str(node_id)].tolist()
-                batch.append({"node_id": int(node_id), "embedding": embedding})
+                try:
+                    embedding = model.wv[str(node_id)].tolist()
+                    batch.append({"node_id": int(node_id), "embedding": embedding})
+                    
+                    if len(batch) >= 1000:
+                        session.run("""
+                            UNWIND $batch AS item
+                            MATCH (c:Case {id: item.node_id})
+                            SET c.embedding = item.embedding
+                        """, {"batch": batch})
+                        batch = []
                 
-                if len(batch) >= 1000:  # Batch ενημερώσεων
-                    session.run("""
-                        UNWIND $batch AS item
-                        MATCH (c:Case {id: item.node_id})
-                        SET c.embedding = item.embedding
-                    """, {"batch": batch})
-                    batch = []
+                except KeyError:
+                    print(f"⚠️ No embedding for node {node_id}", flush=True)
+                    continue
             
-            if batch:  # Τελευταίο batch
+            if batch:
                 session.run("""
                     UNWIND $batch AS item
                     MATCH (c:Case {id: item.node_id})
                     SET c.embedding = item.embedding
                 """, {"batch": batch})
 
-        print(f"✅ Successfully saved embeddings for {len(G.nodes)} nodes")
+        print(f"✅ Επιτυχής αποθήκευση embeddings για {len(G.nodes)} κόμβους", flush=True)
         return True
 
     except Exception as e:
-        print(f"❌ Failed to generate embeddings: {str(e)}")
+        print(f"❌ Σφάλμα δημιουργίας embeddings: {str(e)}", flush=True)
+        traceback.print_exc()
         return False
+    finally:
+        # Καθαρισμός προσωρινών αρχείων
+        if os.path.exists(temp_folder_path):
+            shutil.rmtree(temp_folder_path)
 
 def build_graph():
     driver = connect_to_neo4j()
     file_path = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
 
     try:
+        # Φόρτωση και προετοιμασία δεδομένων
+        print("⏳ Φόρτωση και καθαρισμός δεδομένων...", flush=True)
         df = parse_csv(file_path)
-        print("🧠 First row:", df.iloc[0].to_dict(), flush=True)
+        print("🧠 Δείγμα δεδομένων:", df.iloc[0].to_dict(), flush=True)
 
+        # Δημιουργία γράφου στη Neo4j
         with driver.session() as session:
-            print("🧹 Διαγραφή όλων των κόμβων και σχέσεων...", flush=True)
+            print("🧹 Διαγραφή παλιού γράφου...", flush=True)
             session.run("MATCH (n) DETACH DELETE n")
 
-            print("⏳ Δημιουργία κόμβων...", flush=True)
+            print("⏳ Δημιουργία νέων κόμβων...", flush=True)
             session.execute_write(create_nodes, df)
 
-            print("⏳ Δημιουργία σχέσεων...", flush=True)
+            print("⏳ Δημιουργία βασικών σχέσεων...", flush=True)
             session.execute_write(create_relationships, df)
 
             print("⏳ Δημιουργία σχέσεων ομοιότητας...", flush=True)
             session.execute_write(create_similarity_relationships, df)
 
-        print("⏳ Δημιουργία embeddings...", flush=True)
-        generate_embeddings(driver)
+        # Δημιουργία και αποθήκευση embeddings
+        print("⏳ Δημιουργία graph embeddings...", flush=True)
+        if not generate_embeddings(driver):
+            raise RuntimeError("Failed to generate embeddings")
 
-        print("✅ Ολοκληρώθηκε επιτυχώς!", flush=True)
+        print("✅ Ολοκληρώθηκε επιτυχώς η δημιουργία γράφου!", flush=True)
         sys.exit(0)
 
     except Exception as e:
-        print(f"❌ Σφάλμα: {str(e)}", flush=True)
+        print(f"❌ Κρίσιμο σφάλμα: {str(e)}", flush=True)
         traceback.print_exc()
         sys.exit(1)
 
