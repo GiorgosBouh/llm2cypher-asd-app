@@ -773,7 +773,7 @@ def main():
                     st.error("❌ Failed to run kg_builder_2.py")
                     st.code(result.stderr)
 
- 
+
 
     with tab3:
         st.header("📄 Upload New Case")
