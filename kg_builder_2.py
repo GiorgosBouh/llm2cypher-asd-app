@@ -23,7 +23,7 @@ def parse_csv(file_path):
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col].astype(str).str.replace(",", "."), errors='coerce')
 
-    print("✅ Καθαρίστηκαν οι στήλες:", df.columns.tolist(), flush=True)
+    print("✅ Καθαριστηκαν οι στήλες:", df.columns.tolist(), flush=True)
     return df.dropna()
 
 def create_nodes(tx, df):
