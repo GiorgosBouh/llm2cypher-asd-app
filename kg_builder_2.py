@@ -1,3 +1,4 @@
+print("=== RUNNING kg_builder_2.py from Git repo ===", flush=True)
 import pandas as pd
 import numpy as np
 from neo4j import GraphDatabase
