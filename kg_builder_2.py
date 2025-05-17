@@ -128,48 +128,40 @@ def generate_embeddings(driver):
     
     print("⏳ Φόρτωση γραφήματος από τη Neo4j...", flush=True)
     
-    # Βελτιστοποιημένο query για φόρτωση γραφήματος
+    # Βελτιστοποιημένο query που εγγυάται τη φόρτωση όλων των σχέσεων
     with driver.session() as session:
-        result = session.run("""
-            MATCH (c:Case)
-            OPTIONAL MATCH (c)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY|SIMILAR_TO]->(n)
-            WITH c, collect(DISTINCT n) AS neighbors
-            RETURN toString(c.id) AS node_id, 
-                   [n IN neighbors WHERE n IS NOT NULL | toString(id(n))] AS neighbors
+        # Πρώτα φορτώνουμε όλους τους κόμβους Case
+        case_nodes = session.run("MATCH (c:Case) RETURN toString(c.id) AS node_id")
+        for record in case_nodes:
+            G.add_node(record["node_id"])
+        
+        # Έπειτα φορτώνουμε όλες τις σχέσεις
+        relationships = session.run("""
+            MATCH (c:Case)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY|SIMILAR_TO]->(n)
+            RETURN toString(c.id) AS source, 
+                   toString(id(n)) AS target,
+                   type(r) AS relationship_type
         """)
         
-        records = list(result)  # Μετατροπή σε λίστα για επανάχρηση
-        total_edges = 0
+        rel_count = 0
+        for record in relationships:
+            source = record["source"]
+            target = record["target"]
+            if source and target:  # Ασφαλής έλεγχος
+                G.add_node(source)
+                G.add_node(target)
+                G.add_edge(source, target)
+                rel_count += 1
         
-        for record in records:
-            node_id = record["node_id"]
-            neighbors = record["neighbors"]
-            
-            G.add_node(node_id)
-            for neighbor in neighbors:
-                if neighbor:
-                    G.add_node(neighbor)
-                    G.add_edge(node_id, neighbor)
-                    total_edges += 1
-            
-            if len(records) <= 10:  # Debug print για μικρά γραφήματα
-                print(f"📌 Node {node_id} has {len(neighbors)} neighbors", flush=True)
-
-    print(f"📊 Graph stats: {len(G.nodes)} nodes, {total_edges} edges (before cleaning)")
+        print(f"📊 Φορτώθηκαν {rel_count} σχέσεις από τη βάση", flush=True)
     
-    # Καθαρισμός μη συνδεδεμένων κόμβων
-    isolated_nodes = list(nx.isolates(G))
-    if isolated_nodes:
-        print(f"⚠️ Removing {len(isolated_nodes)} isolated nodes", flush=True)
-        G.remove_nodes_from(isolated_nodes)
-
-    print(f"📊 Final graph stats: {len(G.nodes)} nodes, {len(G.edges)} edges")
+    print(f"📊 Τελικά στατιστικά γράφου: {len(G.nodes)} κόμβοι, {len(G.edges)} ακμές", flush=True)
     
-    if len(G.nodes) < 10:
-        raise ValueError(f"❌ Not enough connected nodes ({len(G.nodes)}) for meaningful embeddings")
-
+    if len(G.edges) == 0:
+        raise ValueError("❌ Ο γράφος δεν έχει ακμές! Έλεγξε τις σχέσεις στη Neo4j.")
+    
     # Δημιουργία Node2Vec embeddings
-    print("⏳ Δημιουργία Node2Vec embeddings...", flush=True)
+    print("⏳ Προετοιμασία για Node2Vec...", flush=True)
     node2vec = Node2Vec(
         G,
         dimensions=128,
@@ -182,15 +174,14 @@ def generate_embeddings(driver):
     )
 
     try:
+        print("⏳ Εκπαίδευση μοντέλου...", flush=True)
         model = node2vec.fit(
             window=10,
             min_count=1,
             batch_words=128
         )
         
-        print("⏳ Αποθήκευση embeddings στη Neo4j...", flush=True)
-        
-        # Μαζική ενημέρωση embeddings
+        print("⏳ Αποθήκευση embeddings...", flush=True)
         with driver.session() as session:
             batch = []
             for node_id in G.nodes():
@@ -217,15 +208,14 @@ def generate_embeddings(driver):
                     SET c.embedding = item.embedding
                 """, {"batch": batch})
 
-        print(f"✅ Επιτυχής αποθήκευση embeddings για {len(G.nodes)} κόμβους", flush=True)
+        print(f"✅ Αποθηκεύτηκαν embeddings για {len(G.nodes)} κόμβους", flush=True)
         return True
 
     except Exception as e:
-        print(f"❌ Σφάλμα δημιουργίας embeddings: {str(e)}", flush=True)
+        print(f"❌ Σφάλμα: {str(e)}", flush=True)
         traceback.print_exc()
         return False
     finally:
-        # Καθαρισμός προσωρινών αρχείων
         if os.path.exists(temp_folder_path):
             shutil.rmtree(temp_folder_path)
 
