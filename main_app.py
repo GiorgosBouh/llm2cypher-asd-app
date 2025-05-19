@@ -645,7 +645,9 @@ by Dr. Bouchouras under the supervision of Dr. Kotis.
 ---
 ### 🧪 What This App Does
 
-This interactive app allows you to:
+This interactive application functions as a GraphRAG-powered intelligent agent designed for the early 
+detection of Autism Spectrum Disorder traits in toddlers. It integrates a Neo4j knowledge graph, 
+machine learning, and natural language interfaces powered by GPT-4. The app allows you to:
 
 - 🧠 Train a machine learning model to detect ASD traits using graph embeddings.
 - 📤 Upload your own toddler screening data from the Q-Chat-10 questionnaire and other demographics.
