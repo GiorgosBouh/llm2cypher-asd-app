@@ -10,9 +10,8 @@ import sys
 import os
 import shutil
 import logging
-import tempfile  # This was the missing import
+import tempfile
 from typing import Dict, List, Tuple
-
 
 # Configure logging
 logging.basicConfig(
@@ -276,13 +275,21 @@ class GraphBuilder:
         case_nodes = [n for n in G.nodes if G.nodes[n].get('type') == 'Case']
         logger.info("🔍 Generating embeddings for %d Case nodes", len(case_nodes))
         
-        return Node2Vec(
+        # Initialize Node2Vec with the correct parameters
+        node2vec = Node2Vec(
             G,
             dimensions=self.EMBEDDING_DIM,
+            walk_length=self.NODE2VEC_PARAMS['walk_length'],
+            num_walks=self.NODE2VEC_PARAMS['num_walks'],
+            p=self.NODE2VEC_PARAMS['p'],
+            q=self.NODE2VEC_PARAMS['q'],
+            workers=self.NODE2VEC_PARAMS['workers'],
             temp_folder=temp_dir,
-            quiet=True,
-            **self.NODE2VEC_PARAMS
-        ).fit(
+            quiet=True
+        )
+        
+        # Fit the model with the remaining parameters
+        return node2vec.fit(
             window=self.NODE2VEC_PARAMS['window'],
             min_count=self.NODE2VEC_PARAMS['min_count'],
             batch_words=self.NODE2VEC_PARAMS['batch_words']
