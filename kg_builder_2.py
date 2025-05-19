@@ -10,7 +10,9 @@ import sys
 import os
 import shutil
 import logging
+import tempfile  # This was the missing import
 from typing import Dict, List, Tuple
+
 
 # Configure logging
 logging.basicConfig(
