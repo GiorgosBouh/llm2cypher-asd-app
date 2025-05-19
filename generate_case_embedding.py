@@ -5,9 +5,10 @@ from neo4j import GraphDatabase
 import sys
 import os
 import time
-import tempfile  # <-- Missing import added here
+import tempfile
 import logging
 from typing import List, Optional
+import shutil  # Make sure this is imported
 
 # Configure logging
 logging.basicConfig(
@@ -18,11 +19,21 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingGenerator:
     def __init__(self):
+        # Make these parameters consistent with main app
         self.EMBEDDING_DIM = 128
         self.MIN_CONNECTIONS = 3
         self.MAX_RETRIES = 3
         self.MIN_SIMILARITY = 5  # Minimum shared answers for similarity
         self.EMBEDDING_NORMALIZATION = True
+        
+        # Add Node2Vec parameters to match kg_builder
+        self.NODE2VEC_WALK_LENGTH = 30
+        self.NODE2VEC_NUM_WALKS = 100
+        self.NODE2VEC_P = 1.0
+        self.NODE2VEC_Q = 0.5
+        self.NODE2VEC_WORKERS = 4
+        self.NODE2VEC_WINDOW = 5
+        self.NODE2VEC_BATCH_WORDS = 1000
 
     def get_driver(self):
         """Create a Neo4j driver with robust settings"""
@@ -58,44 +69,54 @@ class EmbeddingGenerator:
     def build_base_graph(self, driver, upload_id: str) -> Optional[tuple]:
         """Construct the initial graph structure"""
         with driver.session() as session:
+            # Enhanced query to get more relevant connections
             result = session.run("""
                 MATCH (c:Case {upload_id: $upload_id})
-                OPTIONAL MATCH (c)-[r]->(neighbor)
-                WHERE neighbor.id IS NOT NULL
+                OPTIONAL MATCH (c)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY]->(neighbor)
+                WHERE neighbor.id IS NOT NULL OR neighbor:BehaviorQuestion OR neighbor:DemographicAttribute
                 RETURN c.id AS case_id, 
-                       collect(DISTINCT neighbor.id) AS neighbors
+                       collect(DISTINCT CASE 
+                           WHEN neighbor:Case THEN neighbor.id 
+                           ELSE id(neighbor) 
+                       END) AS neighbors
             """, upload_id=upload_id).single()
 
             if not result or not result["case_id"]:
                 logger.error("Case not found or missing ID")
                 return None
 
-            case_id = str(result["case_id"])
+            case_id = f"Case_{result['case_id']}"  # Consistent with kg_builder format
             G = nx.Graph()
             G.add_node(case_id)
             
             # Add initial connections with validation
             for neighbor in result["neighbors"]:
                 if neighbor:
-                    G.add_edge(case_id, str(neighbor))
+                    neighbor_id = f"Case_{neighbor}" if isinstance(neighbor, int) else str(neighbor)
+                    G.add_edge(case_id, neighbor_id)
             
             return G, case_id
 
     def augment_with_similarity(self, driver, G: nx.Graph, case_id: str) -> None:
         """Enhance graph with similarity-based connections"""
+        original_case_id = int(case_id.split('_')[1])  # Extract numeric ID from "Case_123"
+        
         with driver.session() as session:
+            # More comprehensive similarity query
             similar = session.run("""
                 MATCH (c:Case {id: $case_id})-[:HAS_ANSWER]->(q)<-[:HAS_ANSWER]-(similar:Case)
-                WHERE c <> similar
+                WHERE c <> similar AND similar.embedding IS NOT NULL
                 WITH similar, count(q) AS shared_answers
                 WHERE shared_answers >= $min_similarity
-                RETURN similar.id 
+                RETURN similar.id, shared_answers
                 ORDER BY shared_answers DESC 
                 LIMIT 20
-            """, case_id=int(case_id), min_similarity=self.MIN_SIMILARITY)
+            """, case_id=original_case_id, min_similarity=self.MIN_SIMILARITY)
 
             for record in similar:
-                G.add_edge(case_id, str(record["similar.id"]))
+                similar_id = f"Case_{record['similar.id']}"
+                weight = record['shared_answers'] / 10.0  # Normalize weight to 0-2 range
+                G.add_edge(case_id, similar_id, weight=weight)
 
     def generate_embedding(self, G: nx.Graph, case_id: str) -> Optional[List[float]]:
         """Generate node2vec embedding with validation"""
@@ -105,18 +126,20 @@ class EmbeddingGenerator:
             
             node2vec = Node2Vec(
                 G,
-                dimensions=128,
-                walk_length=30,
-                num_walks=100,
-                workers=4,
+                dimensions=self.EMBEDDING_DIM,
+                walk_length=self.NODE2VEC_WALK_LENGTH,
+                num_walks=self.NODE2VEC_NUM_WALKS,
+                workers=self.NODE2VEC_WORKERS,
+                p=self.NODE2VEC_P,
+                q=self.NODE2VEC_Q,
                 quiet=True,
                 temp_folder=temp_dir
             )
             
             model = node2vec.fit(
-                window=5,
+                window=self.NODE2VEC_WINDOW,
                 min_count=1,
-                batch_words=1000
+                batch_words=self.NODE2VEC_BATCH_WORDS
             )
             
             embedding = model.wv[case_id].tolist()
@@ -144,7 +167,7 @@ class EmbeddingGenerator:
                 result = session.run("""
                     MATCH (c:Case {upload_id: $upload_id})
                     SET c.embedding = $embedding,
-                        c.embedding_version = 2.0,
+                        c.embedding_version = 2.1,  # Updated version
                         c.last_embedding_update = timestamp()
                     RETURN count(c) AS updated
                 """, upload_id=upload_id, embedding=embedding).single()
@@ -165,25 +188,30 @@ class EmbeddingGenerator:
                     # Step 1: Build base graph
                     graph_result = self.build_base_graph(driver, upload_id)
                     if not graph_result:
+                        logger.error("Failed to build base graph")
                         return False
                         
                     G, case_id = graph_result
                     
                     # Step 2: Augment with similarity if needed
                     if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
+                        logger.info(f"Initial connections low ({len(G.edges(case_id))}), augmenting...")
                         self.augment_with_similarity(driver, G, case_id)
                         
                         if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
-                            logger.warning(f"Insufficient connections ({len(G.edges(case_id))})")
+                            logger.warning(f"Insufficient connections ({len(G.edges(case_id))}) after augmentation")
                             return False
 
                     # Step 3: Generate embedding
+                    logger.info(f"Generating embedding for {case_id} with {len(G.nodes)} nodes and {len(G.edges)} edges")
                     embedding = self.generate_embedding(G, case_id)
                     if not embedding:
+                        logger.error("Embedding generation returned None")
                         return False
                         
                     # Step 4: Store embedding
                     if not self.store_embedding(driver, upload_id, embedding):
+                        logger.error("Failed to store embedding in Neo4j")
                         return False
                         
                     logger.info(f"Successfully generated embedding for case {case_id}")
@@ -210,8 +238,10 @@ if __name__ == "__main__":
             raise ValueError("Missing upload_id parameter")
         
         upload_id = sys.argv[1]
+        logger.info(f"Starting embedding generation for upload_id: {upload_id}")
         generator = EmbeddingGenerator()
         success = generator.generate_embedding_for_case(upload_id)
+        logger.info(f"Embedding generation {'succeeded' if success else 'failed'}")
         sys.exit(0 if success else 1)
         
     except Exception as e:
