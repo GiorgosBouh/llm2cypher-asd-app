@@ -527,12 +527,16 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             stratify=y,
             random_state=Config.RANDOM_STATE
         )
-
+        neg = sum(y_train == 0)
+        pos = sum(y_train == 1)
+        scale_pos_weight = neg / pos if pos != 0 else 1
         model = XGBClassifier(
             n_estimators=Config.N_ESTIMATORS,
             use_label_encoder=False,
             eval_metric='logloss',
             random_state=Config.RANDOM_STATE
+            scale_pos_weight=scale_pos_weight
+
         )
         model.fit(X_train, y_train)
 
