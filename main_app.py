@@ -5,14 +5,14 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_val_predict
 from sklearn.metrics import (
     roc_auc_score, roc_curve, precision_recall_curve,
     average_precision_score, classification_report, 
     precision_score, recall_score, f1_score, confusion_matrix
 )
 from imblearn.over_sampling import SMOTE
-from sklearn.pipeline import Pipeline  # Αντικατάσταση του imblearn.pipeline
+from imblearn.pipeline import make_pipeline as make_imb_pipeline
 from collections import Counter
 import uuid
 import numpy as np
@@ -32,12 +32,8 @@ from sklearn.inspection import permutation_importance
 import subprocess
 import sys
 from sklearn.impute import SimpleImputer
-import subprocess
-import uuid
 from xgboost import XGBClassifier
-from imblearn.pipeline import make_pipeline
-import pandas as pd
-
+from imblearn.pipeline import Pipeline as ImbPipeline
 
 def call_embedding_generator(upload_id: str) -> bool:
     """Generate embedding for a single case using subprocess with enhanced error handling"""
@@ -102,6 +98,7 @@ class Config:
     MAX_RELATIONSHIPS = 100000
     EMBEDDING_GENERATION_TIMEOUT = 300
     LEAKAGE_CHECK = True
+    SMOTE_K_NEIGHBORS = 5  # Added SMOTE configuration
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -390,9 +387,6 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
             st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
             return
 
-        #if len(X) != len(df):
-            #st.warning("⚠️ Μήκος X και CSV δεν ταιριάζουν — προσπαθώ best effort")
-
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
         df = df[features]
         df = pd.get_dummies(df, drop_first=True)
@@ -486,16 +480,6 @@ def evaluate_model(model, X_test, y_test):
     ax.set_ylabel('Actual')
     st.pyplot(fig)
 
-    #st.subheader("🔍 Feature Importance (Gini)")
-    #try:
-    #    importances = pd.Series(
-    #        model.named_steps['classifier'].feature_importances_,
-    #        index=[f"Dim_{i}" for i in range(X_test.shape[1])]
-    #    ).sort_values(ascending=False)
-    #    st.bar_chart(importances.head(15))
-    #except Exception as e:
-    #    st.warning(f"Could not plot feature importance: {str(e)}")
-
     st.subheader("📈 Performance Curves")
     plot_combined_curves(y_test, y_proba)
 
@@ -520,30 +504,61 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             st.error("⚠️ No valid training data available")
             return None
 
-        # Χρήση αυθεντικών δεδομένων χωρίς SMOTE
+        # Split data before any processing to prevent leakage
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
             test_size=Config.TEST_SIZE,
             stratify=y,
             random_state=Config.RANDOM_STATE
         )
+
+        # Calculate class weights
         neg = sum(y_train == 0)
         pos = sum(y_train == 1)
         scale_pos_weight = neg / pos if pos != 0 else 1
-        model = XGBClassifier(
-            n_estimators=Config.N_ESTIMATORS,
-            use_label_encoder=False,
-            eval_metric='logloss',
-            random_state=Config.RANDOM_STATE,
-            scale_pos_weight=scale_pos_weight
 
-        )
-        model.fit(X_train, y_train)
+        # Create SMOTE + XGBoost pipeline with cross-validation
+        pipeline = ImbPipeline([
+            ('smote', SMOTE(
+                sampling_strategy='auto',
+                k_neighbors=min(Config.SMOTE_K_NEIGHBORS, pos - 1),  # Ensure we don't exceed available neighbors
+                random_state=Config.RANDOM_STATE
+            )),
+            ('xgb', XGBClassifier(
+                n_estimators=Config.N_ESTIMATORS,
+                use_label_encoder=False,
+                eval_metric='logloss',
+                random_state=Config.RANDOM_STATE,
+                scale_pos_weight=scale_pos_weight
+            ))
+        ])
+
+        # First get cross-validated predictions to evaluate SMOTE
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.RANDOM_STATE)
+        y_proba = cross_val_predict(
+            pipeline, X_train, y_train,
+            cv=cv,
+            method='predict_proba',
+            n_jobs=-1
+        )[:, 1]
+
+        # Now train on full training set
+        pipeline.fit(X_train, y_train)
+
+        # Evaluate on test set
+        test_proba = pipeline.predict_proba(X_test)[:, 1]
+        test_pred = pipeline.predict(X_test)
+
+        st.subheader("📊 Cross-Validation Results (Training Set)")
+        st.write(f"Mean CV ROC AUC: {roc_auc_score(y_train, y_proba):.3f}")
+        
+        st.subheader("📊 Test Set Results")
+        st.write(f"Test ROC AUC: {roc_auc_score(y_test, test_proba):.3f}")
 
         reinsert_labels_from_csv(csv_url)
 
         return {
-            "model": model,
+            "model": pipeline,
             "X_test": X_test,
             "y_test": y_test
         }
@@ -552,6 +567,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         st.error(f"❌ Error training model: {e}")
         logger.error(f"Training error: {e}", exc_info=True)
         return None
+
 # === Anomaly Detection ===
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
@@ -606,7 +622,7 @@ def reinsert_labels_from_csv(csv_url: str):
                     MERGE (c)-[:SCREENED_FOR]->(t)
                 """, case_id=case_id, label=label.capitalize())
 
- #=== Streamlit UI ===
+# === Streamlit UI ===
 def main():
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
@@ -669,28 +685,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
     with tab1:
         st.header("🤖 ASD Detection Model")
-
-        #if st.button("🔁 Full Graph Rebuild + Train Model"):
-        #    with st.spinner("Rebuilding graph and generating embeddings...this will take 3-5 minutes"):
-        #        result = subprocess.run(
-        #            [sys.executable, "kg_builder_2.py"],
-        #            capture_output=True,
-        #            text=True
-        #        )
-        #        if result.returncode == 0:
-        #            st.success("✅ Embeddings generated!")
-        #            results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
-        #            if results:
-        #                st.session_state.model_results = results
-        #                st.session_state.model_trained = True
-        #               evaluate_model(
-        #                    results["model"],
-        #                    results["X_test"],
-        #                    results["y_test"]
-        #                )
-        #        else:
-        #            st.error("❌ Failed to rebuild graph")
-        #            st.code(result.stderr)
 
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):

@@ -105,10 +105,10 @@ class EmbeddingGenerator:
             
             node2vec = Node2Vec(
                 G,
-                dimensions=self.EMBEDDING_DIM,
-                walk_length=20,
+                dimensions=128,
+                walk_length=30,
                 num_walks=100,
-                workers=2,
+                workers=4,
                 quiet=True,
                 temp_folder=temp_dir
             )
