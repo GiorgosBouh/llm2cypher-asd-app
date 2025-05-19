@@ -534,7 +534,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             n_estimators=Config.N_ESTIMATORS,
             use_label_encoder=False,
             eval_metric='logloss',
-            random_state=Config.RANDOM_STATE
+            random_state=Config.RANDOM_STATE,
             scale_pos_weight=scale_pos_weight
 
         )
