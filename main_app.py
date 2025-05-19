@@ -508,8 +508,6 @@ def evaluate_model(model, X_test, y_test):
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
-    from sklearn.pipeline import Pipeline  # Χρήση sklearn pipeline αντί για imblearn
-    
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
         remove_screened_for_labels()
@@ -517,19 +515,16 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         X_raw, y = extract_training_data_from_csv(csv_url)
         X = X_raw.copy()
         X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
-        
+
         if X.empty or y.empty:
             st.error("⚠️ No valid training data available")
             return None
 
-        # Χρήση SMOTE ως ξεχωριστό βήμα (δεν είναι μέσα στο Pipeline)
-        smote = SMOTE(random_state=Config.RANDOM_STATE)
-        X_res, y_res = smote.fit_resample(X, y)
-
+        # Χρήση αυθεντικών δεδομένων χωρίς SMOTE
         X_train, X_test, y_train, y_test = train_test_split(
-            X_res, y_res,
+            X, y,
             test_size=Config.TEST_SIZE,
-            stratify=y_res,
+            stratify=y,
             random_state=Config.RANDOM_STATE
         )
 
@@ -544,7 +539,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         reinsert_labels_from_csv(csv_url)
 
         return {
-            "model": model,  # Απλός εκτιμητής τώρα (όχι Pipeline)
+            "model": model,
             "X_test": X_test,
             "y_test": y_test
         }
