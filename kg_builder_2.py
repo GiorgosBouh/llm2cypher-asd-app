@@ -1,4 +1,3 @@
-print("=== RUNNING kg_builder_2.py from Git repo ===", flush=True)
 import pandas as pd
 import numpy as np
 from neo4j import GraphDatabase
@@ -17,9 +16,7 @@ from typing import Dict, List, Tuple
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
 
@@ -158,6 +155,39 @@ class GraphBuilder:
             MATCH (c:Case {upload_id: row.upload_id})
             MERGE (c)-[:SUBMITTED_BY]->(s)
         """, data=submitter_data)
+
+    def create_asd_trait_nodes_and_relationships(self, tx, df: pd.DataFrame) -> None:
+        """
+        Create ASD_Trait nodes (labels: Yes or No) and 
+        create SCREENED_FOR relationships from Case nodes to ASD_Trait nodes.
+        Also validate consistency between CSV and graph.
+        """
+        # First, create (or merge) ASD_Trait nodes 'Yes' and 'No'
+        tx.run("MERGE (:ASD_Trait {label: 'Yes'})")
+        tx.run("MERGE (:ASD_Trait {label: 'No'})")
+
+        # Collect all cases with their labels from CSV
+        csv_labels = df.set_index("Case_No")["Class_ASD_Traits"].str.strip().str.lower()
+
+        # Fetch existing Case nodes in Neo4j and check if SCREENED_FOR relationship exists
+        existing_cases = {record["id"]: record["label"].lower() if record["label"] else None for record in
+                          tx.run("""
+                          MATCH (c:Case)
+                          OPTIONAL MATCH (c)-[:SCREENED_FOR]->(t:ASD_Trait)
+                          RETURN c.id AS id, t.label AS label
+                          """)}
+
+        for case_no, csv_label in csv_labels.items():
+            graph_label = existing_cases.get(case_no)
+            if graph_label != csv_label:
+                logger.warning(f"⚠️ Case_No {case_no} έχει ετικέτα '{csv_label}' στο CSV, αλλά έχει '{graph_label}' στον γράφο.")
+            # Create or update relationship to ASD_Trait node
+            tx.run("""
+                MATCH (c:Case {id: $case_no})
+                MATCH (t:ASD_Trait {label: $label})
+                MERGE (c)-[r:SCREENED_FOR]->(t)
+                SET r.timestamp = timestamp()
+            """, case_no=case_no, label=csv_label.capitalize())
 
     def create_similarity_relationships(self, tx, df: pd.DataFrame) -> None:
         """Create similarity relationships between cases"""
@@ -361,6 +391,9 @@ class GraphBuilder:
                 
                 logger.info("⏳ Creating basic relationships...")
                 session.execute_write(self.create_relationships, df)
+                
+                logger.info("⏳ Creating ASD Trait nodes and relationships...")
+                session.execute_write(self.create_asd_trait_nodes_and_relationships, df)
                 
                 logger.info("⏳ Creating similarity relationships...")
                 session.execute_write(self.create_similarity_relationships, df)
