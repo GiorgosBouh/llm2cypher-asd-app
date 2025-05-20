@@ -38,7 +38,6 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 def call_embedding_generator(upload_id: str) -> bool:
     """Generate embedding for a single case using subprocess with enhanced error handling"""
     try:
-        # Get the absolute path to the script
         script_dir = os.path.dirname(os.path.abspath(__file__))
         builder_path = os.path.join(script_dir, "generate_case_embedding.py")
         
@@ -52,7 +51,7 @@ def call_embedding_generator(upload_id: str) -> bool:
             "NEO4J_URI": os.getenv("NEO4J_URI"),
             "NEO4J_USER": os.getenv("NEO4J_USER"),
             "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD"),
-            "PYTHONPATH": os.path.dirname(script_dir)  # Add project root to PYTHONPATH
+            "PYTHONPATH": os.path.dirname(script_dir)
         })
 
         # Run the process with timeout
@@ -80,7 +79,7 @@ def call_embedding_generator(upload_id: str) -> bool:
         st.error(f"❌ Fatal error calling embedding script: {str(e)}")
         logger.exception(f"Fatal error generating embedding for {upload_id}")
         return False
-
+        
 # === Configuration ===
 class Config:
     EMBEDDING_DIM = 128

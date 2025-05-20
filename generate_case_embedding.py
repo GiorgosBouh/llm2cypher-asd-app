@@ -119,9 +119,8 @@ class EmbeddingGenerator:
                 G.add_edge(case_id, similar_id, weight=weight)
 
     def generate_embedding(self, G: nx.Graph, case_id: str) -> Optional[List[float]]:
-        """Generate node2vec embedding with validation"""
+        temp_dir = None
         try:
-            # Create temp directory safely
             temp_dir = tempfile.mkdtemp()
             
             node2vec = Node2Vec(
@@ -144,12 +143,6 @@ class EmbeddingGenerator:
             
             embedding = model.wv[case_id].tolist()
             
-            # Clean up temp directory
-            try:
-                shutil.rmtree(temp_dir)
-            except Exception as e:
-                logger.warning(f"Could not remove temp directory: {str(e)}")
-            
             if not self.validate_embedding(embedding):
                 logger.error("Generated invalid embedding")
                 return None
@@ -159,6 +152,12 @@ class EmbeddingGenerator:
         except Exception as e:
             logger.error(f"Embedding generation failed: {str(e)}")
             return None
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                try:
+                    shutil.rmtree(temp_dir)
+                except Exception as e:
+                    logger.warning(f"Could not remove temp directory: {str(e)}")
 
     def store_embedding(self, driver, upload_id: str, embedding: List[float]) -> bool:
         """Safely store embedding in Neo4j"""
@@ -167,7 +166,7 @@ class EmbeddingGenerator:
                 result = session.run("""
                     MATCH (c:Case {upload_id: $upload_id})
                     SET c.embedding = $embedding,
-                        c.embedding_version = 2.1,  # Updated version
+                        c.embedding_version = 2.1,
                         c.last_embedding_update = timestamp()
                     RETURN count(c) AS updated
                 """, upload_id=upload_id, embedding=embedding).single()
