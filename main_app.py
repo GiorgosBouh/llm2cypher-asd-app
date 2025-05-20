@@ -323,12 +323,99 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
 
 # === Training Data Preparation ===
 @safe_neo4j_operation
+def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
+    """
+    Ελέγχει αν οι ετικέτες Class_ASD_Traits στο CSV συμφωνούν με τις ετικέτες SCREENED_FOR
+    στον Neo4j γράφο για τα ίδια Case_No. Διακόπτει εκτέλεση αν βρεθούν ασυμφωνίες.
+    """
+    inconsistent_cases = []
+    with neo4j_service.session() as session:
+        for _, row in df.iterrows():
+            case_id = int(row["Case_No"])
+            csv_label = str(row["Class_ASD_Traits"]).strip().lower()
+            # Query στο γράφο για την ετικέτα
+            record = session.run("""
+                MATCH (c:Case {id: $case_id})-[:SCREENED_FOR]->(t:ASD_Trait)
+                RETURN toLower(t.value) AS graph_label
+            """, case_id=case_id).single()
+
+            graph_label = record["graph_label"] if record else None
+
+            if graph_label is None:
+                # Αν λείπει ετικέτα στο γράφο, προειδοποίησε αλλά μη διακόψεις
+                st.warning(f"⚠️ Case_No {case_id} έχει ετικέτα '{csv_label}' στο CSV, αλλά δεν έχει ετικέτα στον γράφο.")
+            elif graph_label != csv_label:
+                inconsistent_cases.append((case_id, csv_label, graph_label))
+
+    if inconsistent_cases:
+        st.error("❌ Βρέθηκαν ασυμφωνίες μεταξύ CSV και Neo4j ετικετών (Class_ASD_Traits vs SCREENED_FOR):")
+        for case_id, csv_label, graph_label in inconsistent_cases:
+            st.error(f"- Case_No {case_id}: CSV='{csv_label}' | Neo4j='{graph_label}'")
+        st.stop()  # Διακοπή εκτέλεσης ώστε να μην γίνει εκπαίδευση με ασυνεπή δεδομένα
+
+@safe_neo4j_operation
+def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
+    try:
+        df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
+        df.columns = [col.strip().replace('\r', '') for col in df.columns]
+        df.columns = [col.strip() for col in df.columns]
+
+        # Έλεγχος συνέπειας ετικετών CSV με γράφο
+        check_label_consistency(df, neo4j_service)
+
+        required_cols = ["Case_No", "Class_ASD_Traits"]
+        missing = [col for col in required_cols if col not in df.columns]
+        if missing:
+            st.error(f"❌ Missing required columns: {', '.join(missing)}")
+            st.write("📋 Found columns in CSV:", df.columns.tolist())
+            return pd.DataFrame(), pd.Series()
+
+        numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        embeddings = []
+        valid_ids = []
+        with neo4j_service.session() as session:
+            for case_no in df["Case_No"]:
+                result = session.run("""
+                    MATCH (c:Case {id: $id})
+                    WHERE c.embedding IS NOT NULL
+                    RETURN c.embedding AS embedding
+                """, id=int(case_no))
+                record = result.single()
+                if record and record["embedding"]:
+                    embeddings.append(record["embedding"])
+                    valid_ids.append(case_no)
+
+        df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
+        y = df_filtered["Class_ASD_Traits"].apply(
+            lambda x: 1 if str(x).strip().lower() == "yes" else 0
+        )
+
+        assert len(embeddings) == len(y), f"⚠️ Embeddings: {len(embeddings)}, Labels: {len(y)}"
+
+        X = pd.DataFrame(embeddings[:len(y)])
+
+        if X.isna().any().any():
+            st.warning(f"⚠️ Found {X.isna().sum().sum()} NaN values in embeddings - applying imputation")
+            X = X.fillna(X.mean())
+
+        return X, y
+
+    except Exception as e:
+        st.error(f"Data extraction failed: {str(e)}")
+        return pd.DataFrame(), pd.Series()
+        
+@safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Extracts training data with leakage protection and NaN handling"""
     try:
         df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
         df.columns = [col.strip().replace('\r', '') for col in df.columns]
         df.columns = [col.strip() for col in df.columns]
+        check_label_consistency(df, neo4j_service)
 
         required_cols = ["Case_No", "Class_ASD_Traits"]
         missing = [col for col in required_cols if col not in df.columns]
