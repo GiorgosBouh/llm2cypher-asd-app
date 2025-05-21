@@ -58,13 +58,16 @@ class GraphBuilder:
             
             # Convert numeric columns
             numeric_cols = ['Case_No', 'A1', 'A2', 'A3', 'A4', 'A5', 
-                          'A6', 'A7', 'A8', 'A9', 'A10', 'Age_Mons', 'Qchat-10-Score']
+                            'A6', 'A7', 'A8', 'A9', 'A10', 'Age_Mons', 'Qchat-10-Score']
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(
                         df[col].astype(str).str.replace(",", "."), 
                         errors='coerce'
                     )
+            
+            # Convert Case_No to int to avoid float keys
+            df['Case_No'] = df['Case_No'].astype(int)
             
             logger.info("✅ Cleaned columns: %s", df.columns.tolist())
             return df.dropna()
@@ -167,10 +170,10 @@ class GraphBuilder:
         tx.run("MERGE (:ASD_Trait {label: 'No'})")
 
         # Collect all cases with their labels from CSV
-        csv_labels = df.set_index("Case_No")["Class_ASD_Traits"].str.strip().str.lower()
+        csv_labels = df.set_index("Case_No")["Class_ASD_Traits"].str.strip().str.capitalize()
 
         # Fetch existing Case nodes in Neo4j and check if SCREENED_FOR relationship exists
-        existing_cases = {record["id"]: record["label"].lower() if record["label"] else None for record in
+        existing_cases = {record["id"]: record["label"].capitalize() if record["label"] else None for record in
                           tx.run("""
                           MATCH (c:Case)
                           OPTIONAL MATCH (c)-[:SCREENED_FOR]->(t:ASD_Trait)
@@ -187,7 +190,7 @@ class GraphBuilder:
                 MATCH (t:ASD_Trait {label: $label})
                 MERGE (c)-[r:SCREENED_FOR]->(t)
                 SET r.timestamp = timestamp()
-            """, case_no=case_no, label=csv_label.capitalize())
+            """, case_no=case_no, label=csv_label)
 
     def create_similarity_relationships(self, tx, df: pd.DataFrame) -> None:
         """Create similarity relationships between cases"""
