@@ -69,6 +69,9 @@ class GraphBuilder:
             # Convert Case_No to int to avoid float keys
             df['Case_No'] = df['Case_No'].astype(int)
             
+            # Clean and standardize Class_ASD_Traits values
+            df['Class_ASD_Traits'] = df['Class_ASD_Traits'].str.strip().str.capitalize()
+            
             logger.info("✅ Cleaned columns: %s", df.columns.tolist())
             return df.dropna()
         except Exception as e:
@@ -106,7 +109,11 @@ class GraphBuilder:
             case_id = int(row["Case_No"])
             upload_id = str(case_id)
             
-            case_data.append({"id": case_id, "upload_id": upload_id})
+            case_data.append({
+                "id": case_id, 
+                "upload_id": upload_id,
+                "asd_trait": row["Class_ASD_Traits"].strip().capitalize()
+            })
             
             # Answers to behavior questions
             for q in [f"A{i}" for i in range(1, 11)]:
@@ -132,12 +139,17 @@ class GraphBuilder:
             })
         
         # Create all nodes and relationships in batches
+        # First create Case nodes with ASD_Trait relationship
         tx.run("""
             UNWIND $data as row 
             MERGE (c:Case {id: row.id}) 
             SET c.upload_id = row.upload_id, c.embedding = null
+            WITH c, row
+            MERGE (t:ASD_Trait {label: row.asd_trait})
+            MERGE (c)-[:SCREENED_FOR]->(t)
         """, data=case_data)
         
+        # Create HAS_ANSWER relationships
         tx.run("""
             UNWIND $data as row
             MATCH (q:BehaviorQuestion {name: row.q})
@@ -145,6 +157,7 @@ class GraphBuilder:
             MERGE (c)-[:HAS_ANSWER {value: row.val}]->(q)
         """, data=answer_data)
         
+        # Create HAS_DEMOGRAPHIC relationships
         tx.run("""
             UNWIND $data as row
             MATCH (d:DemographicAttribute {type: row.type, value: row.val})
@@ -152,45 +165,13 @@ class GraphBuilder:
             MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)
         """, data=demo_data)
         
+        # Create SUBMITTED_BY relationships
         tx.run("""
             UNWIND $data as row
             MATCH (s:SubmitterType {type: row.val})
             MATCH (c:Case {upload_id: row.upload_id})
             MERGE (c)-[:SUBMITTED_BY]->(s)
         """, data=submitter_data)
-
-    def create_asd_trait_nodes_and_relationships(self, tx, df: pd.DataFrame) -> None:
-        """
-        Create ASD_Trait nodes (labels: Yes or No) and 
-        create SCREENED_FOR relationships from Case nodes to ASD_Trait nodes.
-        Also validate consistency between CSV and graph.
-        """
-        # First, create (or merge) ASD_Trait nodes 'Yes' and 'No'
-        tx.run("MERGE (:ASD_Trait {label: 'Yes'})")
-        tx.run("MERGE (:ASD_Trait {label: 'No'})")
-
-        # Collect all cases with their labels from CSV
-        csv_labels = df.set_index("Case_No")["Class_ASD_Traits"].str.strip().str.capitalize()
-
-        # Fetch existing Case nodes in Neo4j and check if SCREENED_FOR relationship exists
-        existing_cases = {record["id"]: record["label"].capitalize() if record["label"] else None for record in
-                          tx.run("""
-                          MATCH (c:Case)
-                          OPTIONAL MATCH (c)-[:SCREENED_FOR]->(t:ASD_Trait)
-                          RETURN c.id AS id, t.label AS label
-                          """)}
-
-        for case_no, csv_label in csv_labels.items():
-            graph_label = existing_cases.get(case_no)
-            if graph_label != csv_label:
-                logger.warning(f"⚠️ Case_No {case_no} έχει ετικέτα '{csv_label}' στο CSV, αλλά έχει '{graph_label}' στον γράφο.")
-            # Create or update relationship to ASD_Trait node
-            tx.run("""
-                MATCH (c:Case {id: $case_no})
-                MATCH (t:ASD_Trait {label: $label})
-                MERGE (c)-[r:SCREENED_FOR]->(t)
-                SET r.timestamp = timestamp()
-            """, case_no=case_no, label=csv_label)
 
     def create_similarity_relationships(self, tx, df: pd.DataFrame) -> None:
         """Create similarity relationships between cases"""
@@ -200,7 +181,7 @@ class GraphBuilder:
         for i, row1 in df.iterrows():
             for j, row2 in df.iloc[i+1:].iterrows():
                 if sum(row1[f'A{k}'] == row2[f'A{k}'] for k in range(1,11)) >= self.MIN_SIMILAR_ANSWERS:
-                    pairs.add((int(row1['Case_No']), int(row2['Case_No'])))
+                    pairs.add((int(row1['Case_No']), int(row2['Case_No']))
         
         # Demographic similarity
         demo_cols = ['Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD']
@@ -392,11 +373,8 @@ class GraphBuilder:
                 logger.info("⏳ Creating nodes...")
                 session.execute_write(self.create_nodes, df)
                 
-                logger.info("⏳ Creating basic relationships...")
+                logger.info("⏳ Creating all relationships...")
                 session.execute_write(self.create_relationships, df)
-                
-                logger.info("⏳ Creating ASD Trait nodes and relationships...")
-                session.execute_write(self.create_asd_trait_nodes_and_relationships, df)
                 
                 logger.info("⏳ Creating similarity relationships...")
                 session.execute_write(self.create_similarity_relationships, df)
