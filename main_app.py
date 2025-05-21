@@ -207,6 +207,19 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
         {"who": row["Who_completed_the_test"], "upload_id": upload_id}
     ))
 
+    # Add ASD_Trait relationship if Class_ASD_Traits exists
+    if "Class_ASD_Traits" in row:
+        label = str(row["Class_ASD_Traits"]).strip().lower()
+        if label in ["yes", "no"]:
+            queries.append((
+                """
+                MATCH (c:Case {upload_id: $upload_id})
+                MERGE (t:ASD_Trait {label: $label})
+                MERGE (c)-[:SCREENED_FOR]->(t)
+                """,
+                {"upload_id": upload_id, "label": label.capitalize()}
+            ))
+
     with neo4j_service.session() as session:
         for query, params in queries:
             session.run(query, **params)
@@ -336,14 +349,19 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
             # Query στο γράφο για την ετικέτα
             record = session.run("""
                 MATCH (c:Case {id: $case_id})-[:SCREENED_FOR]->(t:ASD_Trait)
-                RETURN toLower(t.value) AS graph_label
+                RETURN toLower(t.label) AS graph_label
             """, case_id=case_id).single()
 
             graph_label = record["graph_label"] if record else None
 
             if graph_label is None:
-                # Αν λείπει ετικέτα στο γράφο, προειδοποίησε αλλά μη διακόψεις
-                st.warning(f"⚠️ Case_No {case_id} έχει ετικέτα '{csv_label}' στο CSV, αλλά δεν έχει ετικέτα στον γράφο.")
+                # Αν λείπει ετικέτα στο γράφο, δημιούργησε την
+                st.warning(f"⚠️ Case_No {case_id} έχει ετικέτα '{csv_label}' στο CSV, αλλά δεν έχει ετικέτα στον γράφο. Δημιουργία σχέσης...")
+                session.run("""
+                    MATCH (c:Case {id: $case_id})
+                    MERGE (t:ASD_Trait {label: $label})
+                    MERGE (c)-[:SCREENED_FOR]->(t)
+                """, case_id=case_id, label=csv_label.capitalize())
             elif graph_label != csv_label:
                 inconsistent_cases.append((case_id, csv_label, graph_label))
 
@@ -704,7 +722,7 @@ def reinsert_labels_from_csv(csv_url: str):
             if label in ["yes", "no"]:
                 session.run("""
                     MATCH (c:Case {id: $case_id})
-                    MERGE (t:ASD_Trait {value: $label})
+                    MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
                 """, case_id=case_id, label=label.capitalize())
 
@@ -774,400 +792,400 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab1:
         st.header("🤖 ASD Detection Model")
 
-        if st.button("🔄 Train/Refresh Model"):
-            with st.spinner("Training model with leakage protection..."):
-                results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
-                if results:
-                    st.session_state.model_results = results
-                    st.session_state.model_trained = True
-                    evaluate_model(
-                        results["model"],
-                        results["X_test"],
-                        results["y_test"]
+        if st.button("🔄 Train/Refresh
+                with st.spinner("Training model with leakage protection..."):
+                    results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
+                    if results:
+                        st.session_state.model_results = results
+                        st.session_state.model_trained = True
+                        evaluate_model(
+                            results["model"],
+                            results["X_test"],
+                            results["y_test"]
+                        )
+                        with st.spinner("Reattaching labels to cases..."):
+                            csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+                            reinsert_labels_from_csv(csv_url)
+                            st.success("🎯 Labels reinserted automatically after training!")
+                    if st.session_state.get("model_trained"):
+                        st.success("✅ Model trained successfully!")
+
+            with st.expander("🧪 Compare old vs new embeddings (Case 1)"):
+                if st.button("📤 Save current embedding of Case 1"):
+                    with neo4j_service.session() as session:
+                        result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
+                        if result and result["emb"]:
+                            st.session_state.saved_embedding_case1 = result["emb"]
+                            st.success("✅ Saved current embedding of Case 1")
+
+                if st.button("📥 Compare to current embedding of Case 1"):
+                    with neo4j_service.session() as session:
+                        result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
+                        if result and result["emb"]:
+                            new_emb = result["emb"]
+                            old_emb = st.session_state.get("saved_embedding_case1")
+                            if old_emb:
+                                from numpy.linalg import norm
+                                diff = norm(np.array(old_emb) - np.array(new_emb))
+                                st.write(f"📏 Difference (L2 norm) between saved and current embedding: `{diff:.4f}`")
+                                if diff < 1e-3:
+                                    st.warning("⚠️ Embedding is (almost) identical — rebuild had no effect.")
+                                else:
+                                    st.success("✅ Embedding changed — rebuild updated the graph.")
+                            else:
+                                st.error("❌ No saved embedding found. Click 'Save current embedding' first.")
+
+        with tab2:
+            st.header("🌐 Graph Embeddings")
+            st.warning("⚠️ Don't push this button unless you are the developer!")
+            st.info("ℹ️ This function is for the developer only")
+            if st.button("🔁 Recalculate All Embeddings"):
+                with st.spinner("Running full graph rebuild and embedding generation..."):
+                    result = subprocess.run(
+                        [sys.executable, "kg_builder_2.py"],
+                        capture_output=True,
+                        text=True
                     )
-                    with st.spinner("Reattaching labels to cases..."):
-                        csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-                        reinsert_labels_from_csv(csv_url)
-                        st.success("🎯 Labels reinserted automatically after training!")
-                if st.session_state.get("model_trained"):
-                    st.success("✅ Model trained successfully!")
+                    if result.returncode == 0:
+                        st.success("✅ Embeddings recalculated and updated in the graph!")
+                    else:
+                        st.error("❌ Failed to run kg_builder_2.py")
+                        st.code(result.stderr)
 
-        with st.expander("🧪 Compare old vs new embeddings (Case 1)"):
-            if st.button("📤 Save current embedding of Case 1"):
-                with neo4j_service.session() as session:
-                    result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
-                    if result and result["emb"]:
-                        st.session_state.saved_embedding_case1 = result["emb"]
-                        st.success("✅ Saved current embedding of Case 1")
-
-            if st.button("📥 Compare to current embedding of Case 1"):
-                with neo4j_service.session() as session:
-                    result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
-                    if result and result["emb"]:
-                        new_emb = result["emb"]
-                        old_emb = st.session_state.get("saved_embedding_case1")
-                        if old_emb:
-                            from numpy.linalg import norm
-                            diff = norm(np.array(old_emb) - np.array(new_emb))
-                            st.write(f"📏 Difference (L2 norm) between saved and current embedding: `{diff:.4f}`")
-                            if diff < 1e-3:
-                                st.warning("⚠️ Embedding is (almost) identical — rebuild had no effect.")
-                            else:
-                                st.success("✅ Embedding changed — rebuild updated the graph.")
-                        else:
-                            st.error("❌ No saved embedding found. Click 'Save current embedding' first.")
-
-    with tab2:
-        st.header("🌐 Graph Embeddings")
-        st.warning("⚠️ Don't push this button unless you are the developer!")
-        st.info("ℹ️ This function is for the developer only")
-        if st.button("🔁 Recalculate All Embeddings"):
-            with st.spinner("Running full graph rebuild and embedding generation..."):
-                result = subprocess.run(
-                    [sys.executable, "kg_builder_2.py"],
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode == 0:
-                    st.success("✅ Embeddings recalculated and updated in the graph!")
-                else:
-                    st.error("❌ Failed to run kg_builder_2.py")
-                    st.code(result.stderr)
-
-    with tab3:
-        st.header("📄 Upload New Case")
-        
-        # ========== INSTRUCTIONS SECTION ==========
-        with st.container(border=True):
-            st.subheader("📝 Before You Upload", anchor=False)
+        with tab3:
+            st.header("📄 Upload New Case")
             
-            cols = st.columns([1, 3])
-            with cols[0]:
-                st.image("https://cdn-icons-png.flaticon.com/512/2965/2965300.png", width=80)
-            with cols[1]:
+            # ========== INSTRUCTIONS SECTION ==========
+            with st.container(border=True):
+                st.subheader("📝 Before You Upload", anchor=False)
+                
+                cols = st.columns([1, 3])
+                with cols[0]:
+                    st.image("https://cdn-icons-png.flaticon.com/512/2965/2965300.png", width=80)
+                with cols[1]:
+                    st.markdown("""
+                    **Please follow these steps carefully:**
+                    1. Download the example CSV template
+                    2. Review the data format instructions
+                    3. Prepare your case data accordingly
+                    """)
+                
+                st.markdown("---")
+                st.markdown("### 🛠️ Required Resources")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    with st.container(border=True):
+                        st.markdown("**📥 Example CSV Template**")
+                        st.markdown("Download and use this template to format your data:")
+                        st.markdown("[Download Example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)")
+                
+                with col2:
+                    with st.container(border=True):
+                        st.markdown("**📋 Data Format Instructions**")
+                        st.markdown("Read the detailed documentation:")
+                        st.markdown("[View Instructions Document](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)")
+                
+                st.markdown("---")
                 st.markdown("""
-                **Please follow these steps carefully:**
-                1. Download the example CSV template
-                2. Review the data format instructions
-                3. Prepare your case data accordingly
+                **❗ Important Notes:**
+                - Ensure all required columns are present
+                - Case numbers must be unique
+                - Only upload one case at a time
+                - Values must match the specified formats
                 """)
-            
-            st.markdown("---")
-            st.markdown("### 🛠️ Required Resources")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                with st.container(border=True):
-                    st.markdown("**📥 Example CSV Template**")
-                    st.markdown("Download and use this template to format your data:")
-                    st.markdown("[Download Example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)")
-            
-            with col2:
-                with st.container(border=True):
-                    st.markdown("**📋 Data Format Instructions**")
-                    st.markdown("Read the detailed documentation:")
-                    st.markdown("[View Instructions Document](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)")
-            
-            st.markdown("---")
-            st.markdown("""
-            **❗ Important Notes:**
-            - Ensure all required columns are present
-            - Case numbers must be unique
-            - Only upload one case at a time
-            - Values must match the specified formats
-            """)
-        # ========== END INSTRUCTIONS SECTION ==========
+            # ========== END INSTRUCTIONS SECTION ==========
 
-        # Reset case_inserted if a new file is uploaded
-        if "uploaded_file" in st.session_state and st.session_state.uploaded_file is not None:
-            if st.session_state.uploaded_file != st.session_state.get("last_uploaded_file"):
-                st.session_state.case_inserted = False
-                st.session_state.last_uploaded_file = st.session_state.uploaded_file
+            # Reset case_inserted if a new file is uploaded
+            if "uploaded_file" in st.session_state and st.session_state.uploaded_file is not None:
+                if st.session_state.uploaded_file != st.session_state.get("last_uploaded_file"):
+                    st.session_state.case_inserted = False
+                    st.session_state.last_uploaded_file = st.session_state.uploaded_file
 
-        # File uploader
-        uploaded_file = st.file_uploader(
-            "**Upload your prepared CSV file**", 
-            type="csv",
-            key="case_uploader",
-            help="Ensure your file follows the template format before uploading"
-        )
+            # File uploader
+            uploaded_file = st.file_uploader(
+                "**Upload your prepared CSV file**", 
+                type="csv",
+                key="case_uploader",
+                help="Ensure your file follows the template format before uploading"
+            )
 
-        if uploaded_file:
-            st.session_state.uploaded_file = uploaded_file
-            try:
-                # ========== CSV PREVIEW ==========
-                st.subheader("📊 Uploaded CSV Preview")
-                df = pd.read_csv(uploaded_file, delimiter=";")
-                st.dataframe(
-                    df.style.format(
-                        {
-                        "Case_No": "{:.0f}",
-                        **{f"A{i}": "{:.0f}" for i in range(1,11)}
-                        }
-                    ),
-                    use_container_width=True,
-                    hide_index=True
-                )
-                # ========== END CSV PREVIEW ==========
-
-                required_cols = [
-                    "Case_No", "A1", "A2", "A3", "A4", "A5", 
-                    "A6", "A7", "A8", "A9", "A10",
-                    "Sex", "Ethnicity", "Jaundice", 
-                    "Family_mem_with_ASD", "Who_completed_the_test"
-                ]
-
-                if not all(col in df.columns for col in required_cols):
-                    missing = [col for col in required_cols if col not in df.columns]
-                    st.error(f"❌ Missing required columns: {', '.join(missing)}")
-                    st.write("📋 Found columns in CSV:", df.columns.tolist())
-                    st.stop()
-
-                if len(df) != 1:
-                    st.error("❌ Please upload exactly one case")
-                    st.stop()
-
-                row = df.iloc[0]
+            if uploaded_file:
+                st.session_state.uploaded_file = uploaded_file
                 try:
-                    case_no = int(str(row["Case_No"]).strip())
-                except (ValueError, TypeError):
-                    st.error("❌ Case_No must be an integer value")
-                    st.stop()
+                    # ========== CSV PREVIEW ==========
+                    st.subheader("📊 Uploaded CSV Preview")
+                    df = pd.read_csv(uploaded_file, delimiter=";")
+                    st.dataframe(
+                        df.style.format(
+                            {
+                            "Case_No": "{:.0f}",
+                            **{f"A{i}": "{:.0f}" for i in range(1,11)}
+                            }
+                        ),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    # ========== END CSV PREVIEW ==========
 
-                # Check for duplicate Case_No
-                with neo4j_service.session() as session:
-                    result = session.run("MATCH (c:Case) RETURN c.id AS case_id")
-                    existing_case_nos = {record["case_id"] for record in result}
-                    
-                    max_case_no = max(existing_case_nos) if existing_case_nos else 0
-                    suggested_case_no = max_case_no + 1
-                    
-                    if case_no in existing_case_nos:
-                        st.error(f"❌ Case No. {case_no} already exists in the system!")
-                        st.warning("⚠️ Using duplicate case numbers will cause data integrity issues")
+                    required_cols = [
+                        "Case_No", "A1", "A2", "A3", "A4", "A5", 
+                        "A6", "A7", "A8", "A9", "A10",
+                        "Sex", "Ethnicity", "Jaundice", 
+                        "Family_mem_with_ASD", "Who_completed_the_test"
+                    ]
+
+                    if not all(col in df.columns for col in required_cols):
+                        missing = [col for col in required_cols if col not in df.columns]
+                        st.error(f"❌ Missing required columns: {', '.join(missing)}")
+                        st.write("📋 Found columns in CSV:", df.columns.tolist())
+                        st.stop()
+
+                    if len(df) != 1:
+                        st.error("❌ Please upload exactly one case")
+                        st.stop()
+
+                    row = df.iloc[0]
+                    try:
+                        case_no = int(str(row["Case_No"]).strip())
+                    except (ValueError, TypeError):
+                        st.error("❌ Case_No must be an integer value")
+                        st.stop()
+
+                    # Check for duplicate Case_No
+                    with neo4j_service.session() as session:
+                        result = session.run("MATCH (c:Case) RETURN c.id AS case_id")
+                        existing_case_nos = {record["case_id"] for record in result}
                         
-                        st.subheader("📌 Existing Case Details")
-                        existing_case = session.run("""
-                            MATCH (c:Case {id: $case_no})
-                            OPTIONAL MATCH (c)-[:HAS_DEMOGRAPHIC]->(d)
-                            OPTIONAL MATCH (c)-[:SUBMITTED_BY]->(s)
-                            RETURN c.id AS case_id, 
-                                   collect(DISTINCT d.type + ': ' + d.value) AS demographics,
-                                   s.type AS submitted_by
-                        """, case_no=case_no).data()
+                        max_case_no = max(existing_case_nos) if existing_case_nos else 0
+                        suggested_case_no = max_case_no + 1
                         
-                        if existing_case:
-                            st.json(existing_case[0])
-                        
-                        st.subheader("🛠️ How to Proceed")
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown("**Option 1:** Use suggested Case No.")
-                            edited_df = df.copy()
-                            edited_df.at[0, "Case_No"] = suggested_case_no
-                            st.dataframe(edited_df)
+                        if case_no in existing_case_nos:
+                            st.error(f"❌ Case No. {case_no} already exists in the system!")
+                            st.warning("⚠️ Using duplicate case numbers will cause data integrity issues")
                             
-                            st.download_button(
-                                label=f"💾 Download with Case No. {suggested_case_no}",
-                                data=edited_df.to_csv(sep=";", index=False).encode('utf-8'),
-                                file_name=f"updated_case_{suggested_case_no}.csv",
-                                mime="text/csv",
-                                key=f"download_{suggested_case_no}"
-                            )
-                        
-                        with col2:
-                            st.markdown("**Option 2:** Choose a different Case No.")
-                            new_case_no = st.number_input(
-                                "Enter new Case No.", 
-                                min_value=1,
-                                value=suggested_case_no,
-                                step=1
-                            )
+                            st.subheader("📌 Existing Case Details")
+                            existing_case = session.run("""
+                                MATCH (c:Case {id: $case_no})
+                                OPTIONAL MATCH (c)-[:HAS_DEMOGRAPHIC]->(d)
+                                OPTIONAL MATCH (c)-[:SUBMITTED_BY]->(s)
+                                RETURN c.id AS case_id, 
+                                    collect(DISTINCT d.type + ': ' + d.value) AS demographics,
+                                    s.type AS submitted_by
+                            """, case_no=case_no).data()
                             
-                            if new_case_no in existing_case_nos:
-                                st.error("This Case No. is also taken!")
-                            else:
+                            if existing_case:
+                                st.json(existing_case[0])
+                            
+                            st.subheader("🛠️ How to Proceed")
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                st.markdown("**Option 1:** Use suggested Case No.")
                                 edited_df = df.copy()
-                                edited_df.at[0, "Case_No"] = new_case_no
+                                edited_df.at[0, "Case_No"] = suggested_case_no
                                 st.dataframe(edited_df)
                                 
                                 st.download_button(
-                                    label=f"💾 Download with Case No. {new_case_no}",
+                                    label=f"💾 Download with Case No. {suggested_case_no}",
                                     data=edited_df.to_csv(sep=";", index=False).encode('utf-8'),
-                                    file_name=f"updated_case_{new_case_no}.csv",
+                                    file_name=f"updated_case_{suggested_case_no}.csv",
                                     mime="text/csv",
-                                    key=f"download_{new_case_no}"
+                                    key=f"download_{suggested_case_no}"
                                 )
-                        
-                        st.stop()
-                    else:
-                        st.session_state.last_case_no = case_no
-
-                # Process unique case
-                upload_id = str(uuid.uuid4())
-                with st.spinner("Inserting case into graph..."):
-                    upload_id = insert_user_case(row, upload_id)
-                    st.session_state.last_upload_id = upload_id
-
-                with st.spinner("Generating graph embedding..."):
-                    if not call_embedding_generator(str(upload_id)):
-                        st.error("❌ Failed to generate embedding. Check connection or logs.")
-                        st.stop()
-
-                with st.spinner("Extracting case embedding..."):
-                    embedding = extract_user_embedding(upload_id)
-                    if embedding is None:
-                        st.stop()
-                    st.session_state.current_embedding = embedding
-
-                st.subheader("🧠 Case Embedding")
-                st.write(embedding)
-
-                st.subheader("🧪 Embedding Diagnostics")
-                st.text("📦 Embedding vector:")
-                st.write(embedding.tolist())
-
-                st.text("✅ Embedding integrity check:")
-                if np.isnan(embedding).any():
-                    st.error("❌ Embedding contains NaN values.")
-                else:
-                    st.success("✅ Embedding is valid (no NaNs)")
-
-                with neo4j_service.session() as session:
-                    degree_result = session.run("""
-                        MATCH (c:Case {upload_id: $upload_id})--(n)
-                        RETURN count(n) AS degree
-                    """, upload_id=upload_id)
-                    degree = degree_result.single()["degree"]
-                    st.text(f"🔗 Number of connected nodes: {degree}")
-                    if degree < 5:
-                        st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
-
-                if "model_results" in st.session_state:
-                    X_train = st.session_state.model_results["X_test"]
-                    train_mean = X_train.mean().values
-                    dist = np.linalg.norm(embedding - train_mean)
-                    st.text(f"📏 Distance from train mean: {dist:.4f}")
-                    if dist > 5.0:
-                        st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
-
-                    model = st.session_state.model_results["model"]
-                    proba = model.predict_proba(embedding)[0][1]
-                    prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
-
-                    st.subheader("🔍 Prediction Result")
-                    col1, col2 = st.columns(2)
-                    col1.metric("Prediction", prediction)
-                    col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
-
-                df_bar = pd.DataFrame({
-                    "Category": ["Typical", "ASD Traits"],
-                    "Probability": [1 - proba, proba]
-                })
-                df_bar["Label"] = df_bar["Probability"].apply(lambda x: f"{x:.1%}")
-
-                fig = px.bar(
-                    df_bar,
-                    x="Category",
-                    y="Probability",
-                    title="Prediction Probabilities"
-                )
-                fig.update_traces(
-                    text=df_bar["Label"],
-                    texttemplate="%{text}",
-                    textposition="outside"
-                )
-                fig.update_layout(
-                    yaxis_range=[0, 1],
-                    uniformtext_minsize=8,
-                    uniformtext_mode='hide'
-                )
-                st.plotly_chart(fig)
-
-                with st.spinner("Running anomaly detection..."):
-                    cache_key = st.session_state.get("last_upload_id", str(uuid.uuid4()))
-                    iso_result = train_isolation_forest(cache_key=cache_key)
-                    if iso_result:
-                        iso_forest, scaler = iso_result
-                        embedding_scaled = scaler.transform(embedding)
-                        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-                        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
-
-                        st.subheader("🕵️ Anomaly Detection")
-                        if is_anomaly:
-                            st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
+                            
+                            with col2:
+                                st.markdown("**Option 2:** Choose a different Case No.")
+                                new_case_no = st.number_input(
+                                    "Enter new Case No.", 
+                                    min_value=1,
+                                    value=suggested_case_no,
+                                    step=1
+                                )
+                                
+                                if new_case_no in existing_case_nos:
+                                    st.error("This Case No. is also taken!")
+                                else:
+                                    edited_df = df.copy()
+                                    edited_df.at[0, "Case_No"] = new_case_no
+                                    st.dataframe(edited_df)
+                                    
+                                    st.download_button(
+                                        label=f"💾 Download with Case No. {new_case_no}",
+                                        data=edited_df.to_csv(sep=";", index=False).encode('utf-8'),
+                                        file_name=f"updated_case_{new_case_no}.csv",
+                                        mime="text/csv",
+                                        key=f"download_{new_case_no}"
+                                    )
+                            
+                            st.stop()
                         else:
-                            st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+                            st.session_state.last_case_no = case_no
 
-                st.session_state.case_inserted = True
-                st.success("✅ Case processed successfully!")
-                st.balloons()
+                    # Process unique case
+                    upload_id = str(uuid.uuid4())
+                    with st.spinner("Inserting case into graph..."):
+                        upload_id = insert_user_case(row, upload_id)
+                        st.session_state.last_upload_id = upload_id
 
-            except Exception as e:
-                st.error(f"❌ Error processing file: {str(e)}")
-                logger.exception("Upload case error:")
+                    with st.spinner("Generating graph embedding..."):
+                        if not call_embedding_generator(str(upload_id)):
+                            st.error("❌ Failed to generate embedding. Check connection or logs.")
+                            st.stop()
 
-    with tab4:
-        st.header("💬 Natural Language to Cypher")
-        with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
-            st.markdown("""
-            ### 📚 Dataset Overview
-            This knowledge graph contains screening data for toddlers to help detect potential signs of Autism Spectrum Disorder (ASD).
+                    with st.spinner("Extracting case embedding..."):
+                        embedding = extract_user_embedding(upload_id)
+                        if embedding is None:
+                            st.stop()
+                        st.session_state.current_embedding = embedding
 
-            #### ✅ Node Types:
-            - **Case**: A toddler who was screened.
-            - **BehaviorQuestion**: A question from the Q-Chat-10 questionnaire:
-                - **A1**: Does your child look at you when you call his/her name?
-                - **A2**: How easy is it for you to get eye contact with your child?
-                - **A3**: Does your child point to indicate that s/he wants something?
-                - **A4**: Does your child point to share interest with you?
-                - **A5**: Does your child pretend?
-                - **A6**: Does your child follow where you're looking?
-                - **A7**: If you or someone else in the family is visibly upset, does your child show signs of wanting to comfort them?
-                - **A8**: Would you describe your child's first words as normal in their development?
-                - **A9**: Does your child use simple gestures such as waving to say goodbye?
-                - **A10**: Does your child stare at nothing with no apparent purpose?
+                    st.subheader("🧠 Case Embedding")
+                    st.write(embedding)
 
-            - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
-            - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
-            - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
+                    st.subheader("🧪 Embedding Diagnostics")
+                    st.text("📦 Embedding vector:")
+                    st.write(embedding.tolist())
 
-            #### 🔗 Relationships:
-            - `HAS_ANSWER`: A case's answer to a behavioral question.
-            - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes.
-            - `SUBMITTED_BY`: Who submitted the test.
-            - `SCREENED_FOR`: Final ASD classification.
-            """)
+                    st.text("✅ Embedding integrity check:")
+                    if np.isnan(embedding).any():
+                        st.error("❌ Embedding contains NaN values.")
+                    else:
+                        st.success("✅ Embedding is valid (no NaNs)")
 
-            st.markdown("### 🧠 Example Questions (Click to use)")
-            example_questions = [
-                "How many male toddlers have ASD traits?",
-                "List all ethnicities with more than 5 cases.",
-                "How many cases answered '1' for both A1 and A2?"
-            ]
-
-            for q in example_questions:
-                if st.button(q, key=f"example_{q}"):
-                    st.session_state["preset_question"] = q
-
-        default_question = st.session_state.get("preset_question", "")
-        question = st.text_input("Ask about the data:", value=default_question)
-
-        if question:
-            cypher = nl_to_cypher(question)
-            if cypher:
-                st.code(cypher, language="cypher")
-                if st.button("▶️ Execute Query"):
                     with neo4j_service.session() as session:
-                        try:
-                            results = session.run(cypher).data()
-                            if results:
-                                st.dataframe(pd.DataFrame(results))
+                        degree_result = session.run("""
+                            MATCH (c:Case {upload_id: $upload_id})--(n)
+                            RETURN count(n) AS degree
+                        """, upload_id=upload_id)
+                        degree = degree_result.single()["degree"]
+                        st.text(f"🔗 Number of connected nodes: {degree}")
+                        if degree < 5:
+                            st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
+
+                    if "model_results" in st.session_state:
+                        X_train = st.session_state.model_results["X_test"]
+                        train_mean = X_train.mean().values
+                        dist = np.linalg.norm(embedding - train_mean)
+                        st.text(f"📏 Distance from train mean: {dist:.4f}")
+                        if dist > 5.0:
+                            st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
+
+                        model = st.session_state.model_results["model"]
+                        proba = model.predict_proba(embedding)[0][1]
+                        prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
+
+                        st.subheader("🔍 Prediction Result")
+                        col1, col2 = st.columns(2)
+                        col1.metric("Prediction", prediction)
+                        col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
+
+                    df_bar = pd.DataFrame({
+                        "Category": ["Typical", "ASD Traits"],
+                        "Probability": [1 - proba, proba]
+                    })
+                    df_bar["Label"] = df_bar["Probability"].apply(lambda x: f"{x:.1%}")
+
+                    fig = px.bar(
+                        df_bar,
+                        x="Category",
+                        y="Probability",
+                        title="Prediction Probabilities"
+                    )
+                    fig.update_traces(
+                        text=df_bar["Label"],
+                        texttemplate="%{text}",
+                        textposition="outside"
+                    )
+                    fig.update_layout(
+                        yaxis_range=[0, 1],
+                        uniformtext_minsize=8,
+                        uniformtext_mode='hide'
+                    )
+                    st.plotly_chart(fig)
+
+                    with st.spinner("Running anomaly detection..."):
+                        cache_key = st.session_state.get("last_upload_id", str(uuid.uuid4()))
+                        iso_result = train_isolation_forest(cache_key=cache_key)
+                        if iso_result:
+                            iso_forest, scaler = iso_result
+                            embedding_scaled = scaler.transform(embedding)
+                            anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                            is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+
+                            st.subheader("🕵️ Anomaly Detection")
+                            if is_anomaly:
+                                st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
                             else:
-                                st.info("No results found")
-                        except Exception as e:
-                            st.error(f"Query failed: {str(e)}")
+                                st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
+
+                    st.session_state.case_inserted = True
+                    st.success("✅ Case processed successfully!")
+                    st.balloons()
+
+                except Exception as e:
+                    st.error(f"❌ Error processing file: {str(e)}")
+                    logger.exception("Upload case error:")
+
+        with tab4:
+            st.header("💬 Natural Language to Cypher")
+            with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
+                st.markdown("""
+                ### 📚 Dataset Overview
+                This knowledge graph contains screening data for toddlers to help detect potential signs of Autism Spectrum Disorder (ASD).
+
+                #### ✅ Node Types:
+                - **Case**: A toddler who was screened.
+                - **BehaviorQuestion**: A question from the Q-Chat-10 questionnaire:
+                    - **A1**: Does your child look at you when you call his/her name?
+                    - **A2**: How easy is it for you to get eye contact with your child?
+                    - **A3**: Does your child point to indicate that s/he wants something?
+                    - **A4**: Does your child point to share interest with you?
+                    - **A5**: Does your child pretend?
+                    - **A6**: Does your child follow where you're looking?
+                    - **A7**: If you or someone else in the family is visibly upset, does your child show signs of wanting to comfort them?
+                    - **A8**: Would you describe your child's first words as normal in their development?
+                    - **A9**: Does your child use simple gestures such as waving to say goodbye?
+                    - **A10**: Does your child stare at nothing with no apparent purpose?
+
+                - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
+                - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
+                - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
+
+                #### 🔗 Relationships:
+                - `HAS_ANSWER`: A case's answer to a behavioral question.
+                - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes.
+                - `SUBMITTED_BY`: Who submitted the test.
+                - `SCREENED_FOR`: Final ASD classification.
+                """)
+
+                st.markdown("### 🧠 Example Questions (Click to use)")
+                example_questions = [
+                    "How many male toddlers have ASD traits?",
+                    "List all ethnicities with more than 5 cases.",
+                    "How many cases answered '1' for both A1 and A2?"
+                ]
+
+                for q in example_questions:
+                    if st.button(q, key=f"example_{q}"):
+                        st.session_state["preset_question"] = q
+
+            default_question = st.session_state.get("preset_question", "")
+            question = st.text_input("Ask about the data:", value=default_question)
+
+            if question:
+                cypher = nl_to_cypher(question)
+                if cypher:
+                    st.code(cypher, language="cypher")
+                    if st.button("▶️ Execute Query"):
+                        with neo4j_service.session() as session:
+                            try:
+                                results = session.run(cypher).data()
+                                if results:
+                                    st.dataframe(pd.DataFrame(results))
+                                else:
+                                    st.info("No results found")
+                            except Exception as e:
+                                st.error(f"Query failed: {str(e)}")
 
 if __name__ == "__main__":
     main()
