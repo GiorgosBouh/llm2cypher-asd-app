@@ -1234,24 +1234,39 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             for q in example_questions:
                 if st.button(q, key=f"example_{q}"):
                     st.session_state["preset_question"] = q
+                    st.session_state["last_cypher_results"] = None  # Reset previous results
 
+        # Text input for user question
         default_question = st.session_state.get("preset_question", "")
-        question = st.text_input("Ask about the data:", value=default_question)
+        question = st.text_input("Ask about the data:", value=default_question, key="nlp_question_input")
 
-        if question:
-            cypher = nl_to_cypher(question)
-            if cypher:
-                st.code(cypher, language="cypher")
-                if st.button("▶️ Execute Query"):
-                    with neo4j_service.session() as session:
-                        try:
+        # Όταν πατάμε κουμπί "Execute Query"
+        if st.button("▶️ Execute Query", key="execute_cypher_button"):
+            if question.strip():
+                cypher = nl_to_cypher(question)
+                if cypher:
+                    st.session_state["last_cypher_query"] = cypher
+                    # Εκτέλεση query και αποθήκευση αποτελεσμάτων στο session_state
+                    try:
+                        with neo4j_service.session() as session:
                             results = session.run(cypher).data()
-                            if results:
-                                st.dataframe(pd.DataFrame(results))
-                            else:
-                                st.info("No results found")
-                        except Exception as e:
-                            st.error(f"Query failed: {str(e)}")
+                            st.session_state["last_cypher_results"] = results
+                    except Exception as e:
+                        st.error(f"Query failed: {str(e)}")
+                        st.session_state["last_cypher_results"] = None
+            else:
+                st.warning("Please enter a question.")
+
+        # Αν υπάρχει αποθηκευμένο Cypher query, το δείχνουμε
+        if "last_cypher_query" in st.session_state:
+            st.code(st.session_state["last_cypher_query"], language="cypher")
+
+        # Αν υπάρχουν αποθηκευμένα αποτελέσματα, τα δείχνουμε
+        if "last_cypher_results" in st.session_state and st.session_state["last_cypher_results"] is not None:
+            if len(st.session_state["last_cypher_results"]) > 0:
+                st.dataframe(pd.DataFrame(st.session_state["last_cypher_results"]))
+            else:
+                st.info("No results found.")
 
 if __name__ == "__main__":
     main()
