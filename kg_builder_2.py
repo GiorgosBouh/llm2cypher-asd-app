@@ -69,8 +69,8 @@ class GraphBuilder:
             # Convert Case_No to int to avoid float keys
             df['Case_No'] = df['Case_No'].astype(int)
             
-            # Clean and standardize Class_ASD_Traits values
-            df['Class_ASD_Traits'] = df['Class_ASD_Traits'].str.strip().str.capitalize()
+            # Clean and standardize Class_ASD_Traits values: capitalize first letter, strip spaces
+            df['Class_ASD_Traits'] = df['Class_ASD_Traits'].astype(str).str.strip().str.capitalize()
             
             logger.info("✅ Cleaned columns: %s", df.columns.tolist())
             return df.dropna()
@@ -96,6 +96,10 @@ class GraphBuilder:
         # Submitter Types
         for val in df["Who_completed_the_test"].dropna().unique():
             tx.run("MERGE (:SubmitterType {type: $val})", val=val)
+        
+        # Create ASD_Trait nodes explicitly for "Yes" and "No"
+        tx.run("MERGE (:ASD_Trait {label: 'Yes'})")
+        tx.run("MERGE (:ASD_Trait {label: 'No'})")
 
     def create_relationships(self, tx, df: pd.DataFrame) -> None:
         """Create all relationships between nodes"""
@@ -109,10 +113,19 @@ class GraphBuilder:
             case_id = int(row["Case_No"])
             upload_id = str(case_id)
             
+            # Normalize asd_trait label to capitalized form, safe to ignore if invalid
+            raw_trait = str(row.get("Class_ASD_Traits", "")).strip().lower()
+            if raw_trait == "yes":
+                asd_trait = "Yes"
+            elif raw_trait == "no":
+                asd_trait = "No"
+            else:
+                asd_trait = None
+            
             case_data.append({
                 "id": case_id, 
                 "upload_id": upload_id,
-                "asd_trait": row["Class_ASD_Traits"].strip().capitalize()
+                "asd_trait": asd_trait
             })
             
             # Answers to behavior questions
@@ -139,14 +152,19 @@ class GraphBuilder:
             })
         
         # Create all nodes and relationships in batches
-        # First create Case nodes with ASD_Trait relationship
+        # First create Case nodes with ASD_Trait relationship if trait is valid
         tx.run("""
             UNWIND $data as row 
             MERGE (c:Case {id: row.id}) 
             SET c.upload_id = row.upload_id, c.embedding = null
             WITH c, row
-            MERGE (t:ASD_Trait {label: row.asd_trait})
-            MERGE (c)-[:SCREENED_FOR]->(t)
+            CALL apoc.do.when(
+                row.asd_trait IS NOT NULL,
+                'MERGE (t:ASD_Trait {label: row.asd_trait}) MERGE (c)-[:SCREENED_FOR]->(t)',
+                '',
+                {c:c, row:row}
+            ) YIELD value
+            RETURN count(*) 
         """, data=case_data)
         
         # Create HAS_ANSWER relationships
