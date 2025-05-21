@@ -345,14 +345,15 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
     with neo4j_service.session() as session:
         for _, row in df.iterrows():
             case_id = int(row["Case_No"])
-            csv_label = str(row["Class_ASD_Traits"]).strip().lower()
-            # Query στο γράφο για την ετικέτα
+            csv_label = str(row["Class_ASD_Traits"]).strip().lower()  # Μετατροπή σε lowercase
+            
+            # Query στο γράφο για την ετικέτα (με case-insensitive σύγκριση)
             record = session.run("""
-                MATCH (c:Case {id: $case_id})-[:SCREENED_FOR]->(t:ASD_Trait)
-                RETURN toLower(t.label) AS graph_label
+                MATCH (c:Case {id: $case_id})-[r:SCREENED_FOR]->(t:ASD_Trait)
+                RETURN t.label AS graph_label
             """, case_id=case_id).single()
 
-            graph_label = record["graph_label"] if record else None
+            graph_label = record["graph_label"].lower() if record and record["graph_label"] else None
 
             if graph_label is None:
                 # Αν λείπει ετικέτα στο γράφο, δημιούργησε την
@@ -361,7 +362,7 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
                     MATCH (c:Case {id: $case_id})
                     MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
-                """, case_id=case_id, label=csv_label.capitalize())
+                """, case_id=case_id, label=csv_label.capitalize())  # Αποθήκευση με κεφαλαίο πρώτο γράμμα
             elif graph_label != csv_label:
                 inconsistent_cases.append((case_id, csv_label, graph_label))
 
@@ -718,13 +719,13 @@ def reinsert_labels_from_csv(csv_url: str):
     with neo4j_service.session() as session:
         for _, row in df.iterrows():
             case_id = int(row["Case_No"])
-            label = str(row["Class_ASD_Traits"]).strip().lower()
+            label = str(row["Class_ASD_Traits"]).strip().lower()  # Μετατροπή σε lowercase
             if label in ["yes", "no"]:
                 session.run("""
                     MATCH (c:Case {id: $case_id})
                     MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
-                """, case_id=case_id, label=label.capitalize())
+                """, case_id=case_id, label=label.capitalize())  # Αποθήκευση με κεφαλαίο πρώτο γράμμα
 
 # === Streamlit UI ===
 def main():
