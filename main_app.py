@@ -805,14 +805,129 @@ def reinsert_labels_from_csv(csv_url: str):
                 """, case_id=case_id, label=label.capitalize())
 
 # === Streamlit UI ===
-def main():
-    import os
-    import uuid
-    import pandas as pd
-    import numpy as np
-    import plotly.express as px
-    import streamlit as st
+import streamlit as st
+import logging
+import uuid
+import os
+import pandas as pd
+import numpy as np
+import subprocess
+import sys
+import plotly.express as px
+from neo4j import GraphDatabase
+# plus all your other imports as needed ...
 
+# Setup logger for your Streamlit app
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# === Your existing helper functions and neo4j service initialization here ===
+# ...
+# (Make sure to include find_cases_missing_labels(), reinsert_labels_from_csv(), 
+# extract_training_data_from_csv(), evaluate_model(), etc.)
+
+# === Modified training function with detailed logging ===
+@st.cache_resource(show_spinner="Training ASD detection model...")
+def train_asd_detection_model(cache_key: str) -> 'Optional[dict]':
+    try:
+        logger.info("Starting training function")
+
+        csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+        logger.info("Refreshing SCREENED_FOR labels from CSV")
+        refresh_screened_for_labels(csv_url)
+        logger.info("Labels refreshed")
+
+        X_raw, y = extract_training_data_from_csv(csv_url)
+        logger.info(f"Extracted training data: X shape {X_raw.shape}, y length {len(y)}")
+
+        X = X_raw.copy()
+        X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
+
+        if X.empty or y.empty:
+            logger.error("No valid training data available")
+            st.error("⚠️ No valid training data available")
+            return None
+
+        logger.info("Splitting dataset into train/test")
+        from sklearn.model_selection import train_test_split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y,
+            test_size=0.3,
+            stratify=y,
+            random_state=42
+        )
+        logger.info(f"Train size: {X_train.shape[0]}, Test size: {X_test.shape[0]}")
+
+        neg = sum(y_train == 0)
+        pos = sum(y_train == 1)
+        scale_pos_weight = neg / pos if pos != 0 else 1
+        logger.info(f"Class balance: pos={pos}, neg={neg}, scale_pos_weight={scale_pos_weight:.3f}")
+
+        from imblearn.pipeline import Pipeline as ImbPipeline
+        from imblearn.over_sampling import SMOTE
+        from xgboost import XGBClassifier
+
+        pipeline = ImbPipeline([
+            ('smote', SMOTE(
+                sampling_strategy='auto',
+                k_neighbors=min(5, pos - 1),
+                random_state=42
+            )),
+            ('xgb', XGBClassifier(
+                n_estimators=100,
+                use_label_encoder=False,
+                eval_metric='logloss',
+                random_state=42,
+                scale_pos_weight=scale_pos_weight
+            ))
+        ])
+
+        from sklearn.model_selection import StratifiedKFold, cross_val_predict
+        logger.info("Starting cross-validation predictions")
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        y_proba = cross_val_predict(
+            pipeline, X_train, y_train,
+            cv=cv,
+            method='predict_proba',
+            n_jobs=-1
+        )[:, 1]
+        logger.info("Cross-validation predictions completed")
+
+        logger.info("Fitting pipeline on full training set")
+        pipeline.fit(X_train, y_train)
+        logger.info("Pipeline fitted")
+
+        logger.info("Evaluating on test set")
+        test_proba = pipeline.predict_proba(X_test)[:, 1]
+        test_pred = pipeline.predict(X_test)
+        logger.info("Evaluation done")
+
+        st.subheader("📊 Cross-Validation Results (Training Set)")
+        st.write(f"Mean CV ROC AUC: {roc_auc_score(y_train, y_proba):.3f}")
+
+        st.subheader("📊 Test Set Results")
+        st.write(f"Test ROC AUC: {roc_auc_score(y_test, test_proba):.3f}")
+
+        reinsert_labels_from_csv(csv_url)
+
+        logger.info("Training function finished successfully")
+        return {
+            "model": pipeline,
+            "X_test": X_test,
+            "y_test": y_test
+        }
+
+    except Exception as e:
+        logger.error(f"Error in training: {e}", exc_info=True)
+        st.error(f"❌ Error training model: {e}")
+        return None
+
+
+# === Streamlit UI ===
+def main():
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
         <i>Autism Spectrum Disorder detection using graph embeddings</i>
@@ -855,20 +970,26 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 """)
 
     # Initialize session state variables safely
-    for key, default_val in {
-        "active_tab": "Model Training",
-        "case_inserted": False,
-        "last_upload_id": None,
-        "last_case_no": None,
-        "model_trained": False,
-        "model_results": None,
-        "saved_embedding_case1": None,
-        "last_cypher_query": None,
-        "last_cypher_results": None,
-        "preset_question": ""
-    }.items():
-        if key not in st.session_state:
-            st.session_state[key] = default_val
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = "Model Training"
+    if "case_inserted" not in st.session_state:
+        st.session_state.case_inserted = False
+    if "last_upload_id" not in st.session_state:
+        st.session_state.last_upload_id = None
+    if "last_case_no" not in st.session_state:
+        st.session_state.last_case_no = None
+    if "model_trained" not in st.session_state:
+        st.session_state.model_trained = False
+    if "model_results" not in st.session_state:
+        st.session_state.model_results = None
+    if "saved_embedding_case1" not in st.session_state:
+        st.session_state.saved_embedding_case1 = None
+    if "last_cypher_query" not in st.session_state:
+        st.session_state.last_cypher_query = None
+    if "last_cypher_results" not in st.session_state:
+        st.session_state.last_cypher_results = None
+    if "preset_question" not in st.session_state:
+        st.session_state.preset_question = ""
 
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -878,7 +999,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         "💬 NLP to Cypher"
     ])
 
-    # ======== TAB 1: Model Training ========
+    # === Tab 1: Model Training ===
     with tab1:
         st.header("🤖 ASD Detection Model")
 
@@ -888,24 +1009,24 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         else:
             st.success("✅ Όλες οι περιπτώσεις έχουν SCREENED_FOR ετικέτα.")
 
-        # Training button
         if st.button("🔄 Train/Refresh"):
             with st.spinner("Training model with leakage protection..."):
                 results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
                 if results:
                     st.session_state.model_results = results
                     st.session_state.model_trained = True
-                    st.session_state.show_evaluation = True
                     st.success("✅ Training completed successfully.")
-
-                    # Reinsert labels
+                    evaluate_model(
+                        results["model"],
+                        results["X_test"],
+                        results["y_test"]
+                    )
                     with st.spinner("Reattaching labels to cases..."):
                         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                         reinsert_labels_from_csv(csv_url)
                         st.success("🎯 Labels reinserted automatically after training!")
 
-        # Show evaluation ONLY if flag is True
-        if st.session_state.get("show_evaluation", False) and st.session_state.model_trained and st.session_state.model_results:
+        if st.session_state.model_trained and st.session_state.model_results is not None:
             evaluate_model(
                 st.session_state.model_results["model"],
                 st.session_state.model_results["X_test"],
@@ -937,7 +1058,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         else:
                             st.error("❌ No saved embedding found. Click 'Save current embedding' first.")
 
-    # ======== TAB 2: Graph Embeddings ========
+    # === Tab 2: Graph Embeddings ===
     with tab2:
         st.header("🌐 Graph Embeddings")
         st.warning("⚠️ Don't push this button unless you are the developer!")
@@ -955,11 +1076,11 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("❌ Failed to run kg_builder_2.py")
                     st.code(result.stderr)
 
-    # ======== TAB 3: Upload New Case ========
+    # === Tab 3: Upload New Case ===
     with tab3:
         st.header("📄 Upload New Case")
 
-        # ========== INSTRUCTIONS SECTION ==========
+        # Instructions container
         with st.container(border=True):
             st.subheader("📝 Before You Upload", anchor=False)
 
@@ -998,9 +1119,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             - Only upload one case at a time
             - Values must match the specified formats
             """)
-        # ========== END INSTRUCTIONS SECTION ==========
 
-        # Reset case_inserted if a new file is uploaded
+        # Reset state if new file uploaded
         if "uploaded_file" in st.session_state and st.session_state.uploaded_file is not None:
             if st.session_state.uploaded_file != st.session_state.get("last_uploaded_file"):
                 st.session_state.case_inserted = False
@@ -1017,7 +1137,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         if uploaded_file:
             st.session_state.uploaded_file = uploaded_file
             try:
-                # ========== CSV PREVIEW ==========
                 st.subheader("📊 Uploaded CSV Preview")
                 df = pd.read_csv(uploaded_file, delimiter=";")
                 st.dataframe(
@@ -1030,7 +1149,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     use_container_width=True,
                     hide_index=True
                 )
-                # ========== END CSV PREVIEW ==========
 
                 required_cols = [
                     "Case_No", "A1", "A2", "A3", "A4", "A5",
@@ -1056,7 +1174,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("❌ Case_No must be an integer value")
                     st.stop()
 
-                # Check for duplicate Case_No
                 with neo4j_service.session() as session:
                     result = session.run("MATCH (c:Case) RETURN c.id AS case_id")
                     existing_case_nos = {record["case_id"] for record in result}
@@ -1126,7 +1243,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     else:
                         st.session_state.last_case_no = case_no
 
-                # Insert case into graph and generate embedding
                 upload_id = str(uuid.uuid4())
                 with st.spinner("Inserting case into graph..."):
                     upload_id = insert_user_case(row, upload_id)
@@ -1143,7 +1259,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         st.stop()
                     st.session_state.current_embedding = embedding
 
-                # Display embedding and diagnostics
                 st.subheader("🧠 Case Embedding")
                 st.write(embedding)
 
@@ -1167,8 +1282,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     if degree < 5:
                         st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
 
-                # If model trained, predict and show results
-                if st.session_state.model_trained and st.session_state.model_results is not None:
+                if "model_results" in st.session_state and st.session_state.model_results is not None:
                     X_train = st.session_state.model_results["X_test"]
                     train_mean = X_train.mean().values
                     dist = np.linalg.norm(embedding - train_mean)
@@ -1209,7 +1323,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 )
                 st.plotly_chart(fig)
 
-                # Anomaly detection
                 with st.spinner("Running anomaly detection..."):
                     cache_key = st.session_state.get("last_upload_id", str(uuid.uuid4()))
                     iso_result = train_isolation_forest(cache_key=cache_key)
@@ -1233,7 +1346,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.error(f"❌ Error processing file: {str(e)}")
                 logger.exception("Upload case error:")
 
-    # ======== TAB 4: NLP to Cypher ========
+    # === Tab 4: NLP to Cypher ===
     with tab4:
         st.header("💬 Natural Language to Cypher")
         with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
@@ -1278,11 +1391,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.session_state.preset_question = q
                     st.session_state.last_cypher_results = None  # Reset previous results
 
-        # Text input for user question
         default_question = st.session_state.get("preset_question", "")
         question = st.text_input("Ask about the data:", value=default_question, key="nlp_question_input")
 
-        # Execute query button
         if st.button("▶️ Execute Query", key="execute_cypher_button"):
             if question.strip():
                 cypher = nl_to_cypher(question)
@@ -1298,16 +1409,15 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             else:
                 st.warning("Please enter a question.")
 
-        # Show saved cypher query
         if st.session_state.last_cypher_query:
             st.code(st.session_state.last_cypher_query, language="cypher")
 
-        # Show query results if available
         if st.session_state.last_cypher_results is not None:
             if len(st.session_state.last_cypher_results) > 0:
                 st.dataframe(pd.DataFrame(st.session_state.last_cypher_results))
             else:
                 st.info("No results found.")
+
 
 if __name__ == "__main__":
     main()
