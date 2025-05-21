@@ -1076,11 +1076,10 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("❌ Failed to run kg_builder_2.py")
                     st.code(result.stderr)
 
-    # === Tab 3: Upload New Case ===
     with tab3:
-        st.header("📄 Upload New Case")
+        st.header("📄 Upload New Case (Prediction Only - No Graph Storage)")
 
-        # Instructions container
+        # ========== INSTRUCTIONS SECTION ==========
         with st.container(border=True):
             st.subheader("📝 Before You Upload", anchor=False)
 
@@ -1115,18 +1114,12 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             st.markdown("""
             **❗ Important Notes:**
             - Ensure all required columns are present
-            - Case numbers must be unique
-            - Only upload one case at a time
+            - Upload exactly one case at a time
             - Values must match the specified formats
+            - This upload **does NOT** save data to the graph — prediction only!
             """)
+        # ========== END INSTRUCTIONS SECTION ==========
 
-        # Reset state if new file uploaded
-        if "uploaded_file" in st.session_state and st.session_state.uploaded_file is not None:
-            if st.session_state.uploaded_file != st.session_state.get("last_uploaded_file"):
-                st.session_state.case_inserted = False
-                st.session_state.last_uploaded_file = st.session_state.uploaded_file
-
-        # File uploader
         uploaded_file = st.file_uploader(
             "**Upload your prepared CSV file**",
             type="csv",
@@ -1135,10 +1128,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         )
 
         if uploaded_file:
-            st.session_state.uploaded_file = uploaded_file
             try:
-                st.subheader("📊 Uploaded CSV Preview")
                 df = pd.read_csv(uploaded_file, delimiter=";")
+                st.subheader("📊 Uploaded CSV Preview")
                 st.dataframe(
                     df.style.format(
                         {
@@ -1157,10 +1149,10 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     "Family_mem_with_ASD", "Who_completed_the_test"
                 ]
 
-                if not all(col in df.columns for col in required_cols):
-                    missing = [col for col in required_cols if col not in df.columns]
+                # Έλεγχος υποχρεωτικών στηλών
+                missing = [col for col in required_cols if col not in df.columns]
+                if missing:
                     st.error(f"❌ Missing required columns: {', '.join(missing)}")
-                    st.write("📋 Found columns in CSV:", df.columns.tolist())
                     st.stop()
 
                 if len(df) != 1:
@@ -1168,164 +1160,61 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.stop()
 
                 row = df.iloc[0]
-                try:
-                    case_no = int(str(row["Case_No"]).strip())
-                except (ValueError, TypeError):
-                    st.error("❌ Case_No must be an integer value")
+
+                # Χρήση προσωρινού upload_id για το νέο case
+                temp_upload_id = "temp_upload_" + str(uuid.uuid4())
+
+                if "model_results" not in st.session_state or st.session_state.model_results is None:
+                    st.error("⚠️ Model not trained yet. Please train the model first.")
                     st.stop()
 
-                with neo4j_service.session() as session:
-                    result = session.run("MATCH (c:Case) RETURN c.id AS case_id")
-                    existing_case_nos = {record["case_id"] for record in result}
-
-                    max_case_no = max(existing_case_nos) if existing_case_nos else 0
-                    suggested_case_no = max_case_no + 1
-
-                    if case_no in existing_case_nos:
-                        st.error(f"❌ Case No. {case_no} already exists in the system!")
-                        st.warning("⚠️ Using duplicate case numbers will cause data integrity issues")
-
-                        st.subheader("📌 Existing Case Details")
-                        existing_case = session.run("""
-                            MATCH (c:Case {id: $case_no})
-                            OPTIONAL MATCH (c)-[:HAS_DEMOGRAPHIC]->(d)
-                            OPTIONAL MATCH (c)-[:SUBMITTED_BY]->(s)
-                            RETURN c.id AS case_id,
-                                collect(DISTINCT d.type + ': ' + d.value) AS demographics,
-                                s.type AS submitted_by
-                        """, case_no=case_no).data()
-
-                        if existing_case:
-                            st.json(existing_case[0])
-
-                        st.subheader("🛠️ How to Proceed")
-                        col1, col2 = st.columns(2)
-
-                        with col1:
-                            st.markdown("**Option 1:** Use suggested Case No.")
-                            edited_df = df.copy()
-                            edited_df.at[0, "Case_No"] = suggested_case_no
-                            st.dataframe(edited_df)
-
-                            st.download_button(
-                                label=f"💾 Download with Case No. {suggested_case_no}",
-                                data=edited_df.to_csv(sep=";", index=False).encode('utf-8'),
-                                file_name=f"updated_case_{suggested_case_no}.csv",
-                                mime="text/csv",
-                                key=f"download_{suggested_no}"
-                            )
-
-                        with col2:
-                            st.markdown("**Option 2:** Choose a different Case No.")
-                            new_case_no = st.number_input(
-                                "Enter new Case No.",
-                                min_value=1,
-                                value=suggested_case_no,
-                                step=1
-                            )
-
-                            if new_case_no in existing_case_nos:
-                                st.error("This Case No. is also taken!")
-                            else:
-                                edited_df = df.copy()
-                                edited_df.at[0, "Case_No"] = new_case_no
-                                st.dataframe(edited_df)
-
-                                st.download_button(
-                                    label=f"💾 Download with Case No. {new_case_no}",
-                                    data=edited_df.to_csv(sep=";", index=False).encode('utf-8'),
-                                    file_name=f"updated_case_{new_case_no}.csv",
-                                    mime="text/csv",
-                                    key=f"download_{new_case_no}"
-                                )
-
-                        st.stop()
-                    else:
-                        st.session_state.last_case_no = case_no
-
-                upload_id = str(uuid.uuid4())
-                with st.spinner("Inserting case into graph..."):
-                    upload_id = insert_user_case(row, upload_id)
-                    st.session_state.last_upload_id = upload_id
-
-                with st.spinner("Generating graph embedding..."):
-                    if not call_embedding_generator(str(upload_id)):
-                        st.error("❌ Failed to generate embedding. Check connection or logs.")
+                # Καλούμε subprocess για να δημιουργήσουμε προσωρινό embedding
+                with st.spinner("Generating embedding for prediction..."):
+                    embedding_generated = call_embedding_generator(temp_upload_id)
+                    if not embedding_generated:
+                        st.error("❌ Failed to generate embedding. Check logs.")
                         st.stop()
 
-                with st.spinner("Extracting case embedding..."):
-                    embedding = extract_user_embedding(upload_id)
-                    if embedding is None:
-                        st.stop()
-                    st.session_state.current_embedding = embedding
+                # Παίρνουμε embedding από Neo4j με το προσωρινό upload_id
+                embedding = extract_user_embedding(temp_upload_id)
+                if embedding is None:
+                    st.error("❌ Embedding extraction failed.")
+                    st.stop()
 
-                st.subheader("🧠 Case Embedding")
+                st.subheader("🧠 Case Embedding (Temporary)")
                 st.write(embedding)
 
                 st.subheader("🧪 Embedding Diagnostics")
                 st.text("📦 Embedding vector:")
                 st.write(embedding.tolist())
 
-                st.text("✅ Embedding integrity check:")
                 if np.isnan(embedding).any():
                     st.error("❌ Embedding contains NaN values.")
+                    st.stop()
                 else:
                     st.success("✅ Embedding is valid (no NaNs)")
 
-                with neo4j_service.session() as session:
-                    degree_result = session.run("""
-                        MATCH (c:Case {upload_id: $upload_id})--(n)
-                        RETURN count(n) AS degree
-                    """, upload_id=upload_id)
-                    degree = degree_result.single()["degree"]
-                    st.text(f"🔗 Number of connected nodes: {degree}")
-                    if degree < 5:
-                        st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
+                # Πρόβλεψη με το εκπαιδευμένο μοντέλο
+                model = st.session_state.model_results["model"]
+                proba = model.predict_proba(embedding)[0][1]
+                prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
 
-                if "model_results" in st.session_state and st.session_state.model_results is not None:
-                    X_train = st.session_state.model_results["X_test"]
-                    train_mean = X_train.mean().values
-                    dist = np.linalg.norm(embedding - train_mean)
-                    st.text(f"📏 Distance from train mean: {dist:.4f}")
-                    if dist > 5.0:
-                        st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
+                st.subheader("🔍 Prediction Result")
+                col1, col2 = st.columns(2)
+                col1.metric("Prediction", prediction)
+                col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
 
-                    model = st.session_state.model_results["model"]
-                    proba = model.predict_proba(embedding)[0][1]
-                    prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
+                # Ανάλυση απόκλισης από το training set mean
+                X_train = st.session_state.model_results["X_test"]
+                train_mean = X_train.mean().values
+                dist = np.linalg.norm(embedding - train_mean)
+                st.text(f"📏 Distance from train mean: {dist:.4f}")
+                if dist > 5.0:
+                    st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
 
-                    st.subheader("🔍 Prediction Result")
-                    col1, col2 = st.columns(2)
-                    col1.metric("Prediction", prediction)
-                    col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
-
-                df_bar = pd.DataFrame({
-                    "Category": ["Typical", "ASD Traits"],
-                    "Probability": [1 - proba, proba]
-                })
-                df_bar["Label"] = df_bar["Probability"].apply(lambda x: f"{x:.1%}")
-
-                fig = px.bar(
-                    df_bar,
-                    x="Category",
-                    y="Probability",
-                    title="Prediction Probabilities"
-                )
-                fig.update_traces(
-                    text=df_bar["Label"],
-                    texttemplate="%{text}",
-                    textposition="outside"
-                )
-                fig.update_layout(
-                    yaxis_range=[0, 1],
-                    uniformtext_minsize=8,
-                    uniformtext_mode='hide'
-                )
-                st.plotly_chart(fig)
-
+                # Ανίχνευση ανωμαλιών (Anomaly Detection)
                 with st.spinner("Running anomaly detection..."):
-                    cache_key = st.session_state.get("last_upload_id", str(uuid.uuid4()))
-                    iso_result = train_isolation_forest(cache_key=cache_key)
+                    iso_result = train_isolation_forest(cache_key=temp_upload_id)
                     if iso_result:
                         iso_forest, scaler = iso_result
                         embedding_scaled = scaler.transform(embedding)
@@ -1338,9 +1227,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         else:
                             st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
 
-                st.session_state.case_inserted = True
-                st.success("✅ Case processed successfully!")
-                st.balloons()
+                st.success("✅ Prediction completed successfully!")
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
