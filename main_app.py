@@ -159,7 +159,18 @@ def safe_neo4j_operation(func):
             logger.error(f"Neo4j operation failed: {str(e)}")
             return None
     return wrapper
-
+@safe_neo4j_operation
+def check_embedding_dimensions():
+    with neo4j_service.session() as session:
+        result = session.run("""
+            MATCH (c:Case) WHERE c.embedding IS NOT NULL
+            RETURN c.id AS case_id, size(c.embedding) AS embedding_length
+        """)
+        wrong_dims = [(r["case_id"], r["embedding_length"]) for r in result if r["embedding_length"] != 128]
+        if wrong_dims:
+            st.warning(f"⚠️ Cases with wrong embedding size: {wrong_dims}")
+        else:
+            st.success("✅ All embeddings have correct size (128).")
 # === Data Insertion ===
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
