@@ -185,7 +185,45 @@ def find_cases_missing_labels() -> list:
         else:
             st.success("✅ All cases have SCREENED_FOR labels.")
         return missing_cases
-        
+@safe_neo4j_operation
+def refresh_screened_for_labels(csv_url: str):
+    """
+    Atomically removes all existing SCREENED_FOR relationships
+    και ξαναδημιουργεί τις σωστές βάσει του CSV.
+    """
+
+    df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
+    df.columns = [col.strip() for col in df.columns]
+
+    if "Case_No" not in df.columns or "Class_ASD_Traits" not in df.columns:
+        st.error("❌ Το CSV πρέπει να περιέχει τις στήλες 'Case_No' και 'Class_ASD_Traits'")
+        return
+
+    with neo4j_service.session() as session:
+        # Διαγραφή όλων των σχέσεων
+        session.run("""
+            MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait)
+            DELETE r
+        """)
+        logger.info("✅ Παλιές σχέσεις SCREENED_FOR διαγράφηκαν.")
+
+        # Επανεγγραφή νέων σχέσεων με batch
+        tx = session.begin_transaction()
+
+        for _, row in df.iterrows():
+            case_id = int(row["Case_No"])
+            label = str(row["Class_ASD_Traits"]).strip().capitalize()  # "Yes" ή "No"
+
+            if label in ["Yes", "No"]:
+                tx.run("""
+                    MATCH (c:Case {id: $case_id})
+                    MERGE (t:ASD_Trait {label: $label})
+                    MERGE (c)-[:SCREENED_FOR]->(t)
+                """, case_id=case_id, label=label)
+
+        tx.commit()
+        logger.info("✅ Νέες σχέσεις SCREENED_FOR δημιουργήθηκαν με βάση το CSV.")
+        st.success("✅ Ολοκληρώθηκε η ανανέωση των σχέσεων SCREENED_FOR.")        
 # === Data Insertion ===
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
@@ -620,7 +658,8 @@ def evaluate_model(model, X_test, y_test):
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-        remove_screened_for_labels()
+        refresh_screened_for_labels(csv_url)
+
 
         X_raw, y = extract_training_data_from_csv(csv_url)
         X = X_raw.copy()
