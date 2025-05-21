@@ -792,7 +792,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab1:
         st.header("🤖 ASD Detection Model")
 
-        if st.button("🔄 Train/Refresh):
+        if st.button("🔄 Train/Refresh"):
                 with st.spinner("Training model with leakage protection..."):
                     results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
                     if results:
