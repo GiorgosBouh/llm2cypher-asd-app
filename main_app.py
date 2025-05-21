@@ -337,32 +337,26 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
 # === Training Data Preparation ===
 @safe_neo4j_operation
 def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
-    """
-    Ελέγχει αν οι ετικέτες Class_ASD_Traits στο CSV συμφωνούν με τις ετικέτες SCREENED_FOR
-    στον Neo4j γράφο για τα ίδια Case_No. Διακόπτει εκτέλεση αν βρεθούν ασυμφωνίες.
-    """
     inconsistent_cases = []
     with neo4j_service.session() as session:
         for _, row in df.iterrows():
             case_id = int(row["Case_No"])
-            csv_label = str(row["Class_ASD_Traits"]).strip().lower()  # Μετατροπή σε lowercase
-            
-            # Query στο γράφο για την ετικέτα (με case-insensitive σύγκριση)
+            csv_label = str(row["Class_ASD_Traits"]).strip().lower()  # lowercase και strip
+
             record = session.run("""
                 MATCH (c:Case {id: $case_id})-[r:SCREENED_FOR]->(t:ASD_Trait)
                 RETURN t.label AS graph_label
             """, case_id=case_id).single()
 
-            graph_label = record["graph_label"].lower() if record and record["graph_label"] else None
+            graph_label = record["graph_label"].strip().lower() if record and record["graph_label"] else None
 
             if graph_label is None:
-                # Αν λείπει ετικέτα στο γράφο, δημιούργησε την
                 st.warning(f"⚠️ Case_No {case_id} έχει ετικέτα '{csv_label}' στο CSV, αλλά δεν έχει ετικέτα στον γράφο. Δημιουργία σχέσης...")
                 session.run("""
                     MATCH (c:Case {id: $case_id})
                     MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
-                """, case_id=case_id, label=csv_label.capitalize())  # Αποθήκευση με κεφαλαίο πρώτο γράμμα
+                """, case_id=case_id, label=csv_label.capitalize())  # Κεφαλαίο πρώτο γράμμα
             elif graph_label != csv_label:
                 inconsistent_cases.append((case_id, csv_label, graph_label))
 
@@ -370,7 +364,7 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
         st.error("❌ Βρέθηκαν ασυμφωνίες μεταξύ CSV και Neo4j ετικετών (Class_ASD_Traits vs SCREENED_FOR):")
         for case_id, csv_label, graph_label in inconsistent_cases:
             st.error(f"- Case_No {case_id}: CSV='{csv_label}' | Neo4j='{graph_label}'")
-        st.stop()  # Διακοπή εκτέλεσης ώστε να μην γίνει εκπαίδευση με ασυνεπή δεδομένα
+        st.stop()
 
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
@@ -708,7 +702,6 @@ def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, St
 
 @safe_neo4j_operation
 def reinsert_labels_from_csv(csv_url: str):
-    """Επανατοποθέτηση SCREENED_FOR labels από CSV"""
     df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
     df.columns = [col.strip() for col in df.columns]
 
@@ -719,13 +712,13 @@ def reinsert_labels_from_csv(csv_url: str):
     with neo4j_service.session() as session:
         for _, row in df.iterrows():
             case_id = int(row["Case_No"])
-            label = str(row["Class_ASD_Traits"]).strip().lower()  # Μετατροπή σε lowercase
+            label = str(row["Class_ASD_Traits"]).strip().lower()
             if label in ["yes", "no"]:
                 session.run("""
                     MATCH (c:Case {id: $case_id})
                     MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
-                """, case_id=case_id, label=label.capitalize())  # Αποθήκευση με κεφαλαίο πρώτο γράμμα
+                """, case_id=case_id, label=label.capitalize())
 
 # === Streamlit UI ===
 def main():
