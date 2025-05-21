@@ -658,9 +658,22 @@ def evaluate_model(model, X_test, y_test):
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-        refresh_screened_for_labels(csv_url)
 
+        # 1. Αφαίρεση SCREENED_FOR σχέσεων για αποφυγή leakage
+        remove_screened_for_labels()
 
+        # 2. Αναγέννηση embeddings χωρίς τις ετικέτες (labels)
+        result = subprocess.run(
+            [sys.executable, "kg_builder_2.py"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        if result.returncode != 0:
+            st.error(f"❌ Failed to generate embeddings:\n{result.stderr}")
+            return None
+
+        # 3. Φόρτωση embeddings και labels από CSV (χωρίς leakage)
         X_raw, y = extract_training_data_from_csv(csv_url)
         X = X_raw.copy()
         X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
@@ -669,7 +682,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             st.error("⚠️ No valid training data available")
             return None
 
-        # Split data before any processing to prevent leakage
+        # 4. Train/test split (προστασία από leakage)
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
             test_size=Config.TEST_SIZE,
@@ -677,16 +690,16 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             random_state=Config.RANDOM_STATE
         )
 
-        # Calculate class weights
+        # 5. Υπολογισμός βαρών κλάσεων
         neg = sum(y_train == 0)
         pos = sum(y_train == 1)
         scale_pos_weight = neg / pos if pos != 0 else 1
 
-        # Create SMOTE + XGBoost pipeline with cross-validation
+        # 6. Pipeline με SMOTE και XGBoost
         pipeline = ImbPipeline([
             ('smote', SMOTE(
                 sampling_strategy='auto',
-                k_neighbors=min(Config.SMOTE_K_NEIGHBORS, pos - 1),  # Ensure we don't exceed available neighbors
+                k_neighbors=min(Config.SMOTE_K_NEIGHBORS, pos - 1),
                 random_state=Config.RANDOM_STATE
             )),
             ('xgb', XGBClassifier(
@@ -698,7 +711,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             ))
         ])
 
-        # First get cross-validated predictions to evaluate SMOTE
+        # 7. Cross-validation για να ελεγχθεί η απόδοση χωρίς leakage
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.RANDOM_STATE)
         y_proba = cross_val_predict(
             pipeline, X_train, y_train,
@@ -707,10 +720,10 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             n_jobs=-1
         )[:, 1]
 
-        # Now train on full training set
+        # 8. Εκπαίδευση στο πλήρες training set
         pipeline.fit(X_train, y_train)
 
-        # Evaluate on test set
+        # 9. Αξιολόγηση στο test set
         test_proba = pipeline.predict_proba(X_test)[:, 1]
         test_pred = pipeline.predict(X_test)
 
@@ -720,6 +733,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         st.subheader("📊 Test Set Results")
         st.write(f"Test ROC AUC: {roc_auc_score(y_test, test_proba):.3f}")
 
+        # 10. Επανέφερε τις SCREENED_FOR ετικέτες στον γράφο (μετά το training)
         reinsert_labels_from_csv(csv_url)
 
         return {
@@ -728,6 +742,10 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             "y_test": y_test
         }
 
+    except subprocess.CalledProcessError as cpe:
+        st.error(f"❌ Subprocess failed: {cpe.stderr}")
+        logger.error(f"Subprocess error during embedding generation: {cpe.stderr}")
+        return None
     except Exception as e:
         st.error(f"❌ Error training model: {e}")
         logger.error(f"Training error: {e}", exc_info=True)
