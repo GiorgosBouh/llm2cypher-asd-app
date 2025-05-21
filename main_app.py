@@ -171,6 +171,21 @@ def check_embedding_dimensions():
             st.warning(f"⚠️ Cases with wrong embedding size: {wrong_dims}")
         else:
             st.success("✅ All embeddings have correct size (128).")
+@safe_neo4j_operation
+def find_cases_missing_labels() -> list:
+    with neo4j_service.session() as session:
+        result = session.run("""
+            MATCH (c:Case)
+            WHERE NOT (c)-[:SCREENED_FOR]->(:ASD_Trait)
+            RETURN c.id AS case_id
+        """)
+        missing_cases = [record["case_id"] for record in result]
+        if missing_cases:
+            st.warning(f"⚠️ Cases missing SCREENED_FOR label: {missing_cases}")
+        else:
+            st.success("✅ All cases have SCREENED_FOR labels.")
+        return missing_cases
+        
 # === Data Insertion ===
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
@@ -222,13 +237,14 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
     if "Class_ASD_Traits" in row:
         label = str(row["Class_ASD_Traits"]).strip().lower()
         if label in ["yes", "no"]:
+         
             queries.append((
                 """
-                MATCH (c:Case {upload_id: $upload_id})
+                MATCH (c:Case {id: $id})
                 MERGE (t:ASD_Trait {label: $label})
                 MERGE (c)-[:SCREENED_FOR]->(t)
                 """,
-                {"upload_id": upload_id, "label": label.capitalize()}
+                {"id": int(row["Case_No"]), "label": label.capitalize()}
             ))
 
     with neo4j_service.session() as session:
@@ -352,7 +368,7 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
     with neo4j_service.session() as session:
         for _, row in df.iterrows():
             case_id = int(row["Case_No"])
-            csv_label = str(row["Class_ASD_Traits"]).strip().lower()  # lowercase και strip
+            csv_label = str(row["Class_ASD_Traits"]).strip().lower()
 
             record = session.run("""
                 MATCH (c:Case {id: $case_id})-[r:SCREENED_FOR]->(t:ASD_Trait)
@@ -367,7 +383,7 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
                     MATCH (c:Case {id: $case_id})
                     MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
-                """, case_id=case_id, label=csv_label.capitalize())  # Κεφαλαίο πρώτο γράμμα
+                """, case_id=case_id, label=csv_label.capitalize())
             elif graph_label != csv_label:
                 inconsistent_cases.append((case_id, csv_label, graph_label))
 
@@ -794,8 +810,16 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         "💬 NLP to Cypher"
     ])
 
+    
     with tab1:
         st.header("🤖 ASD Detection Model")
+
+        # Έλεγχος για περιπτώσεις χωρίς SCREENED_FOR label πριν το training
+        missing_labels = find_cases_missing_labels()
+        if missing_labels:
+            st.warning(f"⚠️ Υπάρχουν {len(missing_labels)} περιπτώσεις χωρίς SCREENED_FOR ετικέτα. Παρακαλώ διορθώστε τα δεδομένα πριν προχωρήσετε.")
+        else:
+            st.success("✅ Όλες οι περιπτώσεις έχουν SCREENED_FOR ετικέτα.")
 
         if st.button("🔄 Train/Refresh"):
             with st.spinner("Training model with leakage protection..."):
@@ -812,8 +836,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                         reinsert_labels_from_csv(csv_url)
                         st.success("🎯 Labels reinserted automatically after training!")
-            if st.session_state.get("model_trained"):
-                st.success("✅ Model trained successfully!")
 
         with st.expander("🧪 Compare old vs new embeddings (Case 1)"):
             if st.button("📤 Save current embedding of Case 1"):
