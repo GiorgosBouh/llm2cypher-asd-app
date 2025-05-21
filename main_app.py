@@ -806,6 +806,8 @@ def reinsert_labels_from_csv(csv_url: str):
 
 # === Streamlit UI ===
 def main():
+   
+
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
         <i>Autism Spectrum Disorder detection using graph embeddings</i>
@@ -847,7 +849,7 @@ to format your own screening case correctly.
 Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
 """)
 
-    # Initialize session state
+    # Initialize session state variables safely
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Model Training"
     if "case_inserted" not in st.session_state:
@@ -858,16 +860,25 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         st.session_state.last_case_no = None
     if "model_trained" not in st.session_state:
         st.session_state.model_trained = False
+    if "model_results" not in st.session_state:
+        st.session_state.model_results = None
+    if "saved_embedding_case1" not in st.session_state:
+        st.session_state.saved_embedding_case1 = None
+    if "last_cypher_query" not in st.session_state:
+        st.session_state.last_cypher_query = None
+    if "last_cypher_results" not in st.session_state:
+        st.session_state.last_cypher_results = None
+    if "preset_question" not in st.session_state:
+        st.session_state.preset_question = ""
 
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs([
-        "📊 Model Training", 
-        "🌐 Graph Embeddings", 
-        "📤 Upload New Case", 
+        "📊 Model Training",
+        "🌐 Graph Embeddings",
+        "📤 Upload New Case",
         "💬 NLP to Cypher"
     ])
 
-    
     with tab1:
         st.header("🤖 ASD Detection Model")
 
@@ -878,21 +889,35 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         else:
             st.success("✅ Όλες οι περιπτώσεις έχουν SCREENED_FOR ετικέτα.")
 
+        # Κουμπί για training
         if st.button("🔄 Train/Refresh"):
             with st.spinner("Training model with leakage protection..."):
                 results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
                 if results:
+                    # Αποθήκευση αποτελεσμάτων σε session_state για να μην χάνονται
                     st.session_state.model_results = results
                     st.session_state.model_trained = True
+                    st.success("✅ Training completed successfully.")
+
+                    # Άμεση εμφάνιση αξιολόγησης μετά το training
                     evaluate_model(
                         results["model"],
                         results["X_test"],
                         results["y_test"]
                     )
+
                     with st.spinner("Reattaching labels to cases..."):
                         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                         reinsert_labels_from_csv(csv_url)
                         st.success("🎯 Labels reinserted automatically after training!")
+
+        # Αν υπάρχουν αποτελέσματα από προηγούμενο training, τα εμφανίζουμε εδώ
+        if st.session_state.model_trained and st.session_state.model_results is not None:
+            evaluate_model(
+                st.session_state.model_results["model"],
+                st.session_state.model_results["X_test"],
+                st.session_state.model_results["y_test"]
+            )
 
         with st.expander("🧪 Compare old vs new embeddings (Case 1)"):
             if st.button("📤 Save current embedding of Case 1"):
@@ -907,7 +932,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
                     if result and result["emb"]:
                         new_emb = result["emb"]
-                        old_emb = st.session_state.get("saved_embedding_case1")
+                        old_emb = st.session_state.saved_embedding_case1
                         if old_emb:
                             from numpy.linalg import norm
                             diff = norm(np.array(old_emb) - np.array(new_emb))
@@ -938,11 +963,11 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
     with tab3:
         st.header("📄 Upload New Case")
-        
+
         # ========== INSTRUCTIONS SECTION ==========
         with st.container(border=True):
             st.subheader("📝 Before You Upload", anchor=False)
-            
+
             cols = st.columns([1, 3])
             with cols[0]:
                 st.image("https://cdn-icons-png.flaticon.com/512/2965/2965300.png", width=80)
@@ -953,23 +978,23 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 2. Review the data format instructions
                 3. Prepare your case data accordingly
                 """)
-            
+
             st.markdown("---")
             st.markdown("### 🛠️ Required Resources")
-            
+
             col1, col2 = st.columns(2)
             with col1:
                 with st.container(border=True):
                     st.markdown("**📥 Example CSV Template**")
                     st.markdown("Download and use this template to format your data:")
                     st.markdown("[Download Example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)")
-            
+
             with col2:
                 with st.container(border=True):
                     st.markdown("**📋 Data Format Instructions**")
                     st.markdown("Read the detailed documentation:")
                     st.markdown("[View Instructions Document](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)")
-            
+
             st.markdown("---")
             st.markdown("""
             **❗ Important Notes:**
@@ -988,7 +1013,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
         # File uploader
         uploaded_file = st.file_uploader(
-            "**Upload your prepared CSV file**", 
+            "**Upload your prepared CSV file**",
             type="csv",
             key="case_uploader",
             help="Ensure your file follows the template format before uploading"
@@ -1003,8 +1028,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.dataframe(
                     df.style.format(
                         {
-                        "Case_No": "{:.0f}",
-                        **{f"A{i}": "{:.0f}" for i in range(1,11)}
+                            "Case_No": "{:.0f}",
+                            **{f"A{i}": "{:.0f}" for i in range(1, 11)}
                         }
                     ),
                     use_container_width=True,
@@ -1013,9 +1038,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 # ========== END CSV PREVIEW ==========
 
                 required_cols = [
-                    "Case_No", "A1", "A2", "A3", "A4", "A5", 
+                    "Case_No", "A1", "A2", "A3", "A4", "A5",
                     "A6", "A7", "A8", "A9", "A10",
-                    "Sex", "Ethnicity", "Jaundice", 
+                    "Sex", "Ethnicity", "Jaundice",
                     "Family_mem_with_ASD", "Who_completed_the_test"
                 ]
 
@@ -1040,36 +1065,36 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 with neo4j_service.session() as session:
                     result = session.run("MATCH (c:Case) RETURN c.id AS case_id")
                     existing_case_nos = {record["case_id"] for record in result}
-                    
+
                     max_case_no = max(existing_case_nos) if existing_case_nos else 0
                     suggested_case_no = max_case_no + 1
-                    
+
                     if case_no in existing_case_nos:
                         st.error(f"❌ Case No. {case_no} already exists in the system!")
                         st.warning("⚠️ Using duplicate case numbers will cause data integrity issues")
-                        
+
                         st.subheader("📌 Existing Case Details")
                         existing_case = session.run("""
                             MATCH (c:Case {id: $case_no})
                             OPTIONAL MATCH (c)-[:HAS_DEMOGRAPHIC]->(d)
                             OPTIONAL MATCH (c)-[:SUBMITTED_BY]->(s)
-                            RETURN c.id AS case_id, 
+                            RETURN c.id AS case_id,
                                 collect(DISTINCT d.type + ': ' + d.value) AS demographics,
                                 s.type AS submitted_by
                         """, case_no=case_no).data()
-                        
+
                         if existing_case:
                             st.json(existing_case[0])
-                        
+
                         st.subheader("🛠️ How to Proceed")
                         col1, col2 = st.columns(2)
-                        
+
                         with col1:
                             st.markdown("**Option 1:** Use suggested Case No.")
                             edited_df = df.copy()
                             edited_df.at[0, "Case_No"] = suggested_case_no
                             st.dataframe(edited_df)
-                            
+
                             st.download_button(
                                 label=f"💾 Download with Case No. {suggested_case_no}",
                                 data=edited_df.to_csv(sep=";", index=False).encode('utf-8'),
@@ -1077,23 +1102,23 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                                 mime="text/csv",
                                 key=f"download_{suggested_no}"
                             )
-                        
+
                         with col2:
                             st.markdown("**Option 2:** Choose a different Case No.")
                             new_case_no = st.number_input(
-                                "Enter new Case No.", 
+                                "Enter new Case No.",
                                 min_value=1,
                                 value=suggested_case_no,
                                 step=1
                             )
-                            
+
                             if new_case_no in existing_case_nos:
                                 st.error("This Case No. is also taken!")
                             else:
                                 edited_df = df.copy()
                                 edited_df.at[0, "Case_No"] = new_case_no
                                 st.dataframe(edited_df)
-                                
+
                                 st.download_button(
                                     label=f"💾 Download with Case No. {new_case_no}",
                                     data=edited_df.to_csv(sep=";", index=False).encode('utf-8'),
@@ -1101,7 +1126,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                                     mime="text/csv",
                                     key=f"download_{new_case_no}"
                                 )
-                        
+
                         st.stop()
                     else:
                         st.session_state.last_case_no = case_no
@@ -1146,7 +1171,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     if degree < 5:
                         st.warning("⚠️ Very few connections in the graph. The embedding might be weak.")
 
-                if "model_results" in st.session_state:
+                if "model_results" in st.session_state and st.session_state.model_results is not None:
                     X_train = st.session_state.model_results["X_test"]
                     train_mean = X_train.mean().values
                     dist = np.linalg.norm(embedding - train_mean)
@@ -1251,8 +1276,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
             for q in example_questions:
                 if st.button(q, key=f"example_{q}"):
-                    st.session_state["preset_question"] = q
-                    st.session_state["last_cypher_results"] = None  # Reset previous results
+                    st.session_state.preset_question = q
+                    st.session_state.last_cypher_results = None  # Reset previous results
 
         # Text input for user question
         default_question = st.session_state.get("preset_question", "")
@@ -1263,26 +1288,26 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             if question.strip():
                 cypher = nl_to_cypher(question)
                 if cypher:
-                    st.session_state["last_cypher_query"] = cypher
+                    st.session_state.last_cypher_query = cypher
                     # Εκτέλεση query και αποθήκευση αποτελεσμάτων στο session_state
                     try:
                         with neo4j_service.session() as session:
                             results = session.run(cypher).data()
-                            st.session_state["last_cypher_results"] = results
+                            st.session_state.last_cypher_results = results
                     except Exception as e:
                         st.error(f"Query failed: {str(e)}")
-                        st.session_state["last_cypher_results"] = None
+                        st.session_state.last_cypher_results = None
             else:
                 st.warning("Please enter a question.")
 
         # Αν υπάρχει αποθηκευμένο Cypher query, το δείχνουμε
-        if "last_cypher_query" in st.session_state:
-            st.code(st.session_state["last_cypher_query"], language="cypher")
+        if st.session_state.last_cypher_query:
+            st.code(st.session_state.last_cypher_query, language="cypher")
 
         # Αν υπάρχουν αποθηκευμένα αποτελέσματα, τα δείχνουμε
-        if "last_cypher_results" in st.session_state and st.session_state["last_cypher_results"] is not None:
-            if len(st.session_state["last_cypher_results"]) > 0:
-                st.dataframe(pd.DataFrame(st.session_state["last_cypher_results"]))
+        if st.session_state.last_cypher_results is not None:
+            if len(st.session_state.last_cypher_results) > 0:
+                st.dataframe(pd.DataFrame(st.session_state.last_cypher_results))
             else:
                 st.info("No results found.")
 
