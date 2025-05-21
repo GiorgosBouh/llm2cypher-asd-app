@@ -181,7 +181,7 @@ class GraphBuilder:
         for i, row1 in df.iterrows():
             for j, row2 in df.iloc[i+1:].iterrows():
                 if sum(row1[f'A{k}'] == row2[f'A{k}'] for k in range(1,11)) >= self.MIN_SIMILAR_ANSWERS:
-                    pairs.add((int(row1['Case_No']), int(row2['Case_No']))
+                    pairs.add((int(row1['Case_No']), int(row2['Case_No'])))
         
         # Demographic similarity
         demo_cols = ['Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD']
