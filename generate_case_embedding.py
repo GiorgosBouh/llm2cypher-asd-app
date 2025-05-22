@@ -187,7 +187,9 @@ class EmbeddingGenerator:
                 p=self.NODE2VEC_P,
                 q=self.NODE2VEC_Q,
                 quiet=True,
-                temp_folder=temp_dir
+                temp_folder=temp_dir,
+                weighted=True,  # Χρήση βαρών από τις σχέσεις
+                weight_key='weight'
             )
             
             model = node2vec.fit(
@@ -197,6 +199,10 @@ class EmbeddingGenerator:
             )
             
             embedding = model.wv[case_id].tolist()
+            
+            if np.std(embedding) < 0.01:  # Πολύ μικρή διακύμανση
+                logger.warning(f"Low variance embedding for {case_id}")
+                return None
             
             if not self.validate_embedding(embedding):
                 logger.error("Generated invalid embedding")

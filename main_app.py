@@ -738,7 +738,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             pipeline = ImbPipeline([
                 ('smote', SMOTE(
                     sampling_strategy='auto',
-                    k_neighbors=smote_k,
+                    k_neighbors=min(Config.SMOTE_K_NEIGHBORS, pos - 1),  # Προστασία για πολύ μικρές κλάσεις
                     random_state=Config.RANDOM_STATE
                 )),
                 ('xgb', XGBClassifier(
