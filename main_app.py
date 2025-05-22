@@ -100,7 +100,7 @@ class Config:
     MAX_RELATIONSHIPS = 100000
     EMBEDDING_GENERATION_TIMEOUT = 300
     LEAKAGE_CHECK = True
-    SMOTE_K_NEIGHBORS = 5  # Added SMOTE configuration
+    SMOTE_K_NEIGHBORS = 3  # Added SMOTE configuration
 
 # === Logging Setup ===
 logging.basicConfig(
