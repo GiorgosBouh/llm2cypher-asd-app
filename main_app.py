@@ -1201,7 +1201,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 # Πρόβλεψη με το εκπαιδευμένο μοντέλο
                 model = st.session_state.model_results["model"]
                 embedding_array = np.array(embedding).reshape(1, -1)
-                proba = model.predict_proba(embedding_array)[0][1]
+                proba = model.predict_proba(embedding.reshape(1, -1))[0][1]
                 prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
 
                 st.subheader("🔍 Prediction Result")
