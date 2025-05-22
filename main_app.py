@@ -34,6 +34,8 @@ import sys
 from sklearn.impute import SimpleImputer
 from xgboost import XGBClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
+import json
+
 
 def call_embedding_generator(upload_id: str) -> bool:
     """Generate embedding for a single case using subprocess with enhanced error handling"""
@@ -1067,6 +1069,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("❌ Failed to run kg_builder_2.py")
                     st.code(result.stderr)
 
+
+
     with tab3:
         st.header("📄 Upload New Case (Prediction Only - No Graph Storage)")
 
@@ -1151,26 +1155,35 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.stop()
 
                 row = df.iloc[0]
-
-                # Χρήση προσωρινού upload_id για το νέο case
-                temp_upload_id = "temp_upload_" + str(uuid.uuid4())
+                case_data = row.to_dict()
 
                 if "model_results" not in st.session_state or st.session_state.model_results is None:
                     st.error("⚠️ Model not trained yet. Please train the model first.")
                     st.stop()
 
-                # Καλούμε subprocess για να δημιουργήσουμε προσωρινό embedding
-                with st.spinner("Generating embedding for prediction..."):
-                    embedding_generated = call_embedding_generator(temp_upload_id)
-                    if not embedding_generated:
-                        st.error("❌ Failed to generate embedding. Check logs.")
-                        st.stop()
+                # Δημιουργία προσωρινού upload_id
+                temp_upload_id = "temp_upload_" + str(uuid.uuid4())
 
-                # Παίρνουμε embedding από Neo4j με το προσωρινό upload_id
-                embedding = extract_user_embedding(temp_upload_id)
-                if embedding is None:
-                    st.error("❌ Embedding extraction failed.")
-                    st.stop()
+                # Κλήση subprocess generate_case_embedding.py με upload_id και case_data JSON
+                with st.spinner("Generating embedding for prediction..."):
+                    cmd = [
+                        sys.executable,
+                        "generate_case_embedding.py",
+                        temp_upload_id,
+                        json.dumps(case_data)
+                    ]
+                    proc = subprocess.run(cmd, capture_output=True, text=True)
+                    
+                    if proc.returncode != 0:
+                        st.error(f"❌ Embedding generation failed: {proc.stderr.strip()}")
+                        st.stop()
+                    
+                    embedding_json = proc.stdout.strip()
+                    try:
+                        embedding = np.array(json.loads(embedding_json))
+                    except Exception as e:
+                        st.error(f"❌ Failed to parse embedding JSON: {str(e)}")
+                        st.stop()
 
                 st.subheader("🧠 Case Embedding (Temporary)")
                 st.write(embedding)

@@ -8,7 +8,8 @@ import time
 import tempfile
 import logging
 from typing import List, Optional
-import shutil  # Make sure this is imported
+import shutil
+import json
 
 # Configure logging
 logging.basicConfig(
@@ -19,14 +20,12 @@ logger = logging.getLogger(__name__)
 
 class EmbeddingGenerator:
     def __init__(self):
-        # Make these parameters consistent with main app
         self.EMBEDDING_DIM = 128
         self.MIN_CONNECTIONS = 3
         self.MAX_RETRIES = 3
         self.MIN_SIMILARITY = 5  # Minimum shared answers for similarity
         self.EMBEDDING_NORMALIZATION = True
         
-        # Add Node2Vec parameters to match kg_builder
         self.NODE2VEC_WALK_LENGTH = 30
         self.NODE2VEC_NUM_WALKS = 100
         self.NODE2VEC_P = 1.0
@@ -36,7 +35,6 @@ class EmbeddingGenerator:
         self.NODE2VEC_BATCH_WORDS = 1000
 
     def get_driver(self):
-        """Create a Neo4j driver with robust settings"""
         return GraphDatabase.driver(
             os.getenv("NEO4J_URI"),
             auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD")),
@@ -46,7 +44,6 @@ class EmbeddingGenerator:
         )
 
     def validate_embedding(self, embedding: List[float]) -> bool:
-        """Ensure embedding is valid and normalized"""
         if not embedding or len(embedding) != self.EMBEDDING_DIM:
             return False
             
@@ -66,10 +63,71 @@ class EmbeddingGenerator:
             
         return True
 
+    def insert_temporary_case(self, driver, upload_id: str, case_data: dict) -> bool:
+        """Insert temporary Case node and related nodes/relationships"""
+        logger.info(f"Inserting temporary case with upload_id {upload_id}")
+        with driver.session() as session:
+            # Δημιουργία κόμβου Case με upload_id
+            # και δημιουργία σχέσεων με BehaviorQuestion, DemographicAttribute, SubmitterType
+            # Τα δεδομένα του case_data περιλαμβάνουν απαντήσεις A1-A10, Demographics κλπ
+
+            try:
+                # Δημιουργία του κόμβου Case
+                session.run("""
+                    CREATE (c:Case {upload_id: $upload_id, id: $case_no})
+                """, upload_id=upload_id, case_no=int(case_data["Case_No"]))
+
+                # Συνδέουμε με BehaviorQuestion nodes και τις απαντήσεις (HAS_ANSWER)
+                for i in range(1, 11):
+                    question_label = f"A{i}"
+                    answer_value = int(case_data.get(question_label, 0))
+                    session.run("""
+                        MATCH (c:Case {upload_id: $upload_id}), (q:BehaviorQuestion {name: $question})
+                        MERGE (c)-[r:HAS_ANSWER]->(q)
+                        SET r.value = $value
+                    """, upload_id=upload_id, question=question_label, value=answer_value)
+
+                # Συνδέουμε με DemographicAttribute nodes (HAS_DEMOGRAPHIC)
+                demographic_fields = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
+                for field in demographic_fields:
+                    val = str(case_data.get(field, "")).strip()
+                    if val:
+                        session.run("""
+                            MATCH (c:Case {upload_id: $upload_id}), (d:DemographicAttribute {type: $field, value: $val})
+                            MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)
+                        """, upload_id=upload_id, field=field, val=val)
+
+                # Συνδέουμε με SubmitterType node (SUBMITTED_BY)
+                submitter = str(case_data.get("Who_completed_the_test", "")).strip()
+                if submitter:
+                    session.run("""
+                        MATCH (c:Case {upload_id: $upload_id}), (s:SubmitterType {type: $submitter})
+                        MERGE (c)-[:SUBMITTED_BY]->(s)
+                    """, upload_id=upload_id, submitter=submitter)
+
+                logger.info("Temporary case inserted successfully")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to insert temporary case: {str(e)}")
+                return False
+
+    def delete_temporary_case(self, driver, upload_id: str) -> None:
+        """Delete the temporary case node and all its relationships"""
+        logger.info(f"Deleting temporary case with upload_id {upload_id}")
+        with driver.session() as session:
+            try:
+                session.run("""
+                    MATCH (c:Case {upload_id: $upload_id})
+                    DETACH DELETE c
+                """, upload_id=upload_id)
+                logger.info("Temporary case deleted successfully")
+            except Exception as e:
+                logger.error(f"Failed to delete temporary case: {str(e)}")
+
     def build_base_graph(self, driver, upload_id: str) -> Optional[tuple]:
         """Construct the initial graph structure"""
         with driver.session() as session:
-            # Enhanced query to get more relevant connections
             result = session.run("""
                 MATCH (c:Case {upload_id: $upload_id})
                 OPTIONAL MATCH (c)-[r:HAS_ANSWER|HAS_DEMOGRAPHIC|SUBMITTED_BY]->(neighbor)
@@ -85,11 +143,10 @@ class EmbeddingGenerator:
                 logger.error("Case not found or missing ID")
                 return None
 
-            case_id = f"Case_{result['case_id']}"  # Consistent with kg_builder format
+            case_id = f"Case_{result['case_id']}"
             G = nx.Graph()
             G.add_node(case_id)
             
-            # Add initial connections with validation
             for neighbor in result["neighbors"]:
                 if neighbor:
                     neighbor_id = f"Case_{neighbor}" if isinstance(neighbor, int) else str(neighbor)
@@ -98,11 +155,9 @@ class EmbeddingGenerator:
             return G, case_id
 
     def augment_with_similarity(self, driver, G: nx.Graph, case_id: str) -> None:
-        """Enhance graph with similarity-based connections"""
-        original_case_id = int(case_id.split('_')[1])  # Extract numeric ID from "Case_123"
+        original_case_id = int(case_id.split('_')[1])
         
         with driver.session() as session:
-            # More comprehensive similarity query
             similar = session.run("""
                 MATCH (c:Case {id: $case_id})-[:HAS_ANSWER]->(q)<-[:HAS_ANSWER]-(similar:Case)
                 WHERE c <> similar AND similar.embedding IS NOT NULL
@@ -115,7 +170,7 @@ class EmbeddingGenerator:
 
             for record in similar:
                 similar_id = f"Case_{record['similar.id']}"
-                weight = record['shared_answers'] / 10.0  # Normalize weight to 0-2 range
+                weight = record['shared_answers'] / 10.0
                 G.add_edge(case_id, similar_id, weight=weight)
 
     def generate_embedding(self, G: nx.Graph, case_id: str) -> Optional[List[float]]:
@@ -159,73 +214,56 @@ class EmbeddingGenerator:
                 except Exception as e:
                     logger.warning(f"Could not remove temp directory: {str(e)}")
 
-    def store_embedding(self, driver, upload_id: str, embedding: List[float]) -> bool:
-        """Safely store embedding in Neo4j"""
-        try:
-            with driver.session() as session:
-                result = session.run("""
-                    MATCH (c:Case {upload_id: $upload_id})
-                    SET c.embedding = $embedding,
-                        c.embedding_version = 2.1,
-                        c.last_embedding_update = timestamp()
-                    RETURN count(c) AS updated
-                """, upload_id=upload_id, embedding=embedding).single()
-                
-                return result["updated"] > 0
-        except Exception as e:
-            logger.error(f"Failed to store embedding: {str(e)}")
-            return False
-
-    def generate_embedding_for_case(self, upload_id: str) -> bool:
-        """Main embedding generation workflow"""
+    def generate_embedding_for_case(self, upload_id: str, case_data: dict) -> Optional[List[float]]:
+        """Main embedding generation workflow for temporary case"""
         driver = None
         try:
             driver = self.get_driver()
+
+            # Step 0: Insert temporary case node with relationships
+            inserted = self.insert_temporary_case(driver, upload_id, case_data)
+            if not inserted:
+                logger.error("Failed to insert temporary case. Aborting embedding generation.")
+                return None
             
-            for attempt in range(self.MAX_RETRIES):
-                try:
-                    # Step 1: Build base graph
-                    graph_result = self.build_base_graph(driver, upload_id)
-                    if not graph_result:
-                        logger.error("Failed to build base graph")
-                        return False
-                        
-                    G, case_id = graph_result
-                    
-                    # Step 2: Augment with similarity if needed
-                    if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
-                        logger.info(f"Initial connections low ({len(G.edges(case_id))}), augmenting...")
-                        self.augment_with_similarity(driver, G, case_id)
-                        
-                        if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
-                            logger.warning(f"Insufficient connections ({len(G.edges(case_id))}) after augmentation")
-                            return False
+            # Step 1: Build base graph
+            graph_result = self.build_base_graph(driver, upload_id)
+            if not graph_result:
+                logger.error("Failed to build base graph")
+                self.delete_temporary_case(driver, upload_id)
+                return None
+                
+            G, case_id = graph_result
+            
+            # Step 2: Augment with similarity if needed
+            if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
+                logger.info(f"Initial connections low ({len(G.edges(case_id))}), augmenting...")
+                self.augment_with_similarity(driver, G, case_id)
+                
+                if len(G.edges(case_id)) < self.MIN_CONNECTIONS:
+                    logger.warning(f"Insufficient connections ({len(G.edges(case_id))}) after augmentation")
+                    self.delete_temporary_case(driver, upload_id)
+                    return None
 
-                    # Step 3: Generate embedding
-                    logger.info(f"Generating embedding for {case_id} with {len(G.nodes)} nodes and {len(G.edges)} edges")
-                    embedding = self.generate_embedding(G, case_id)
-                    if not embedding:
-                        logger.error("Embedding generation returned None")
-                        return False
-                        
-                    # Step 4: Store embedding
-                    if not self.store_embedding(driver, upload_id, embedding):
-                        logger.error("Failed to store embedding in Neo4j")
-                        return False
-                        
-                    logger.info(f"Successfully generated embedding for case {case_id}")
-                    return True
+            # Step 3: Generate embedding
+            logger.info(f"Generating embedding for {case_id} with {len(G.nodes)} nodes and {len(G.edges)} edges")
+            embedding = self.generate_embedding(G, case_id)
+            if not embedding:
+                logger.error("Embedding generation returned None")
+                self.delete_temporary_case(driver, upload_id)
+                return None
 
-                except Exception as e:
-                    if attempt == self.MAX_RETRIES - 1:
-                        raise
-                    wait_time = 2 ** attempt
-                    logger.warning(f"Attempt {attempt + 1} failed, retrying in {wait_time}s...")
-                    time.sleep(wait_time)
+            # Step 4: Delete temporary node
+            self.delete_temporary_case(driver, upload_id)
+
+            logger.info(f"Successfully generated embedding for case {case_id}")
+            return embedding
 
         except Exception as e:
             logger.error(f"Embedding generation failed: {str(e)}")
-            return False
+            if driver:
+                self.delete_temporary_case(driver, upload_id)
+            return None
 
         finally:
             if driver:
@@ -233,15 +271,25 @@ class EmbeddingGenerator:
 
 if __name__ == "__main__":
     try:
-        if len(sys.argv) < 2:
-            raise ValueError("Missing upload_id parameter")
+        if len(sys.argv) < 3:
+            raise ValueError("Missing parameters. Usage: generate_case_embedding.py <upload_id> <case_data_json>")
         
         upload_id = sys.argv[1]
+        case_data_json = sys.argv[2]
+        case_data = json.loads(case_data_json)
+
         logger.info(f"Starting embedding generation for upload_id: {upload_id}")
         generator = EmbeddingGenerator()
-        success = generator.generate_embedding_for_case(upload_id)
-        logger.info(f"Embedding generation {'succeeded' if success else 'failed'}")
-        sys.exit(0 if success else 1)
+        embedding = generator.generate_embedding_for_case(upload_id, case_data)
+
+        if embedding is not None:
+            logger.info("Embedding generated successfully")
+            # Επιστρέφουμε το embedding ως JSON στο stdout για να το πάρει το main_app.py
+            print(json.dumps(embedding))
+            sys.exit(0)
+        else:
+            logger.error("Embedding generation failed")
+            sys.exit(1)
         
     except Exception as e:
         logger.critical(f"Fatal error: {str(e)}")
