@@ -1023,6 +1023,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         results["model"],
                         results["X_test"],
                         results["y_test"]
+                    )
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
             evaluate_model(
                 st.session_state.model_results["model"],
