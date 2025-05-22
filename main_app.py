@@ -1018,6 +1018,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.session_state.model_results = results
                     st.session_state.model_trained = True
                     st.success("✅ Training completed successfully.")
+                    st.experimental_rerun()
 
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
             evaluate_model(
