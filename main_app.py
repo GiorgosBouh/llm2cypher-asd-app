@@ -1149,7 +1149,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     "Family_mem_with_ASD", "Who_completed_the_test"
                 ]
 
-                # Έλεγχος υποχρεωτικών στηλών
+                # Check required columns
                 missing = [col for col in required_cols if col not in df.columns]
                 if missing:
                     st.error(f"❌ Missing required columns: {', '.join(missing)}")
@@ -1166,10 +1166,10 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("⚠️ Model not trained yet. Please train the model first.")
                     st.stop()
 
-                # Δημιουργία προσωρινού upload_id
+                # Temporary upload_id for embedding generation
                 temp_upload_id = "temp_upload_" + str(uuid.uuid4())
 
-                # Κλήση subprocess generate_case_embedding.py με upload_id και case_data JSON
+                # Call subprocess generate_case_embedding.py with upload_id and case_data JSON
                 with st.spinner("Generating embedding for prediction..."):
                     cmd = [
                         sys.executable,
@@ -1178,11 +1178,11 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         json.dumps(case_data)
                     ]
                     proc = subprocess.run(cmd, capture_output=True, text=True)
-                    
+
                     if proc.returncode != 0:
                         st.error(f"❌ Embedding generation failed: {proc.stderr.strip()}")
                         st.stop()
-                    
+
                     embedding_json = proc.stdout.strip()
                     try:
                         embedding = np.array(json.loads(embedding_json))
@@ -1203,10 +1203,10 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 else:
                     st.success("✅ Embedding is valid (no NaNs)")
 
-                # Πρόβλεψη με το εκπαιδευμένο μοντέλο
+                # *** Prediction ***
                 model = st.session_state.model_results["model"]
-                embedding_array = np.array(embedding).reshape(1, -1)
-                proba = model.predict_proba(embedding.reshape(1, -1))[0][1]
+                embedding_reshaped = embedding.reshape(1, -1)  # Σημαντικό για σωστή μορφή
+                proba = model.predict_proba(embedding_reshaped)[0][1]
                 prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
 
                 st.subheader("🔍 Prediction Result")
@@ -1214,7 +1214,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 col1.metric("Prediction", prediction)
                 col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
 
-                # Ανάλυση απόκλισης από το training set mean
+                # Distance from training mean
                 X_train = st.session_state.model_results["X_test"]
                 train_mean = X_train.mean().values
                 dist = np.linalg.norm(embedding - train_mean)
@@ -1222,12 +1222,12 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 if dist > 5.0:
                     st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
 
-                # Ανίχνευση ανωμαλιών (Anomaly Detection)
+                # Anomaly Detection
                 with st.spinner("Running anomaly detection..."):
                     iso_result = train_isolation_forest(cache_key=temp_upload_id)
                     if iso_result:
                         iso_forest, scaler = iso_result
-                        embedding_scaled = scaler.transform(embedding)
+                        embedding_scaled = scaler.transform(embedding_reshaped)  # reshape εδώ επίσης
                         anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
                         is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
 
