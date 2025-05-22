@@ -1016,47 +1016,40 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.session_state.model_results = results
                     st.session_state.model_trained = True
                     st.success("✅ Training completed successfully.")
-                    evaluate_model(
-                        results["model"],
-                        results["X_test"],
-                        results["y_test"]
-                    )
-                    with st.spinner("Reattaching labels to cases..."):
-                        csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-                        reinsert_labels_from_csv(csv_url)
-                        st.success("🎯 Labels reinserted automatically after training!")
+                    st.experimental_rerun()  # Ανανέωση UI για να εμφανιστούν τα αποτελέσματα
 
-        if st.session_state.model_trained and st.session_state.model_results is not None:
+        if st.session_state.get("model_trained") and st.session_state.get("model_results"):
+            st.info("Displaying evaluation results:")
             evaluate_model(
                 st.session_state.model_results["model"],
                 st.session_state.model_results["X_test"],
                 st.session_state.model_results["y_test"]
             )
 
-        with st.expander("🧪 Compare old vs new embeddings (Case 1)"):
-            if st.button("📤 Save current embedding of Case 1"):
-                with neo4j_service.session() as session:
-                    result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
-                    if result and result["emb"]:
-                        st.session_state.saved_embedding_case1 = result["emb"]
-                        st.success("✅ Saved current embedding of Case 1")
+            with st.expander("🧪 Compare old vs new embeddings (Case 1)"):
+                if st.button("📤 Save current embedding of Case 1"):
+                    with neo4j_service.session() as session:
+                        result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
+                        if result and result["emb"]:
+                            st.session_state.saved_embedding_case1 = result["emb"]
+                            st.success("✅ Saved current embedding of Case 1")
 
-            if st.button("📥 Compare to current embedding of Case 1"):
-                with neo4j_service.session() as session:
-                    result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
-                    if result and result["emb"]:
-                        new_emb = result["emb"]
-                        old_emb = st.session_state.saved_embedding_case1
-                        if old_emb:
-                            from numpy.linalg import norm
-                            diff = norm(np.array(old_emb) - np.array(new_emb))
-                            st.write(f"📏 Difference (L2 norm) between saved and current embedding: `{diff:.4f}`")
-                            if diff < 1e-3:
-                                st.warning("⚠️ Embedding is (almost) identical — rebuild had no effect.")
+                if st.button("📥 Compare to current embedding of Case 1"):
+                    with neo4j_service.session() as session:
+                        result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
+                        if result and result["emb"]:
+                            new_emb = result["emb"]
+                            old_emb = st.session_state.saved_embedding_case1
+                            if old_emb:
+                                from numpy.linalg import norm
+                                diff = norm(np.array(old_emb) - np.array(new_emb))
+                                st.write(f"📏 Difference (L2 norm) between saved and current embedding: `{diff:.4f}`")
+                                if diff < 1e-3:
+                                    st.warning("⚠️ Embedding is (almost) identical — rebuild had no effect.")
+                                else:
+                                    st.success("✅ Embedding changed — rebuild updated the graph.")
                             else:
-                                st.success("✅ Embedding changed — rebuild updated the graph.")
-                        else:
-                            st.error("❌ No saved embedding found. Click 'Save current embedding' first.")
+                                st.error("❌ No saved embedding found. Click 'Save current embedding' first.")
 
     # === Tab 2: Graph Embeddings ===
     with tab2:
