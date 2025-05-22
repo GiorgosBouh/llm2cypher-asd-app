@@ -1016,10 +1016,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.session_state.model_results = results
                     st.session_state.model_trained = True
                     st.success("✅ Training completed successfully.")
-                    st.experimental_rerun()  # Ανανέωση UI για να εμφανιστούν τα αποτελέσματα
 
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
-            st.info("Displaying evaluation results:")
             evaluate_model(
                 st.session_state.model_results["model"],
                 st.session_state.model_results["X_test"],
