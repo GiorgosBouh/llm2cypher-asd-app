@@ -661,99 +661,154 @@ def evaluate_model(model, X_test, y_test):
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+        
+        # 1. Ανανέωση ετικετών από CSV (πρώτα διαγραφή, μετά εισαγωγή)
+        with st.spinner("Refreshing SCREENED_FOR labels..."):
+            refresh_screened_for_labels(csv_url)
+            missing_cases = find_cases_missing_labels()
+            if missing_cases:
+                st.error(f"❌ {len(missing_cases)} cases still missing labels after refresh")
+                return None
 
-        # 1. Αφαίρεση SCREENED_FOR σχέσεων για αποφυγή leakage
-        remove_screened_for_labels()
+        # 2. Αφαίρεση προσωρινή των ετικετών για embedding generation
+        with st.spinner("Removing labels temporarily for safe embedding generation..."):
+            remove_screened_for_labels()
+            
+        # 3. Αναγέννηση embeddings χωρίς τις ετικέτες (labels)
+        with st.spinner("Rebuilding graph embeddings..."):
+            result = subprocess.run(
+                [sys.executable, "kg_builder_2.py"],
+                capture_output=True,
+                text=True,
+                timeout=600  # 10 minutes timeout
+            )
+            if result.returncode != 0:
+                st.error(f"❌ Failed to generate embeddings:\n{result.stderr}")
+                return None
 
-        # 2. Αναγέννηση embeddings χωρίς τις ετικέτες (labels)
-        result = subprocess.run(
-            [sys.executable, "kg_builder_2.py"],
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        if result.returncode != 0:
-            st.error(f"❌ Failed to generate embeddings:\n{result.stderr}")
-            return None
+        # 4. Επαναφορά ετικετών μετά τη δημιουργία embeddings
+        with st.spinner("Restoring labels after embedding generation..."):
+            reinsert_labels_from_csv(csv_url)
+            missing_cases = find_cases_missing_labels()
+            if missing_cases:
+                st.error(f"❌ {len(missing_cases)} cases missing labels after reinsertion")
+                return None
 
-        # 3. Φόρτωση embeddings και labels από CSV (χωρίς leakage)
-        X_raw, y = extract_training_data_from_csv(csv_url)
-        X = X_raw.copy()
-        X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
+        # 5. Φόρτωση embeddings και labels από CSV
+        with st.spinner("Loading training data..."):
+            X_raw, y = extract_training_data_from_csv(csv_url)
+            if X_raw.empty or y.empty:
+                st.error("⚠️ No valid training data available")
+                return None
+                
+            # Έλεγχος για leakage
+            if Config.LEAKAGE_CHECK:
+                labeled_before = set()
+                with neo4j_service.session() as session:
+                    result = session.run("""
+                        MATCH (c:Case)-[:SCREENED_FOR]->(:ASD_Trait)
+                        RETURN c.id AS case_id
+                    """)
+                    labeled_before = {r["case_id"] for r in result}
+                
+                if any(case_id in labeled_before for case_id in X_raw.index):
+                    st.error("🚨 Data leakage detected - some training cases had pre-existing labels")
+                    return None
 
-        if X.empty or y.empty:
-            st.error("⚠️ No valid training data available")
-            return None
+            X = X_raw.copy()
+            X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
 
-        # 4. Train/test split (προστασία από leakage)
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size=Config.TEST_SIZE,
-            stratify=y,
-            random_state=Config.RANDOM_STATE
-        )
+        # 6. Train/test split με stratification
+        with st.spinner("Splitting dataset..."):
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y,
+                test_size=Config.TEST_SIZE,
+                stratify=y,
+                random_state=Config.RANDOM_STATE
+            )
 
-        # 5. Υπολογισμός βαρών κλάσεων
+        # 7. Υπολογισμός class weights
         neg = sum(y_train == 0)
         pos = sum(y_train == 1)
-        scale_pos_weight = neg / pos if pos != 0 else 1
+        scale_pos_weight = neg / pos if pos > 1 else 1  # Προστασία για μηδενικό ή ένα δείγμα
 
-        # 6. Pipeline με SMOTE και XGBoost
-        pipeline = ImbPipeline([
-            ('smote', SMOTE(
-                sampling_strategy='auto',
-                k_neighbors=min(Config.SMOTE_K_NEIGHBORS, pos - 1),
-                random_state=Config.RANDOM_STATE
-            )),
-            ('xgb', XGBClassifier(
-                n_estimators=Config.N_ESTIMATORS,
-                use_label_encoder=False,
-                eval_metric='logloss',
-                random_state=Config.RANDOM_STATE,
-                scale_pos_weight=scale_pos_weight
-            ))
-        ])
+        # 8. Pipeline με SMOTE και XGBoost
+        with st.spinner("Configuring model pipeline..."):
+            smote_k = min(Config.SMOTE_K_NEIGHBORS, pos - 1) if pos > 1 else 1
+            pipeline = ImbPipeline([
+                ('smote', SMOTE(
+                    sampling_strategy='auto',
+                    k_neighbors=smote_k,
+                    random_state=Config.RANDOM_STATE
+                )),
+                ('xgb', XGBClassifier(
+                    n_estimators=Config.N_ESTIMATORS,
+                    use_label_encoder=False,
+                    eval_metric='logloss',
+                    random_state=Config.RANDOM_STATE,
+                    scale_pos_weight=scale_pos_weight,
+                    early_stopping_rounds=10
+                ))
+            ])
 
-        # 7. Cross-validation για να ελεγχθεί η απόδοση χωρίς leakage
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.RANDOM_STATE)
-        y_proba = cross_val_predict(
-            pipeline, X_train, y_train,
-            cv=cv,
-            method='predict_proba',
-            n_jobs=-1
-        )[:, 1]
+        # 9. Cross-validation
+        with st.spinner("Running cross-validation..."):
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.RANDOM_STATE)
+            y_proba = cross_val_predict(
+                pipeline, X_train, y_train,
+                cv=cv,
+                method='predict_proba',
+                n_jobs=-1
+            )[:, 1]
 
-        # 8. Εκπαίδευση στο πλήρες training set
-        pipeline.fit(X_train, y_train)
+        # 10. Εκπαίδευση τελικού μοντέλου
+        with st.spinner("Training final model..."):
+            pipeline.fit(X_train, y_train)
 
-        # 9. Αξιολόγηση στο test set
-        test_proba = pipeline.predict_proba(X_test)[:, 1]
-        test_pred = pipeline.predict(X_test)
+        # 11. Αξιολόγηση
+        with st.spinner("Evaluating model..."):
+            test_proba = pipeline.predict_proba(X_test)[:, 1]
+            test_pred = pipeline.predict(X_test)
+            
+            # Performance metrics
+            cv_auc = roc_auc_score(y_train, y_proba)
+            test_auc = roc_auc_score(y_test, test_proba)
+            
+            st.subheader("📊 Cross-Validation Results (Training Set)")
+            st.write(f"Mean CV ROC AUC: {cv_auc:.3f}")
+            
+            st.subheader("📊 Test Set Results")
+            st.write(f"Test ROC AUC: {test_auc:.3f}")
 
-        st.subheader("📊 Cross-Validation Results (Training Set)")
-        st.write(f"Mean CV ROC AUC: {roc_auc_score(y_train, y_proba):.3f}")
-        
-        st.subheader("📊 Test Set Results")
-        st.write(f"Test ROC AUC: {roc_auc_score(y_test, test_proba):.3f}")
-
-        # 10. Επανέφερε τις SCREENED_FOR ετικέτες στον γράφο (μετά το training)
-        reinsert_labels_from_csv(csv_url)
+            # Performance validation
+            if test_auc > 0.98:
+                st.warning("""
+                🚨 Suspiciously high performance detected. Possible causes:
+                1. Data leakage in embeddings
+                2. Test set contains training data
+                3. Label contamination in graph
+                """)
 
         return {
             "model": pipeline,
             "X_test": X_test,
-            "y_test": y_test
+            "y_test": y_test,
+            "cv_auc": cv_auc,
+            "test_auc": test_auc
         }
 
+    except subprocess.TimeoutExpired:
+        st.error("❌ Embedding generation timed out after 10 minutes")
+        logger.error("Embedding generation timeout")
+        return None
     except subprocess.CalledProcessError as cpe:
         st.error(f"❌ Subprocess failed: {cpe.stderr}")
-        logger.error(f"Subprocess error during embedding generation: {cpe.stderr}")
+        logger.error(f"Subprocess error: {cpe.stderr}")
         return None
     except Exception as e:
-        st.error(f"❌ Error training model: {e}")
-        logger.error(f"Training error: {e}", exc_info=True)
+        st.error(f"❌ Error training model: {str(e)}")
+        logger.error(f"Training error: {str(e)}", exc_info=True)
         return None
-
 # === Anomaly Detection ===
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
@@ -827,106 +882,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# === Your existing helper functions and neo4j service initialization here ===
-# ...
-# (Make sure to include find_cases_missing_labels(), reinsert_labels_from_csv(), 
-# extract_training_data_from_csv(), evaluate_model(), etc.)
-
-# === Modified training function with detailed logging ===
-@st.cache_resource(show_spinner="Training ASD detection model...")
-def train_asd_detection_model(cache_key: str) -> 'Optional[dict]':
-    try:
-        logger.info("Starting training function")
-
-        csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-        logger.info("Refreshing SCREENED_FOR labels from CSV")
-        refresh_screened_for_labels(csv_url)
-        logger.info("Labels refreshed")
-
-        X_raw, y = extract_training_data_from_csv(csv_url)
-        logger.info(f"Extracted training data: X shape {X_raw.shape}, y length {len(y)}")
-
-        X = X_raw.copy()
-        X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
-
-        if X.empty or y.empty:
-            logger.error("No valid training data available")
-            st.error("⚠️ No valid training data available")
-            return None
-
-        logger.info("Splitting dataset into train/test")
-        from sklearn.model_selection import train_test_split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size=0.3,
-            stratify=y,
-            random_state=42
-        )
-        logger.info(f"Train size: {X_train.shape[0]}, Test size: {X_test.shape[0]}")
-
-        neg = sum(y_train == 0)
-        pos = sum(y_train == 1)
-        scale_pos_weight = neg / pos if pos != 0 else 1
-        logger.info(f"Class balance: pos={pos}, neg={neg}, scale_pos_weight={scale_pos_weight:.3f}")
-
-        from imblearn.pipeline import Pipeline as ImbPipeline
-        from imblearn.over_sampling import SMOTE
-        from xgboost import XGBClassifier
-
-        pipeline = ImbPipeline([
-            ('smote', SMOTE(
-                sampling_strategy='auto',
-                k_neighbors=min(5, pos - 1),
-                random_state=42
-            )),
-            ('xgb', XGBClassifier(
-                n_estimators=100,
-                use_label_encoder=False,
-                eval_metric='logloss',
-                random_state=42,
-                scale_pos_weight=scale_pos_weight
-            ))
-        ])
-
-        from sklearn.model_selection import StratifiedKFold, cross_val_predict
-        logger.info("Starting cross-validation predictions")
-        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-        y_proba = cross_val_predict(
-            pipeline, X_train, y_train,
-            cv=cv,
-            method='predict_proba',
-            n_jobs=-1
-        )[:, 1]
-        logger.info("Cross-validation predictions completed")
-
-        logger.info("Fitting pipeline on full training set")
-        pipeline.fit(X_train, y_train)
-        logger.info("Pipeline fitted")
-
-        logger.info("Evaluating on test set")
-        test_proba = pipeline.predict_proba(X_test)[:, 1]
-        test_pred = pipeline.predict(X_test)
-        logger.info("Evaluation done")
-
-        st.subheader("📊 Cross-Validation Results (Training Set)")
-        st.write(f"Mean CV ROC AUC: {roc_auc_score(y_train, y_proba):.3f}")
-
-        st.subheader("📊 Test Set Results")
-        st.write(f"Test ROC AUC: {roc_auc_score(y_test, test_proba):.3f}")
-
-        reinsert_labels_from_csv(csv_url)
-
-        logger.info("Training function finished successfully")
-        return {
-            "model": pipeline,
-            "X_test": X_test,
-            "y_test": y_test
-        }
-
-    except Exception as e:
-        logger.error(f"Error in training: {e}", exc_info=True)
-        st.error(f"❌ Error training model: {e}")
-        return None
 
 
 # === Streamlit UI ===
