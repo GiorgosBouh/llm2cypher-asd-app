@@ -35,6 +35,11 @@ from sklearn.impute import SimpleImputer
 from xgboost import XGBClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
 import json
+from streamlit.runtime.scriptrunner.script_runner import RerunException
+from streamlit.runtime.scriptrunner.script_request_queue import RerunData
+
+def rerun():
+    raise RerunException(RerunData())
 
 
 def call_embedding_generator(upload_id: str) -> bool:
@@ -1018,7 +1023,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.session_state.model_results = results
                     st.session_state.model_trained = True
                     st.success("✅ Training completed successfully.")
-                    st.experimental_rerun()
+                    rerun()
 
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
             evaluate_model(
