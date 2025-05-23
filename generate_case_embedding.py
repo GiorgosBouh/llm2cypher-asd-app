@@ -7,10 +7,11 @@ import os
 import time
 import tempfile
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple # Ensure Tuple is imported
 import shutil
 import json
 from dotenv import load_dotenv # ADDED: For consistent env var loading
+import pandas as pd # ADDED: Needed for pd.isna, pd.to_numeric
 
 # Configure logging
 logging.basicConfig(
@@ -62,8 +63,6 @@ class EmbeddingGenerator:
             logger.warning("Embedding is all zeros.")
             return False
             
-        # Removed self.EMBEDDING_NORMALIZATION logic here. 
-        # Normalization should be handled by the ML model or explicitly after embedding generation if needed.
         return True
 
     def insert_temporary_case(self, driver, upload_id: str, case_data: dict) -> bool:
@@ -139,7 +138,7 @@ class EmbeddingGenerator:
                 MATCH (c:Case {{upload_id: '{upload_id}'}})
                 OPTIONAL MATCH (c)-[r]->(n)
                 OPTIONAL MATCH (c)-[s:SIMILAR_TO]-(other_case:Case)
-                WHERE other_case.embedding IS NOT NULL AND other_case <> c
+                WHERE other_case.embedding IS NOT NULL AND other_case.id IS NOT NULL AND other_case <> c
                 RETURN c.id AS case_id_num,
                        collect(DISTINCT {{ node: n, rel_type: type(r), rel_value: r.value, rel_weight: r.weight }}) AS direct_neighbors,
                        collect(DISTINCT {{ node: other_case, rel_type: type(s), rel_value: s.value, rel_weight: s.weight }}) AS similar_cases_neighbors
@@ -163,30 +162,32 @@ class EmbeddingGenerator:
 
                 if neighbor:
                     # Consistent naming scheme for non-Case nodes
-                    if 'name' in neighbor: # BehaviorQuestion
+                    if 'name' in neighbor: # BehaviorQuestion (has 'name' property)
                         neighbor_node_name = f"Q_{neighbor['name']}"
                         G.add_node(neighbor_node_name, type="BehaviorQuestion", name=neighbor['name'])
-                    elif 'type' in neighbor and 'value' in neighbor: # DemographicAttribute or SubmitterType
+                    elif 'type' in neighbor and 'value' in neighbor: # DemographicAttribute (has 'type' and 'value')
                         if 'DemographicAttribute' in neighbor.labels:
                              neighbor_node_name = f"D_{neighbor['type']}_{str(neighbor['value']).replace(' ', '_')}"
                              G.add_node(neighbor_node_name, type="DemographicAttribute", attribute_type=neighbor['type'], value=neighbor['value'])
-                        elif 'SubmitterType' in neighbor.labels:
+                        elif 'SubmitterType' in neighbor.labels: # SubmitterType (has 'type' property)
                              neighbor_node_name = f"S_{str(neighbor['type']).replace(' ', '_')}"
                              G.add_node(neighbor_node_name, type="SubmitterType", submitter_type=neighbor['type'])
-                        else:
-                            neighbor_node_name = f"Node_{neighbor.id}" # Fallback
+                        else: # Fallback for unexpected nodes (should ideally not happen with strict schema)
+                            neighbor_node_name = f"Node_{neighbor.id}"
                             G.add_node(neighbor_node_name, type="Generic")
-                    else: # Fallback for unexpected nodes or Case nodes from initial match (should be handled by similar_cases_neighbors if also matched)
-                        neighbor_node_name = f"Node_{neighbor.id}"
+                    else: # Fallback for nodes without expected properties or Case nodes from initial match
+                        # If it's a Case node it should be handled by 'similar_cases_neighbors' logic
+                        # If it's another type, ensure it has a unique identifier
+                        neighbor_node_name = f"Node_id_{neighbor.id}" # Use internal Neo4j ID as fallback
                         G.add_node(neighbor_node_name, type="Generic")
+
 
                     edge_attrs = {"type": rel_type, "weight": rel_weight}
                     if rel_value is not None:
                         edge_attrs["value"] = rel_value
                     G.add_edge(case_node_name, neighbor_node_name, **edge_attrs)
-
-            # Add SIMILAR_TO relationships (already handled by main_app.py if needed, or by kg_builder_2.py)
-            # This is more for ensuring existing similar nodes are in the graph for walks
+                
+            # Add SIMILAR_TO relationships (from the similar_cases_neighbors collection)
             for similar_data in result['similar_cases_neighbors']:
                 similar_node = similar_data['node']
                 rel_type = similar_data['rel_type']
@@ -194,14 +195,19 @@ class EmbeddingGenerator:
                 
                 if similar_node and 'id' in similar_node:
                     similar_case_node_name = f"Case_{similar_node['id']}"
-                    G.add_node(similar_case_node_name, type="Case", id=similar_node['id'])
-                    G.add_edge(case_node_name, similar_case_node_name, type=rel_type, weight=rel_weight)
-
-
+                    # Add similar case node to graph if not already present
+                    if similar_case_node_name not in G:
+                        G.add_node(similar_case_node_name, type="Case", id=similar_node['id'])
+                    
+                    # Add edge, ensuring it's not a self-loop and doesn't already exist
+                    if case_node_name != similar_case_node_name and not G.has_edge(case_node_name, similar_case_node_name):
+                        G.add_edge(case_node_name, similar_case_node_name, type=rel_type, weight=rel_weight)
+                        logger.info(f"Added similarity edge: {case_node_name} -- {similar_case_node_name} (weight: {weight:.2f})")
+                
             logger.info(f"Base graph for {case_node_name} built with {len(G.nodes)} nodes and {len(G.edges)} edges.")
             if not G.nodes:
                 raise ValueError("Graph built for temporary case is empty. No nodes found.")
-            if not G.edges:
+            if len(G.edges) == 0:
                 logger.warning(f"Graph built for temporary case has no edges. Node2Vec might not generate meaningful embeddings.")
             
             return G, case_node_name
@@ -263,14 +269,14 @@ class EmbeddingGenerator:
                 q=self.NODE2VEC_Q,
                 quiet=True,
                 temp_folder=temp_dir,
-                weighted=True,  # ADDED: Ensure weights are used
-                weight_key='weight' # ADDED: Specify weight key
+                # REMOVED: `weighted=True` and `weight_key='weight'` because Node2Vec 0.5.0 does not support them.
+                # This means the graph will be treated as unweighted for embedding generation.
             )
             
             model = node2vec.fit(
                 window=self.NODE2VEC_WINDOW,
                 min_count=1,
-                batch_words=self.NODE2VEC_BATCH_WORDS
+                # batch_words=self.NODE2VEC_BATCH_WORDS # Removed as Node2Vec 0.5.0 fit() doesn't have it
             )
             
             if case_node_name not in model.wv:
@@ -324,11 +330,7 @@ class EmbeddingGenerator:
                 
                 if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
                     logger.warning(f"Insufficient connections ({len(G.edges(case_node_name))}) for {case_node_name} even after augmentation. Embedding might be poor.")
-                    # Decide if you want to return None here or generate a potentially poor embedding
-                    # For now, allow generation but log warning.
-                    # self.delete_temporary_case(driver, upload_id)
-                    # return None
-
+            
             # Step 3: Generate embedding
             logger.info(f"Generating embedding for {case_node_name} (NetworkX graph: {len(G.nodes)} nodes, {len(G.edges)} edges)")
             embedding = self.generate_embedding(G, case_node_name)
