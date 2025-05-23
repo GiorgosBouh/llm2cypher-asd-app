@@ -11,7 +11,7 @@ import shutil
 import logging
 import tempfile
 from typing import Dict, List, Tuple
-from dotenv import load_dotenv # ADDED: For consistent env var loading
+from dotenv import load_dotenv
 
 # Configure logging
 logging.basicConfig(
@@ -21,7 +21,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ADDED: Load environment variables here for standalone script execution
 load_dotenv()
 
 class GraphBuilder:
@@ -42,10 +41,6 @@ class GraphBuilder:
         self.BATCH_SIZE = 500
 
     def connect_to_neo4j(self) -> GraphDatabase.driver:
-        """Create Neo4j driver with environment variables"""
-        # --- CRITICAL FIX: REMOVED HARDCODED DEFAULTS ---
-        # Ensure NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD are set in your .env file
-        # and are NOT hardcoded here for security and correct database connection.
         return GraphDatabase.driver(
             os.getenv("NEO4J_URI"),
             auth=(
@@ -57,12 +52,10 @@ class GraphBuilder:
         )
 
     def parse_csv(self, file_path: str) -> pd.DataFrame:
-        """Load and clean the dataset"""
         try:
             df = pd.read_csv(file_path, sep=";", encoding="utf-8-sig")
             df.columns = [col.strip() for col in df.columns]
             
-            # Convert numeric columns
             numeric_cols = ['Case_No', 'A1', 'A2', 'A3', 'A4', 'A5', 
                             'A6', 'A7', 'A8', 'A9', 'A10', 'Age_Mons', 'Qchat-10-Score']
             for col in numeric_cols:
@@ -72,29 +65,20 @@ class GraphBuilder:
                         errors='coerce'
                     )
             
-            # Convert Case_No to int to avoid float keys
-            # df.dropna() handles rows where Case_No might have become NaN due to 'coerce'
             df['Case_No'] = df['Case_No'].astype(int)
             
-            # Clean and standardize Class_ASD_Traits values: capitalize first letter, strip spaces
             df['Class_ASD_Traits'] = df['Class_ASD_Traits'].astype(str).str.strip().str.capitalize()
             
             logger.info("✅ Cleaned columns: %s", df.columns.tolist())
-            # --- IMPROVEMENT: df.dropna() will drop any row with any NaN. 
-            # If you want to keep rows with NaNs in non-critical columns,
-            # use df.dropna(subset=['Case_No', 'Class_ASD_Traits', ...])
             return df.dropna() 
         except Exception as e:
             logger.error("❌ Failed to parse CSV: %s", str(e))
             raise
 
     def create_nodes(self, tx, df: pd.DataFrame) -> None:
-        """Create all nodes in the graph"""
-        # Behavior Questions
         for q in [f"A{i}" for i in range(1, 11)]:
             tx.run("MERGE (:BehaviorQuestion {name: $q})", q=q)
         
-        # Demographic Attributes
         demo_cols = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
         for col in demo_cols:
             for val in df[col].dropna().unique():
@@ -103,17 +87,13 @@ class GraphBuilder:
                     type=col, val=val
                 )
         
-        # Submitter Types
         for val in df["Who_completed_the_test"].dropna().unique():
             tx.run("MERGE (:SubmitterType {type: $val})", val=val)
         
-        # Create ASD_Trait nodes explicitly for "Yes" and "No"
         tx.run("MERGE (:ASD_Trait {label: 'Yes'})")
         tx.run("MERGE (:ASD_Trait {label: 'No'})")
 
     def create_relationships(self, tx, df: pd.DataFrame) -> None:
-        """Create all relationships between nodes"""
-        # Prepare batch data
         case_data = []
         answer_data = []
         demo_data = []
@@ -121,7 +101,7 @@ class GraphBuilder:
         
         for _, row in df.iterrows():
             case_id = int(row["Case_No"])
-            upload_id = str(case_id) # Using Case_No as upload_id for initial build
+            upload_id = str(case_id)
             
             raw_trait = str(row.get("Class_ASD_Traits", "")).strip().lower()
             if raw_trait == "yes":
@@ -129,7 +109,7 @@ class GraphBuilder:
             elif raw_trait == "no":
                 asd_trait = "No"
             else:
-                asd_trait = None # If label is neither Yes nor No, set to None
+                asd_trait = None
             
             case_data.append({
                 "id": case_id, 
@@ -137,16 +117,14 @@ class GraphBuilder:
                 "asd_trait": asd_trait
             })
             
-            # Answers to behavior questions
             for q in [f"A{i}" for i in range(1, 11)]:
-                answer_val = pd.to_numeric(row.get(q, np.nan), errors='coerce') # Handle potential NaNs in A1-A10
+                answer_val = pd.to_numeric(row.get(q, np.nan), errors='coerce')
                 answer_data.append({
                     "upload_id": upload_id,
                     "q": q,
-                    "val": int(answer_val) if not pd.isna(answer_val) else -1 # Default to -1 or specific value if NaN
+                    "val": int(answer_val) if not pd.isna(answer_val) else -1
                 })
             
-            # Demographic attributes
             demo_cols = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
             for col in demo_cols:
                 val = str(row.get(col, "")).strip() 
@@ -156,14 +134,12 @@ class GraphBuilder:
                     "val": val
                 })
             
-            # Submitter information
             submitter_val = str(row.get("Who_completed_the_test", "")).strip()
             submitter_data.append({
                 "upload_id": upload_id,
                 "val": submitter_val
             })
         
-        # Create all nodes and relationships in batches
         logger.info(f"Preparing to create/merge {len(case_data)} Case nodes and their SCREENED_FOR relationships.")
         tx.run("""
             UNWIND $data as row 
@@ -204,10 +180,8 @@ class GraphBuilder:
         """, data=submitter_data)
 
     def create_similarity_relationships(self, tx, df: pd.DataFrame) -> None:
-        """Create similarity relationships between cases"""
         pairs = set()
         
-        # Behavioral similarity (shared answers)
         if all(f'A{k}' in df.columns for k in range(1, 11)):
             for i, row1 in df.iterrows():
                 for j, row2 in df.iloc[i+1:].iterrows():
@@ -220,7 +194,6 @@ class GraphBuilder:
         else:
             logger.warning("Skipping behavioral similarity: A1-A10 columns not all present in DataFrame.")
             
-        # Demographic similarity
         demo_cols = ['Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD']
         actual_demo_cols = [col for col in demo_cols if col in df.columns]
 
@@ -231,12 +204,11 @@ class GraphBuilder:
                     for j in range(i+1, len(case_list)):
                         pairs.add(tuple(sorted((int(case_list[i]), int(case_list[j])))))
         
-        # Apply limit and shuffle
         pair_list = list(pairs)
         shuffle(pair_list)
         pair_list = pair_list[:self.MAX_SIMILAR_PAIRS]
         
-        if not pair_list: # ADDED: Check if pair_list is empty
+        if not pair_list:
             logger.info("No similarity pairs generated. Skipping SIMILAR_TO relationship creation.")
             return
 
@@ -255,7 +227,6 @@ class GraphBuilder:
 
 
     def _calculate_similarity_weight(self, id1: int, id2: int, df: pd.DataFrame) -> float:
-        """Calculate similarity weight between two cases"""
         row1 = df[df['Case_No'] == id1]
         row2 = df[df['Case_No'] == id2]
 
@@ -266,7 +237,6 @@ class GraphBuilder:
         row1 = row1.iloc[0]
         row2 = row2.iloc[0]
         
-        # Behavioral similarity (70% weight)
         answer_sim_score = 0.0
         answer_cols = [f'A{i}' for i in range(1, 11)]
         valid_answer_comparisons = 0
@@ -278,7 +248,6 @@ class GraphBuilder:
         
         answer_sim = answer_sim_score / valid_answer_comparisons if valid_answer_comparisons > 0 else 0.0
         
-        # Demographic similarity (30% weight)
         demo_cols = ['Sex', 'Ethnicity', 'Jaundice', 'Family_mem_with_ASD']
         demo_sim_score = 0.0
         valid_demo_comparisons = 0
@@ -293,7 +262,6 @@ class GraphBuilder:
         return 0.7 * answer_sim + 0.3 * demo_sim
 
     def generate_embeddings(self, driver: GraphDatabase.driver) -> bool:
-        """Generate and store node embeddings"""
         temp_dir = tempfile.mkdtemp()
         try:
             G = self._build_networkx_graph(driver)
@@ -303,7 +271,6 @@ class GraphBuilder:
                 return False
             if not G.edges:
                 logger.warning("No edges found in graph to generate embeddings. Node2Vec works best with edges. Proceeding but embeddings might be trivial.")
-                # You might want to raise ValueError here if edges are strictly required.
             
             model = self._run_node2vec(G, temp_dir)
             
@@ -318,17 +285,14 @@ class GraphBuilder:
             self._cleanup_temp_dir(temp_dir)
 
     def _build_networkx_graph(self, driver: GraphDatabase.driver) -> nx.Graph:
-        """Construct the networkx graph from Neo4j data"""
         G = nx.Graph()
         
         with driver.session() as session:
-            # Load all Case nodes
             cases = session.run("MATCH (c:Case) RETURN c.id AS id")
             case_ids = [f"Case_{record['id']}" for record in cases]
             G.add_nodes_from(case_ids, type="Case")
             logger.info("📊 Loaded %d Case nodes", len(case_ids))
             
-            # Load all relationships connecting to/from Case nodes
             relationships = session.run("""
                 MATCH (c:Case)-[r]->(n)
                 RETURN c.id AS source_id, 
@@ -388,8 +352,10 @@ class GraphBuilder:
             workers=self.NODE2VEC_PARAMS['workers'],
             temp_folder=temp_dir,
             quiet=True,
-            weighted=True, # ADDED: Ensure weights are used
-            weight_key='weight' # ADDED: Specify weight key
+            # REMOVED: `weighted=True` and `weight_key='weight'` because Node2Vec 0.5.0 does not support them.
+            # This means the graph will be treated as unweighted for embedding generation.
+            # weighted=True, 
+            # weight_key='weight' 
         )
         
         return node2vec.fit(
@@ -410,7 +376,7 @@ class GraphBuilder:
                     case_id = int(node.split('_')[1])
                     if node in model.wv: 
                         embedding = model.wv[node].tolist()
-                        if self._validate_embedding_data(embedding): # Renamed helper for clarity
+                        if self._validate_embedding_data(embedding): 
                             batch.append({"case_id": case_id, "embedding": embedding})
                         else:
                             logger.warning(f"⚠️ Invalid embedding data generated for {node}. Skipping save.")
@@ -449,7 +415,7 @@ class GraphBuilder:
         logger.info("✅ Completed saving %d embeddings", saved_count)
         return saved_count > 0
 
-    def _validate_embedding_data(self, embedding: List[float]) -> bool: # Renamed helper for clarity
+    def _validate_embedding_data(self, embedding: List[float]) -> bool:
         """Helper to validate embedding list."""
         if not embedding or len(embedding) != self.EMBEDDING_DIM:
             logger.warning(f"Embedding invalid: Length {len(embedding)} != {self.EMBEDDING_DIM} or empty.")
