@@ -12,7 +12,7 @@ from sklearn.metrics import (
     precision_score, recall_score, f1_score, confusion_matrix
 )
 from imblearn.over_sampling import SMOTE
-from imblearn.pipeline import make_pipeline as make_imb_pipeline # Kept for potential future use or consistency, though ImbPipeline is used directly
+from imblearn.pipeline import make_pipeline as make_imb_pipeline
 from collections import Counter
 import uuid
 import numpy as np
@@ -23,15 +23,15 @@ from contextlib import contextmanager
 import logging
 from typing import Optional, Tuple
 from sklearn.preprocessing import StandardScaler
-from node2vec import Node2Vec # Imported but not used in the provided snippet
-import networkx as nx # Imported but not used in the provided snippet
-import tempfile # Imported but not used in the provided snippet
-import shutil # Imported but not used in the provided snippet
+from node2vec import Node2Vec 
+import networkx as nx 
+import tempfile 
+import shutil 
 import seaborn as sns
 from sklearn.inspection import permutation_importance
 import subprocess
 import sys
-from sklearn.impute import SimpleImputer # Imported but not used in the provided snippet
+from sklearn.impute import SimpleImputer 
 from xgboost import XGBClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
 import json
@@ -455,7 +455,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
             st.write("📋 Found columns in CSV:", df_raw.columns.tolist())
             return pd.DataFrame(), pd.Series()
 
-        # Ensure Case_No is numeric for consistency
+        # Ensure Case_No is numeric and handle potential errors
         df_raw["Case_No"] = pd.to_numeric(df_raw["Case_No"], errors='coerce')
         df_raw.dropna(subset=["Case_No"], inplace=True)
         df_raw["Case_No"] = df_raw["Case_No"].astype(int)
@@ -952,7 +952,9 @@ def reinsert_labels_from_csv(csv_url: str) -> bool:
 
 # === Streamlit UI ===
 def main():
+    # st.set_page_config must be the very first Streamlit command in the script
     st.set_page_config(layout="wide", page_title="NeuroCypher ASD")
+    
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
         <i>Autism Spectrum Disorder detection using graph embeddings</i>
@@ -1360,8 +1362,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         try:
                             with neo4j_service.session() as session:
                                 results = session.run(cypher).data()
-                                st.session_state.last_cypher_results = results
                                 st.success("✅ Query executed successfully!")
+                                st.session_state.last_cypher_results = results
                         except Exception as e:
                             st.error(f"❌ Query failed: {str(e)}")
                             logger.error(f"Cypher query execution failed: {str(e)}", exc_info=True)
