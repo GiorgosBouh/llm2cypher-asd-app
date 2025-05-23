@@ -36,53 +36,6 @@ from xgboost import XGBClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
 import json
 
-
-
-def call_embedding_generator(upload_id: str) -> bool:
-    """Generate embedding for a single case using subprocess with enhanced error handling"""
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        builder_path = os.path.join(script_dir, "generate_case_embedding.py")
-        
-        if not os.path.exists(builder_path):
-            st.error(f"❌ Embedding generator script not found at: {builder_path}")
-            return False
-
-        # Prepare environment variables
-        env = os.environ.copy()
-        env.update({
-            "NEO4J_URI": os.getenv("NEO4J_URI"),
-            "NEO4J_USER": os.getenv("NEO4J_USER"),
-            "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD"),
-            "PYTHONPATH": os.path.dirname(script_dir)
-        })
-
-        # Run the process with timeout
-        result = subprocess.run(
-            [sys.executable, builder_path, upload_id],
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=Config.EMBEDDING_GENERATION_TIMEOUT
-        )
-        
-        if result.returncode != 0:
-            error_msg = result.stderr or "Unknown error (no stderr output)"
-            st.error(f"❌ Embedding generation failed with error:\n{error_msg}")
-            logger.error(f"Embedding generation failed for {upload_id}: {error_msg}")
-            return False
-            
-        return True
-        
-    except subprocess.TimeoutExpired:
-        st.error("❌ Embedding generation timed out")
-        logger.error(f"Embedding generation timeout for {upload_id}")
-        return False
-    except Exception as e:
-        st.error(f"❌ Fatal error calling embedding script: {str(e)}")
-        logger.exception(f"Fatal error generating embedding for {upload_id}")
-        return False
-        
 # === Configuration ===
 class Config:
     EMBEDDING_DIM = 128
@@ -100,7 +53,7 @@ class Config:
     MAX_RELATIONSHIPS = 100000
     EMBEDDING_GENERATION_TIMEOUT = 300
     LEAKAGE_CHECK = True
-    SMOTE_K_NEIGHBORS = 3  # Added SMOTE configuration
+    SMOTE_K_NEIGHBORS = 3
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -162,6 +115,7 @@ def safe_neo4j_operation(func):
             logger.error(f"Neo4j operation failed: {str(e)}")
             return None
     return wrapper
+
 @safe_neo4j_operation
 def check_embedding_dimensions():
     with neo4j_service.session() as session:
@@ -174,6 +128,7 @@ def check_embedding_dimensions():
             st.warning(f"⚠️ Cases with wrong embedding size: {wrong_dims}")
         else:
             st.success("✅ All embeddings have correct size (128).")
+
 @safe_neo4j_operation
 def find_cases_missing_labels() -> list:
     with neo4j_service.session() as session:
@@ -188,13 +143,13 @@ def find_cases_missing_labels() -> list:
         else:
             st.success("✅ All cases have SCREENED_FOR labels.")
         return missing_cases
+
 @safe_neo4j_operation
 def refresh_screened_for_labels(csv_url: str):
     """
     Atomically removes all existing SCREENED_FOR relationships
     και ξαναδημιουργεί τις σωστές βάσει του CSV.
     """
-
     df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
     df.columns = [col.strip() for col in df.columns]
 
@@ -227,6 +182,7 @@ def refresh_screened_for_labels(csv_url: str):
         tx.commit()
         logger.info("✅ Νέες σχέσεις SCREENED_FOR δημιουργήθηκαν με βάση το CSV.")
         st.success("✅ Ολοκληρώθηκε η ανανέωση των σχέσεων SCREENED_FOR.")        
+
 # === Data Insertion ===
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
@@ -278,7 +234,6 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
     if "Class_ASD_Traits" in row:
         label = str(row["Class_ASD_Traits"]).strip().lower()
         if label in ["yes", "no"]:
-         
             queries.append((
                 """
                 MATCH (c:Case {id: $id})
@@ -305,34 +260,57 @@ def remove_screened_for_labels():
         logger.info("✅ SCREENED_FOR relationships removed to prevent leakage.")
 
 # === Graph Embeddings Generation ===
-@safe_neo4j_operation
-def generate_embedding_for_case(upload_id: str) -> bool:
-    """Generate embedding for a single case using subprocess"""
+def generate_embedding(upload_id: str, script_path: str) -> bool:
+    """Generates embedding for a case using a subprocess."""
     try:
-        # Get the directory of the current script
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        builder_path = os.path.join(script_dir, "generate_case_embedding.py")
-        
-        if not os.path.exists(builder_path):
-            st.error(f"❌ Embedding generator script not found at: {builder_path}")
+        if not os.path.exists(script_path):
+            st.error(f"❌ Embedding generator script not found at: {script_path}")
             return False
 
-        # Run the embedding generator as a subprocess
+        env = os.environ.copy()
+        env.update({
+            "NEO4J_URI": os.getenv("NEO4J_URI"),
+            "NEO4J_USER": os.getenv("NEO4J_USER"),
+            "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD"),
+            "PYTHONPATH": os.path.dirname(script_path)
+        })
+
         result = subprocess.run(
-            [sys.executable, builder_path, upload_id],
+            [sys.executable, script_path, upload_id],
+            env=env,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=Config.EMBEDDING_GENERATION_TIMEOUT
         )
-        
+
         if result.returncode != 0:
-            st.error(f"❌ Embedding generation failed with error:\n{result.stderr}")
+            error_msg = result.stderr or "Unknown error (no stderr output)"
+            st.error(f"❌ Embedding generation failed with error:\n{error_msg}")
+            logger.error(f"Embedding generation failed for {upload_id}: {error_msg}")
             return False
-            
+
         return True
-        
-    except Exception as e:
-        st.error(f"❌ Error generating embedding: {str(e)}")
+
+    except subprocess.TimeoutExpired:
+        st.error("❌ Embedding generation timed out")
+        logger.error(f"Embedding generation timeout for {upload_id}")
         return False
+    except Exception as e:
+        st.error(f"❌ Fatal error calling embedding script: {str(e)}")
+        logger.exception(f"Fatal error generating embedding for {upload_id}")
+        return False
+
+def call_embedding_generator(upload_id: str) -> bool:
+    """Generate embedding for a single case using subprocess with enhanced error handling"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    builder_path = os.path.join(script_dir, "generate_case_embedding.py")
+    return generate_embedding(upload_id, builder_path)
+
+def generate_embedding_for_case(upload_id: str) -> bool:
+    """Generate embedding for a single case using subprocess"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    builder_path = os.path.join(script_dir, "generate_case_embedding.py")
+    return generate_embedding(upload_id, builder_path)
 
 # === Natural Language to Cypher ===
 def nl_to_cypher(question: str) -> Optional[str]:
@@ -442,60 +420,6 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         df.columns = [col.strip() for col in df.columns]
 
         # Έλεγχος συνέπειας ετικετών CSV με γράφο
-        check_label_consistency(df, neo4j_service)
-
-        required_cols = ["Case_No", "Class_ASD_Traits"]
-        missing = [col for col in required_cols if col not in df.columns]
-        if missing:
-            st.error(f"❌ Missing required columns: {', '.join(missing)}")
-            st.write("📋 Found columns in CSV:", df.columns.tolist())
-            return pd.DataFrame(), pd.Series()
-
-        numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        embeddings = []
-        valid_ids = []
-        with neo4j_service.session() as session:
-            for case_no in df["Case_No"]:
-                result = session.run("""
-                    MATCH (c:Case {id: $id})
-                    WHERE c.embedding IS NOT NULL
-                    RETURN c.embedding AS embedding
-                """, id=int(case_no))
-                record = result.single()
-                if record and record["embedding"]:
-                    embeddings.append(record["embedding"])
-                    valid_ids.append(case_no)
-
-        df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
-        y = df_filtered["Class_ASD_Traits"].apply(
-            lambda x: 1 if str(x).strip().lower() == "yes" else 0
-        )
-
-        assert len(embeddings) == len(y), f"⚠️ Embeddings: {len(embeddings)}, Labels: {len(y)}"
-
-        X = pd.DataFrame(embeddings[:len(y)])
-
-        if X.isna().any().any():
-            st.warning(f"⚠️ Found {X.isna().sum().sum()} NaN values in embeddings - applying imputation")
-            X = X.fillna(X.mean())
-
-        return X, y
-
-    except Exception as e:
-        st.error(f"Data extraction failed: {str(e)}")
-        return pd.DataFrame(), pd.Series()
-        
-@safe_neo4j_operation
-def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
-    """Extracts training data with leakage protection and NaN handling"""
-    try:
-        df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
-        df.columns = [col.strip().replace('\r', '') for col in df.columns]
-        df.columns = [col.strip() for col in df.columns]
         check_label_consistency(df, neo4j_service)
 
         required_cols = ["Case_No", "Class_ASD_Traits"]
@@ -655,14 +579,13 @@ def evaluate_model(model, X_test, y_test):
     csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
     analyze_embedding_correlations(X_test, csv_url)
 
-
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
         
-        # 1. Ανανέωση ετικετών από CSV (πρώτα διαγραφή, μετά εισαγωγή)
+        # 1. Refresh labels from CSV
         with st.spinner("Refreshing SCREENED_FOR labels..."):
             refresh_screened_for_labels(csv_url)
             missing_cases = find_cases_missing_labels()
@@ -670,11 +593,11 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                 st.error(f"❌ {len(missing_cases)} cases still missing labels after refresh")
                 return None
 
-        # 2. Αφαίρεση προσωρινή των ετικετών για embedding generation
+        # 2. Remove labels temporarily for embedding generation
         with st.spinner("Removing labels temporarily for safe embedding generation..."):
             remove_screened_for_labels()
             
-        # 3. Αναγέννηση embeddings χωρίς τις ετικέτες (labels)
+        # 3. Rebuild graph embeddings
         with st.spinner("Rebuilding graph embeddings..."):
             result = subprocess.run(
                 [sys.executable, "kg_builder_2.py"],
@@ -686,7 +609,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                 st.error(f"❌ Failed to generate embeddings:\n{result.stderr}")
                 return None
 
-        # 4. Επαναφορά ετικετών μετά τη δημιουργία embeddings
+        # 4. Restore labels after embedding generation
         with st.spinner("Restoring labels after embedding generation..."):
             reinsert_labels_from_csv(csv_url)
             missing_cases = find_cases_missing_labels()
@@ -694,14 +617,14 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                 st.error(f"❌ {len(missing_cases)} cases missing labels after reinsertion")
                 return None
 
-        # 5. Φόρτωση embeddings και labels από CSV
+        # 5. Load embeddings and labels from CSV
         with st.spinner("Loading training data..."):
             X_raw, y = extract_training_data_from_csv(csv_url)
             if X_raw.empty or y.empty:
                 st.error("⚠️ No valid training data available")
                 return None
                 
-            # Έλεγχος για leakage
+            # Check for leakage
             if Config.LEAKAGE_CHECK:
                 labeled_before = set()
                 with neo4j_service.session() as session:
@@ -718,7 +641,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             X = X_raw.copy()
             X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
 
-        # 6. Train/test split με stratification
+        # 6. Train/test split with stratification
         with st.spinner("Splitting dataset..."):
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y,
@@ -727,18 +650,18 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                 random_state=Config.RANDOM_STATE
             )
 
-        # 7. Υπολογισμός class weights
+        # 7. Calculate class weights
         neg = sum(y_train == 0)
         pos = sum(y_train == 1)
-        scale_pos_weight = neg / pos if pos > 1 else 1  # Προστασία για μηδενικό ή ένα δείγμα
+        scale_pos_weight = neg / pos if pos > 1 else 1
 
-        # 8. Pipeline με SMOTE και XGBoost
+        # 8. Configure pipeline with SMOTE and XGBoost
         with st.spinner("Configuring model pipeline..."):
             smote_k = min(Config.SMOTE_K_NEIGHBORS, pos - 1) if pos > 1 else 1
             pipeline = ImbPipeline([
                 ('smote', SMOTE(
                     sampling_strategy='auto',
-                    k_neighbors=min(Config.SMOTE_K_NEIGHBORS, pos - 1),  # Προστασία για πολύ μικρές κλάσεις
+                    k_neighbors=min(Config.SMOTE_K_NEIGHBORS, pos - 1),
                     random_state=Config.RANDOM_STATE
                 )),
                 ('xgb', XGBClassifier(
@@ -761,11 +684,11 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                 n_jobs=-1
             )[:, 1]
 
-        # 10. Εκπαίδευση τελικού μοντέλου
+        # 10. Train final model
         with st.spinner("Training final model..."):
             pipeline.fit(X_train, y_train)
 
-        # 11. Αξιολόγηση
+        # 11. Evaluation
         with st.spinner("Evaluating model..."):
             test_proba = pipeline.predict_proba(X_test)[:, 1]
             test_pred = pipeline.predict(X_test)
@@ -809,6 +732,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         st.error(f"❌ Error training model: {str(e)}")
         logger.error(f"Training error: {str(e)}", exc_info=True)
         return None
+
 # === Anomaly Detection ===
 @safe_neo4j_operation
 def get_existing_embeddings() -> Optional[np.ndarray]:
@@ -861,28 +785,6 @@ def reinsert_labels_from_csv(csv_url: str):
                     MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
                 """, case_id=case_id, label=label.capitalize())
-
-# === Streamlit UI ===
-import streamlit as st
-import logging
-import uuid
-import os
-import pandas as pd
-import numpy as np
-import subprocess
-import sys
-import plotly.express as px
-from neo4j import GraphDatabase
-# plus all your other imports as needed ...
-
-# Setup logger for your Streamlit app
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger(__name__)
-
-
 
 # === Streamlit UI ===
 def main():
@@ -1029,8 +931,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("❌ Failed to run kg_builder_2.py")
                     st.code(result.stderr)
 
-
-
+    # === Tab 3: Upload New Case ===
     with tab3:
         st.header("📄 Upload New Case (Prediction Only - No Graph Storage)")
 
