@@ -41,12 +41,14 @@ class GraphBuilder:
         self.BATCH_SIZE = 500
 
     def connect_to_neo4j(self) -> GraphDatabase.driver:
+        """Create Neo4j driver with environment variables"""
+        uri = os.getenv("NEO4J_URI")
+        user = os.getenv("NEO4J_USER")
+        password_masked = '*' * len(os.getenv("NEO4J_PASSWORD")) if os.getenv("NEO4J_PASSWORD") else 'N/A'
+        logger.info(f"kg_builder_2.py connecting to: URI='{uri}', User='{user}', Pass='{password_masked}'") # <--- Make sure this line is here
         return GraphDatabase.driver(
-            os.getenv("NEO4J_URI"),
-            auth=(
-                os.getenv("NEO4J_USER"),
-                os.getenv("NEO4J_PASSWORD")
-            ),
+            uri,
+            auth=(user, os.getenv("NEO4J_PASSWORD")),
             max_connection_lifetime=7200,
             max_connection_pool_size=50
         )

@@ -104,7 +104,7 @@ def get_neo4j_service_cached():
     uri = os.getenv("NEO4J_URI")
     user = os.getenv("NEO4J_USER")
     password_masked = '*' * len(os.getenv("NEO4J_PASSWORD")) if os.getenv("NEO4J_PASSWORD") else 'N/A'
-    logger.info(f"main_app.py connecting to: URI='{uri}', User='{user}', Pass='{password_masked}'")
+    logger.info(f"main_app.py connecting to: URI='{uri}', User='{user}', Pass='{password_masked}'") # <--- Make sure this line is here
     return Neo4jService(uri, user, os.getenv("NEO4J_PASSWORD"))
 
 @st.cache_resource
