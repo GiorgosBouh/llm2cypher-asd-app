@@ -1,6 +1,8 @@
 import streamlit as st
 
 # --- CRITICAL: st.set_page_config() MUST BE THE FIRST STREAMLIT COMMAND ---
+# This line sets global Streamlit page configuration and must be called
+# only once, and as the very first Streamlit command in your script.
 st.set_page_config(layout="wide", page_title="NeuroCypher ASD")
 # --- END CRITICAL SECTION ---
 
@@ -13,7 +15,7 @@ import json
 import logging
 import subprocess
 from contextlib import contextmanager
-from typing import Optional, Tuple, List # Ensure List is imported for type hints
+from typing import Optional, Tuple, List 
 
 # --- Third-Party Library Imports ---
 import pandas as pd
@@ -41,7 +43,6 @@ from xgboost import XGBClassifier
 
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline 
-# from imblearn.pipeline import make_pipeline as make_imb_pipeline # Removed as ImbPipeline is used directly
 
 # --- Configuration (Moved to top level after initial imports for clarity) ---
 class Config:
@@ -60,7 +61,7 @@ class Config:
     MAX_RELATIONSHIPS = 100000
     EMBEDDING_GENERATION_TIMEOUT = 300 # Timeout for subprocess calls in seconds
     LEAKAGE_CHECK = True
-    SMOTE_K_NEIGHBORS = 3 # Ensured this matches previous agreed value
+    SMOTE_K_NEIGHBORS = 3
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -70,7 +71,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # === Environment Setup ===
-load_dotenv() # Load environment variables early
+load_dotenv() # Load environment variables early from .env file
 
 # Validate Environment Variables
 required_env_vars = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "OPENAI_API_KEY"]
@@ -104,7 +105,7 @@ def get_neo4j_service_cached():
     uri = os.getenv("NEO4J_URI")
     user = os.getenv("NEO4J_USER")
     password_masked = '*' * len(os.getenv("NEO4J_PASSWORD")) if os.getenv("NEO4J_PASSWORD") else 'N/A'
-    logger.info(f"main_app.py connecting to: URI='{uri}', User='{user}', Pass='{password_masked}'") # <--- Make sure this line is here
+    logger.info(f"main_app.py connecting to Neo4j: URI='{uri}', User='{user}', Pass='{password_masked}'")
     return Neo4jService(uri, user, os.getenv("NEO4J_PASSWORD"))
 
 @st.cache_resource
@@ -112,7 +113,8 @@ def get_openai_client_cached():
     """Initializes and caches the OpenAI client."""
     return OpenAI(api_key=OPENAI_API_KEY)
 
-# Assign cached service instances to global variables
+# Assign cached service instances to global variables.
+# These calls happen during script initialization, after st.set_page_config.
 neo4j_service = get_neo4j_service_cached()
 client = get_openai_client_cached()
 
@@ -155,11 +157,7 @@ def find_cases_missing_labels() -> List[int]:
             RETURN c.id AS case_id
         """)
         missing_cases = [record["case_id"] for record in result]
-        if missing_cases:
-            st.warning(f"⚠️ {len(missing_cases)} cases are missing SCREENED_FOR labels.")
-        else:
-            st.success("✅ All cases have SCREENED_FOR labels.")
-        return missing_cases
+        return missing_cases # Do not display messages here; `main()` will handle.
 
 @safe_neo4j_operation
 def refresh_screened_for_labels(csv_url: str) -> bool:
@@ -196,7 +194,7 @@ def refresh_screened_for_labels(csv_url: str) -> bool:
                     data_to_create.append({"case_id": case_id, "label": label})
             
             if not data_to_create:
-                st.warning("⚠️ No valid labels found in CSV to create SCREENED_FOR relationships. Please check your CSV data.")
+                logger.warning("⚠️ No valid labels found in CSV to create SCREENED_FOR relationships.")
                 return False
 
             logger.info(f"Attempting to refresh labels for {len(data_to_create)} cases from CSV.")
@@ -590,10 +588,15 @@ def evaluate_model(model, X_test, y_test):
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
+    """
+    Trains the ASD detection model.
+    The `cache_key` parameter is explicitly passed to allow manual cache invalidation,
+    ensuring a fresh training run when triggered by the button.
+    """
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
         
-        st.session_state.model_trained = False 
+        st.session_state.model_trained = False # Reset state at start of training attempt
         st.session_state.model_results = None
 
         # 1. Refresh labels from CSV (always good to ensure consistency)
@@ -602,6 +605,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                 st.error("❌ Label refresh failed or was incomplete. Cannot proceed with training.")
                 return None
             
+            # After refresh, immediately re-check missing labels to confirm
             missing_cases = find_cases_missing_labels()
             if missing_cases:
                 st.error(f"❌ {len(missing_cases)} cases still missing labels after refresh. This indicates a problem with the label application. Please investigate why `refresh_screened_for_labels` did not fully apply them. Check your Neo4j database content directly.")
@@ -632,9 +636,10 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
 
         # 4. Restore labels after embedding generation
         with st.spinner("Restoring labels after embedding generation..."):
-            if not refresh_screened_for_labels(csv_url): 
+            if not refresh_screened_for_labels(csv_url): # Re-use refresh function to re-add labels
                 st.error("❌ Label reinsertion failed or was incomplete. Cannot proceed with training.")
                 return None
+            # Re-check labels immediately after reinsertion
             missing_cases = find_cases_missing_labels()
             if missing_cases:
                 st.error(f"❌ {len(missing_cases)} cases still missing labels after reinsertion. This is unexpected. Please check CSV data and Neo4j content.")
@@ -642,14 +647,16 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             else:
                 st.success("✅ All labels successfully reinserted after embedding generation.")
 
-        # ... (rest of the function, loading data, training model, etc. remains the same) ...
-
         # 5. Load embeddings and labels from CSV
         with st.spinner("Loading training data..."):
             X_raw, y = extract_training_data_from_csv(csv_url)
             if X_raw.empty or y.empty:
                 st.error("⚠️ No valid training data available after extraction. This could mean no cases with embeddings were found, or labels are missing.")
                 return None
+                
+            if Config.LEAKAGE_CHECK:
+                pass 
+
             X = X_raw 
 
         # 6. Train/test split with stratification
@@ -800,7 +807,7 @@ def nl_to_cypher(question: str) -> Optional[str]:
     Schema:
     - (:Case {{id: int}})
     - (:BehaviorQuestion {{name: string}})
-    - (:ASD_Trait {{label: 'Yes' | 'No'}}) # Corrected to 'label'
+    - (:ASD_Trait {{label: 'Yes' | 'No'}}) 
     - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
     - (:SubmitterType {{type: string}})
 
@@ -837,7 +844,7 @@ def nl_to_cypher(question: str) -> Optional[str]:
 
 # === Streamlit UI ===
 def main():
-    # st.set_page_config() is now at the very top of the script, outside of main().
+    # st.set_page_config() is correctly placed at the very top of the script file.
     
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
@@ -903,11 +910,16 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab1:
         st.header("🤖 ASD Detection Model")
 
+        # --- CRITICAL LOGGING FOR INITIAL STATE ---
+        logger.info("main_app.py: Performing initial label check on app startup.")
         missing_labels_initial_check = find_cases_missing_labels()
         if missing_labels_initial_check:
+            logger.warning(f"main_app.py: {len(missing_labels_initial_check)} cases missing SCREENED_FOR labels on initial load.")
             st.warning(f"⚠️ Υπάρχουν {len(missing_labels_initial_check)} περιπτώσεις χωρίς SCREENED_FOR ετικέτα. Παρακαλώ διορθώστε τα δεδομένα πριν προχωρήσετε.")
         else:
+            logger.info("main_app.py: All cases have SCREENED_FOR labels on initial load.")
             st.success("✅ Όλες οι περιπτώσεις έχουν SCREENED_FOR ετικέτα.")
+        # --- END CRITICAL LOGGING ---
 
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection... This can take several minutes."):
@@ -982,7 +994,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
             with st.spinner("Running full graph rebuild and embedding generation... This can take a considerable amount of time depending on graph size."):
                 result = subprocess.run(
-                    [sys.executable, "kg_builder_2.py"],
+                    [sys.executable, "kg_builder_2.py", "--build-full-graph"], # Ensure full graph build is called here
                     capture_output=True,
                     text=True,
                     timeout=1200 
@@ -1202,9 +1214,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             example_questions = [
                 "How many male toddlers have ASD traits?",
                 "List all ethnicities with more than 5 cases.",
-                "How many cases answered '1' for both A1 and A2?",
-                "What is the average A5 score for cases with ASD traits?",
-                "Which submitter type has the most cases?"
+                "How many cases answered '1' for both A1 and A2?"
             ]
             for q in example_questions:
                 if st.button(q, key=f"example_{q}"):
