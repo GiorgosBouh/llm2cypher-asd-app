@@ -1,35 +1,3 @@
-The problem of your Streamlit app "stacking on loading" often indicates that a long-running operation is blocking the main thread, causing the UI to freeze. In a Streamlit application, this is typically due to:
-
-1.  **Synchronous Long Computations**: Operations like training a model, running complex Neo4j queries, or executing external scripts (subprocesses) can take a lot of time. If these are not handled asynchronously or with proper feedback, the app appears unresponsive.
-2.  **Inefficient Database Interactions**: Slow Neo4j queries or large data transfers can cause delays.
-3.  **Subprocess Issues**: If `subprocess.run` calls to `kg_builder_2.py` or `generate_case_embedding.py` hang, crash, or take too long, the main app will wait indefinitely or until a timeout occurs.
-4.  **Caching Misuse**: While `@st.cache_resource` is used, if the `cache_key` always changes (e.g., `str(uuid.uuid4())`), the cached function will always re-run, effectively defeating the caching purpose for static operations and leading to repeated long waits.
-
-I've made the following key adjustments to your code to address these potential issues and improve robustness and clarity:
-
----
-
-### Summary of Fixes & Improvements
-
-1.  **Robust Embedding Extraction for Training Data**:
-    * In `extract_training_data_from_csv`, the process of matching CSV `Case_No` with Neo4j embeddings has been made more robust. Instead of relying on sequential order, it now explicitly collects embeddings along with their `Case_No` from Neo4j and then merges them correctly with the filtered DataFrame, ensuring `X` (embeddings) and `y` (labels) are perfectly aligned. This reduces the risk of data misalignment that could lead to unexpected model behavior or errors.
-2.  **Streamlined `Neo4jService` Initialization**:
-    * Removed `st.session_state.neo4j_driver.close()` from `get_neo4j_service`. Streamlit's `@st.cache_resource` is designed to manage the lifecycle of such resources. Explicitly closing the driver there could lead to issues where the driver is prematurely closed or reopened unnecessarily by the caching mechanism.
-3.  **XGBoost `early_stopping_rounds` Clarification**:
-    * Removed `early_stopping_rounds=10` from the `XGBClassifier` initialization within the `train_asd_detection_model` function. This parameter is only effective when an `eval_set` is passed to the `fit` method, which was not consistently done for the final model training pipeline. If you intend to use early stopping for the final model, you'll need to explicitly provide an evaluation set during `pipeline.fit()`.
-4.  **Improved Anomaly Detection Caching**:
-    * Modified the `cache_key` for `train_isolation_forest` to be based on the number of existing embeddings (`len(embeddings)`). This ensures the Isolation Forest model is *actually cached* and only retrained if the number of cases in your Neo4j graph changes, rather than retraining on every run or on every new prediction attempt for a temporary case.
-5.  **"Upload New Case" Clarity**:
-    * Clarified the `generate_case_embedding.py` subprocess call's role. The "Upload New Case" tab explicitly states "Prediction Only - No Graph Storage". The subprocess call to `generate_case_embedding.py` is assumed to handle the generation of the embedding *without persisting the new case data in your main Neo4j graph for that specific flow*. This is crucial to maintain the promise of "No Graph Storage" for uploaded cases. If `generate_case_embedding.py` *does* write to the graph, you should review its implementation to align with this promise.
-6.  **Minor Refinements**:
-    * Added comments for better understanding of certain logic blocks.
-    * Ensured consistent variable usage.
-
----
-
-### Full Code
-
-```python
 import streamlit as st
 from neo4j import GraphDatabase
 from openai import OpenAI
