@@ -439,8 +439,8 @@ class GraphBuilder:
         except Exception as e:
             logger.warning("⚠️ Error cleaning temp directory: %s", str(e))
 
-    def build_graph(self) -> None:
-        """Main graph building workflow"""
+    def build_full_graph(self) -> None:
+        """Builds the entire graph from scratch, including deleting old data."""
         driver = None
         try:
             driver = self.connect_to_neo4j()
@@ -465,15 +465,47 @@ class GraphBuilder:
             if not self.generate_embeddings(driver):
                 raise RuntimeError("Embedding generation failed or no embeddings were generated/stored.")
             
-            logger.info("✅ Graph built successfully!")
+            logger.info("✅ Full graph built successfully!")
             sys.exit(0)
             
         except Exception as e:
-            logger.critical("❌ Critical error: %s", str(e), exc_info=True)
+            logger.critical("❌ Critical error during full graph build: %s", str(e), exc_info=True)
             sys.exit(1)
         finally:
             if driver:
                 driver.close()
 
+    def generate_embeddings_only(self) -> None:
+        """Generates embeddings for the *existing* graph without deleting/rebuilding."""
+        driver = None
+        try:
+            driver = self.connect_to_neo4j()
+            
+            logger.info("⏳ Generating embeddings for existing graph...")
+            if not self.generate_embeddings(driver):
+                raise RuntimeError("Embedding generation failed or no embeddings were generated/stored.")
+            
+            logger.info("✅ Embeddings for existing graph generated successfully!")
+            sys.exit(0)
+            
+        except Exception as e:
+            logger.critical("❌ Critical error during embeddings-only generation: %s", str(e), exc_info=True)
+            sys.exit(1)
+        finally:
+            if driver:
+                driver.close()
+
+# Modify the __main__ block to accept arguments
 if __name__ == "__main__":
-    GraphBuilder().build_graph()
+    builder = GraphBuilder()
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--build-full-graph":
+            builder.build_full_graph()
+        elif sys.argv[1] == "--generate-embeddings-only":
+            builder.generate_embeddings_only()
+        else:
+            logger.error("Invalid argument. Use --build-full-graph or --generate-embeddings-only")
+            sys.exit(1)
+    else:
+        logger.info("No arguments provided. Defaulting to full graph build.")
+        builder.build_full_graph() # Default behavior if no args are given

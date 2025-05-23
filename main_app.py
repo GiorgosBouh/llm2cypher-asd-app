@@ -590,24 +590,18 @@ def evaluate_model(model, X_test, y_test):
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
 def train_asd_detection_model(cache_key: str) -> Optional[dict]:
-    """
-    Trains the ASD detection model.
-    The `cache_key` parameter is explicitly passed to allow manual cache invalidation,
-    ensuring a fresh training run when triggered by the button.
-    """
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
         
-        st.session_state.model_trained = False # Reset state at start of training attempt
+        st.session_state.model_trained = False 
         st.session_state.model_results = None
 
-        # 1. Refresh labels from CSV
+        # 1. Refresh labels from CSV (always good to ensure consistency)
         with st.spinner("Refreshing SCREENED_FOR labels..."):
             if not refresh_screened_for_labels(csv_url):
                 st.error("❌ Label refresh failed or was incomplete. Cannot proceed with training.")
                 return None
             
-            # After refresh, immediately re-check missing labels to confirm
             missing_cases = find_cases_missing_labels()
             if missing_cases:
                 st.error(f"❌ {len(missing_cases)} cases still missing labels after refresh. This indicates a problem with the label application. Please investigate why `refresh_screened_for_labels` did not fully apply them. Check your Neo4j database content directly.")
@@ -620,27 +614,27 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         with st.spinner("Removing labels temporarily for safe embedding generation..."):
             remove_screened_for_labels()
             
-        # 3. Rebuild graph embeddings (calls external kg_builder_2.py)
-        with st.spinner("Rebuilding graph embeddings. This may take a while..."):
+        # 3. Regenerate embeddings for the existing graph (without deleting the graph)
+        with st.spinner("Regenerating embeddings for existing graph... This may take a while."):
+            # CORRECTED: Call kg_builder_2.py with the --generate-embeddings-only argument
             result = subprocess.run(
-                [sys.executable, "kg_builder_2.py"],
+                [sys.executable, "kg_builder_2.py", "--generate-embeddings-only"], 
                 capture_output=True,
                 text=True,
                 timeout=600  # 10 minutes timeout
             )
             if result.returncode != 0:
-                st.error(f"❌ Failed to generate embeddings (kg_builder_2.py exited with error):\n{result.stderr}")
-                logger.error(f"kg_builder_2.py failed: {result.stderr}")
+                st.error(f"❌ Failed to regenerate embeddings (kg_builder_2.py --generate-embeddings-only exited with error):\n{result.stderr}")
+                logger.error(f"kg_builder_2.py --generate-embeddings-only failed: {result.stderr}")
                 return None
             else:
-                logger.info(f"kg_builder_2.py stdout: {result.stdout}")
+                logger.info(f"kg_builder_2.py --generate-embeddings-only stdout: {result.stdout}")
 
         # 4. Restore labels after embedding generation
         with st.spinner("Restoring labels after embedding generation..."):
-            if not refresh_screened_for_labels(csv_url): # Re-use refresh function to re-add labels
+            if not refresh_screened_for_labels(csv_url): 
                 st.error("❌ Label reinsertion failed or was incomplete. Cannot proceed with training.")
                 return None
-            # Re-check labels immediately after reinsertion
             missing_cases = find_cases_missing_labels()
             if missing_cases:
                 st.error(f"❌ {len(missing_cases)} cases still missing labels after reinsertion. This is unexpected. Please check CSV data and Neo4j content.")
@@ -648,20 +642,14 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             else:
                 st.success("✅ All labels successfully reinserted after embedding generation.")
 
+        # ... (rest of the function, loading data, training model, etc. remains the same) ...
+
         # 5. Load embeddings and labels from CSV
         with st.spinner("Loading training data..."):
             X_raw, y = extract_training_data_from_csv(csv_url)
             if X_raw.empty or y.empty:
                 st.error("⚠️ No valid training data available after extraction. This could mean no cases with embeddings were found, or labels are missing.")
                 return None
-                
-            if Config.LEAKAGE_CHECK:
-                # The primary leakage prevention is the remove_screened_for_labels -> kg_builder_2.py -> reinsert_labels_from_csv cycle.
-                # This check ensures that after the entire process, all labels are indeed present for the extracted data.
-                # If `extract_training_data_from_csv` already filters to only cases with labels, then this explicit check
-                # using `labeled_cases_in_graph` might be redundant or could serve as an extra validation.
-                pass 
-
             X = X_raw 
 
         # 6. Train/test split with stratification
