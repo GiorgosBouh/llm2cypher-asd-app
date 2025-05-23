@@ -1,4 +1,11 @@
 import streamlit as st
+
+# --- ST.SET_PAGE_CONFIG MUST BE THE FIRST STREAMLIT COMMAND IN THE SCRIPT ---
+# This ensures it's called before any other st.command
+st.set_page_config(layout="wide", page_title="NeuroCypher ASD")
+# --- END ST.SET_PAGE_CONFIG ---
+
+# Now, the rest of your imports can follow
 from neo4j import GraphDatabase
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -39,21 +46,18 @@ import json
 # === Configuration ===
 class Config:
     EMBEDDING_DIM = 128
-    # Using np.random.randint directly for RANDOM_STATE ensures it's different every run if not cached,
-    # but for reproducibility across app restarts (without clearing cache), a fixed seed might be better.
-    # For now, keeping it as is, as it's passed to models.
     RANDOM_STATE = np.random.randint(0, 1000) 
     TEST_SIZE = 0.3
     N_ESTIMATORS = 100
-    SMOTE_RATIO = 'auto' # Defined but 'auto' is used in SMOTE, which is equivalent
+    SMOTE_RATIO = 'auto' 
     MIN_CASES_FOR_ANOMALY_DETECTION = 10
-    NODE2VEC_WALK_LENGTH = 20 # Defined but used by kg_builder_2.py, not directly here
-    NODE2VEC_NUM_WALKS = 100 # Defined but used by kg_builder_2.py, not directly here
-    NODE2VEC_WORKERS = 2 # Defined but used by kg_builder_2.py, not directly here
-    NODE2VEC_P = 1 # Defined but used by kg_builder_2.py, not directly here
-    NODE2VEC_Q = 1 # Defined but used by kg_builder_2.py, not directly here
-    EMBEDDING_BATCH_SIZE = 50 # Defined but used by kg_builder_2.py, not directly here
-    MAX_RELATIONSHIPS = 100000 # Defined but not used in this snippet
+    NODE2VEC_WALK_LENGTH = 20 
+    NODE2VEC_NUM_WALKS = 100 
+    NODE2VEC_WORKERS = 2 
+    NODE2VEC_P = 1 
+    NODE2VEC_Q = 1 
+    EMBEDDING_BATCH_SIZE = 50 
+    MAX_RELATIONSHIPS = 100000 
     EMBEDDING_GENERATION_TIMEOUT = 300
     LEAKAGE_CHECK = True
     SMOTE_K_NEIGHBORS = 3
@@ -68,7 +72,9 @@ logger = logging.getLogger(__name__)
 # === Environment Setup ===
 load_dotenv()
 
-# Validate Environment Variables
+# Validate Environment Variables - these must run before any st. calls that depend on them,
+# but the st.error and st.stop calls will *still* be the first if st.set_page_config is not before them.
+# So, st.set_page_config must be at the very top.
 required_env_vars = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "OPENAI_API_KEY"]
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
@@ -96,17 +102,14 @@ class Neo4jService:
 # === Initialize Services ===
 @st.cache_resource
 def get_neo4j_service():
-    # Streamlit's @st.cache_resource handles resource lifecycle.
-    # Explicitly closing a driver potentially managed by the cache might cause issues.
-    # The cache ensures a single driver instance across reruns unless its arguments change.
-    # if 'neo4j_driver' in st.session_state:
-    #     st.session_state.neo4j_driver.close()
     return Neo4jService(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
 
 @st.cache_resource
 def get_openai_client():
     return OpenAI(api_key=OPENAI_API_KEY)
 
+# These global calls to cached functions will initialize Streamlit resources
+# They must occur *after* st.set_page_config has been called.
 neo4j_service = get_neo4j_service()
 client = get_openai_client()
 
@@ -118,7 +121,7 @@ def safe_neo4j_operation(func):
             return func(*args, **kwargs)
         except Exception as e:
             st.error(f"Neo4j operation failed: {str(e)}")
-            logger.error(f"Neo4j operation failed: {str(e)}", exc_info=True) # Log full traceback
+            logger.error(f"Neo4j operation failed: {str(e)}", exc_info=True) 
             return None
     return wrapper
 
@@ -173,7 +176,6 @@ def refresh_screened_for_labels(csv_url: str):
             logger.info("✅ Παλιές σχέσεις SCREENED_FOR διαγράφηκαν.")
 
             # Recreate new relationships in batches for efficiency
-            # It's better to use UNWIND for batching in Neo4j rather than a Python loop with individual transactions.
             data_to_create = []
             for _, row in df.iterrows():
                 case_id = int(row["Case_No"])
@@ -198,14 +200,10 @@ def refresh_screened_for_labels(csv_url: str):
         return False
 
 # === Data Insertion ===
-# Note: insert_user_case is not used by the "Upload New Case" tab's primary prediction flow,
-# which instead calls generate_case_embedding.py via subprocess.
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
     queries = []
 
-    # MERGE the Case by upload_id, setting id and embedding to null.
-    # This assumes 'Case_No' is the permanent ID, while 'upload_id' is temporary for the session.
     queries.append((
         "MERGE (c:Case {upload_id: $upload_id}) SET c.id = $id, c.embedding = null",
         {"upload_id": upload_id, "id": int(row["Case_No"])}
@@ -248,7 +246,6 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
         {"who": row["Who_completed_the_test"], "upload_id": upload_id}
     ))
 
-    # Add ASD_Trait relationship if Class_ASD_Traits exists (e.g., for training data insertion)
     if "Class_ASD_Traits" in row:
         label = str(row["Class_ASD_Traits"]).strip().lower()
         if label in ["yes", "no"]:
@@ -295,7 +292,7 @@ def generate_embedding(upload_id: str, script_path: str, case_data_json: Optiona
 
         cmd = [sys.executable, script_path, upload_id]
         if case_data_json:
-            cmd.append(case_data_json) # Pass case data as JSON string for temporary use
+            cmd.append(case_data_json) 
 
         result = subprocess.run(
             cmd,
@@ -311,7 +308,6 @@ def generate_embedding(upload_id: str, script_path: str, case_data_json: Optiona
             logger.error(f"Embedding generation failed for {upload_id}: {error_msg}")
             return False, None
 
-        # Assuming the script outputs the embedding JSON to stdout
         return True, result.stdout.strip()
 
     except subprocess.TimeoutExpired:
@@ -323,10 +319,6 @@ def generate_embedding(upload_id: str, script_path: str, case_data_json: Optiona
         logger.exception(f"Fatal error generating embedding for {upload_id}")
         return False, None
 
-# These functions are wrappers to call the main generate_embedding
-# 'call_embedding_generator' and 'generate_embedding_for_case' seem redundant, consolidating to one.
-# The 'upload_id' parameter is critical for the subprocess to identify the case.
-# If 'generate_case_embedding.py' is expected to insert data, this upload_id (e.g., temp_upload_...) is used.
 def generate_embedding_via_subprocess(upload_id: str, case_data_json: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     """Generate embedding for a single case using subprocess"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -379,8 +371,6 @@ def nl_to_cypher(question: str) -> Optional[str]:
         return None
 
 # === Embedding Extraction ===
-# This function is not used in the "Upload New Case" prediction flow,
-# as the embedding is returned directly by the subprocess call.
 @safe_neo4j_operation
 def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
     """Safely extracts embedding for a specific case identified by upload_id."""
@@ -394,7 +384,6 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
         if record and record["embedding"] is not None:
             return np.array(record["embedding"]).reshape(1, -1)
         
-        # Check if the case exists at all, even without an embedding
         exists = session.run(
             "MATCH (c:Case {upload_id: $upload_id}) RETURN count(c) > 0 AS exists",
             upload_id=upload_id
@@ -424,7 +413,6 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
             graph_label = record["graph_label"].strip().lower() if record and record["graph_label"] else None
 
             if graph_label is None:
-                # If no label in graph, create it based on CSV
                 st.warning(f"⚠️ Case_No {case_id} has label '{csv_label}' in CSV, but no label in graph. Creating relationship...")
                 session.run("""
                     MATCH (c:Case {id: $case_id})
@@ -491,7 +479,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
             embeddings_df,
             left_on="Case_No",
             right_index=True,
-            how="inner" # Only keep cases that have both CSV data and an embedding
+            how="inner" 
         )
 
         if df_merged.empty:
@@ -500,7 +488,7 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
 
         # Prepare X (embeddings) and y (labels)
         X = pd.DataFrame(df_merged["embedding"].tolist())
-        X.columns = [f"Dim_{i}" for i in range(X.shape[1])] # Rename columns for clarity
+        X.columns = [f"Dim_{i}" for i in range(X.shape[1])] 
         y = df_merged["Class_ASD_Traits"].apply(
             lambda x: 1 if str(x).strip().lower() == "yes" else 0
         )
@@ -577,11 +565,11 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
                 if len(df_original_features_processed[feat]) == len(X_embeddings_aligned[dim]):
                     corr.at[feat, dim] = np.corrcoef(df_original_features_processed[feat], X_embeddings_aligned[dim])[0, 1]
                 else:
-                    corr.at[feat, dim] = np.nan # Or handle discrepancy
+                    corr.at[feat, dim] = np.nan 
 
         corr = corr.astype(float)
-        corr.dropna(axis=0, how='all', inplace=True) # Drop rows with all NaNs if any
-        corr.dropna(axis=1, how='all', inplace=True) # Drop columns with all NaNs if any
+        corr.dropna(axis=0, how='all', inplace=True) 
+        corr.dropna(axis=1, how='all', inplace=True) 
 
         if corr.empty:
             st.warning("Correlation matrix is empty. Not enough common data or features for analysis.")
@@ -618,7 +606,6 @@ def plot_combined_curves(y_true, y_proba):
 
 def show_permutation_importance(model, X_test, y_test):
     try:
-        # Ensure X_test columns are named if they aren't already
         if not all(isinstance(col, str) and col.startswith("Dim_") for col in X_test.columns):
             X_test.columns = [f"Dim_{i}" for i in range(X_test.shape[1])]
 
@@ -682,7 +669,6 @@ def evaluate_model(model, X_test, y_test):
 
     show_permutation_importance(model, X_test, y_test)
 
-    # This CSV URL is specific to the original features for correlation analysis
     csv_url_original_features = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
     analyze_embedding_correlations(X_test, csv_url_original_features)
 
@@ -741,7 +727,6 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                 st.error("⚠️ No valid training data available after extraction.")
                 return None
                 
-            # Check for leakage after loading data, before splitting
             if Config.LEAKAGE_CHECK:
                 labeled_cases_in_graph = set()
                 with neo4j_service.session() as session:
@@ -751,23 +736,9 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                     """)
                     labeled_cases_in_graph = {r["case_id"] for r in result}
                 
-                # Check if any case_id in X_raw (which is now indexed by Case_No) was part of the initial labeled set
-                # This check ensures that the data used for training and testing did not have labels
-                # present during the embedding generation phase if that's the intended leakage prevention.
-                # The labels are removed, then embeddings generated, then labels restored.
-                # So if any case_id from X_raw.index was in labeled_cases_in_graph *before* the removal,
-                # it's just a verification that the labels were indeed restored properly.
-                # The *critical* leakage check is about *how embeddings were generated*.
-                # If embeddings were generated when labels were present, that's the actual leakage.
-                # The current workflow of remove_labels -> generate_embeddings -> restore_labels attempts to prevent this.
-                # This `if any(case_id in labeled_cases_in_graph for case_id in X_raw.index)` check
-                # would actually always be true if reinsert_labels_from_csv worked.
-                # It's more of a check for *missing* labels after reinsertion, already covered.
-                # The `LEAKAGE_CHECK` constant might refer to a deeper check on how kg_builder_2.py handles labels internally.
-                pass # Keeping the pass as the primary leakage prevention is the remove/reinsert cycle.
+                pass 
 
-            X = X_raw # X_raw is already a DataFrame with appropriate column names
-            # X.columns = [f"Dim_{i}" for i in range(X.shape[1])] # This should already be handled in extract_training_data_from_csv
+            X = X_raw 
 
         # 6. Train/test split with stratification
         with st.spinner("Splitting dataset..."):
@@ -781,22 +752,20 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         # 7. Calculate class weights
         neg = sum(y_train == 0)
         pos = sum(y_train == 1)
-        scale_pos_weight = neg / pos if pos > 0 else 1 # Avoid division by zero if no positive samples
+        scale_pos_weight = neg / pos if pos > 0 else 1 
 
         # 8. Configure pipeline with SMOTE and XGBoost
         with st.spinner("Configuring model pipeline..."):
-            # Ensure k_neighbors is less than the number of minority samples (pos)
-            smote_k = min(Config.SMOTE_K_NEIGHBORS, pos - 1) if pos > 1 else 1 # smote_k must be at least 1
-            if smote_k == 0: # If pos is 1, k_neighbors becomes 0, SMOTE fails. Handle this case.
+            smote_k = min(Config.SMOTE_K_NEIGHBORS, pos - 1) if pos > 1 else 1 
+            if smote_k == 0: 
                 st.warning("Not enough positive samples for SMOTE k_neighbors. SMOTE will be skipped.")
                 pipeline = ImbPipeline([
                     ('xgb', XGBClassifier(
                         n_estimators=Config.N_ESTIMATORS,
-                        use_label_encoder=False, # Deprecated warning, but still works for now
+                        use_label_encoder=False, 
                         eval_metric='logloss',
                         random_state=Config.RANDOM_STATE,
                         scale_pos_weight=scale_pos_weight
-                        # early_stopping_rounds removed as it requires eval_set in pipeline.fit()
                     ))
                 ])
             else:
@@ -808,11 +777,10 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
                     )),
                     ('xgb', XGBClassifier(
                         n_estimators=Config.N_ESTIMATORS,
-                        use_label_encoder=False, # Deprecated warning, but still works for now
+                        use_label_encoder=False, 
                         eval_metric='logloss',
                         random_state=Config.RANDOM_STATE,
                         scale_pos_weight=scale_pos_weight
-                        # early_stopping_rounds removed as it requires eval_set in pipeline.fit()
                     ))
                 ])
 
@@ -828,8 +796,6 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
 
         # 10. Train final model on the entire training set
         with st.spinner("Training final model..."):
-            # If early_stopping_rounds is desired, add an eval_set here:
-            # pipeline.fit(X_train, y_train, xgb__eval_set=[(X_val, y_val)], xgb__verbose=False)
             pipeline.fit(X_train, y_train)
 
         # 11. Evaluation
@@ -847,8 +813,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             st.subheader("📊 Test Set Results")
             st.write(f"Test ROC AUC: {test_auc:.3f}")
 
-            # Performance validation
-            if test_auc > 0.98: # Threshold for suspiciously high performance
+            if test_auc > 0.98: 
                 st.warning("""
                 🚨 Suspiciously high performance detected. Possible causes:
                 1. Data leakage in embeddings: Embeddings might have been generated using information that should not be available during prediction (e.g., labels).
@@ -904,14 +869,12 @@ def train_isolation_forest(num_embeddings: int) -> Optional[Tuple[IsolationFores
     scaler = StandardScaler()
     embeddings_scaled = scaler.fit_transform(embeddings)
 
-    # Contamination should be estimated or based on domain knowledge.
-    # A small fraction of the total cases is a common starting point.
     contamination = min(0.1, 5.0 / len(embeddings)) 
     
     iso_forest = IsolationForest(
         contamination=contamination,
         random_state=Config.RANDOM_STATE,
-        n_jobs=-1 # Use all available cores
+        n_jobs=-1 
     )
     iso_forest.fit(embeddings_scaled)
 
@@ -936,7 +899,6 @@ def reinsert_labels_from_csv(csv_url: str) -> bool:
                 if label in ["yes", "no"]:
                     data_to_create.append({"case_id": case_id, "label": label.capitalize()})
             
-            # Use UNWIND for efficient batching
             session.run("""
                 UNWIND $data AS item
                 MATCH (c:Case {id: item.case_id})
@@ -952,8 +914,7 @@ def reinsert_labels_from_csv(csv_url: str) -> bool:
 
 # === Streamlit UI ===
 def main():
-    # st.set_page_config must be the very first Streamlit command in the script
-    st.set_page_config(layout="wide", page_title="NeuroCypher ASD")
+    # st.set_page_config() has been moved to the very top of the script.
     
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
@@ -996,7 +957,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 """)
 
     # Initialize session state variables safely
-    # Using st.session_state.get() provides a default if the key doesn't exist.
     st.session_state.active_tab = st.session_state.get("active_tab", "Model Training")
     st.session_state.case_inserted = st.session_state.get("case_inserted", False)
     st.session_state.last_upload_id = st.session_state.get("last_upload_id", None)
@@ -1026,8 +986,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         else:
             st.success("✅ Όλες οι περιπτώσεις έχουν SCREENED_FOR ετικέτα.")
 
-        # The cache_key=str(uuid.uuid4()) forces a re-run of the cached function every time this button is clicked.
-        # This is desired for a "Train/Refresh" button to ensure new training.
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection... This can take several minutes."):
                 results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
@@ -1035,7 +993,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.session_state.model_results = results
                     st.session_state.model_trained = True
                     st.success("✅ Training completed successfully. Evaluating model...")
-                    # Evaluate model immediately after successful training
                     evaluate_model(
                         results["model"],
                         results["X_test"],
@@ -1046,11 +1003,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.session_state.model_trained = False
                     st.session_state.model_results = None
         
-        # Display evaluation metrics if model is already trained from a previous run or current run
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
             st.markdown("---")
             st.subheader("Current Model Performance")
-            # Re-evaluate model if session state has results (e.g. after a page refresh, retaining results)
             evaluate_model(
                 st.session_state.model_results["model"],
                 st.session_state.model_results["X_test"],
@@ -1084,7 +1039,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                                     from numpy.linalg import norm
                                     diff = norm(old_emb - new_emb)
                                     st.write(f"📏 Difference (L2 norm) between saved and current embedding: `{diff:.4f}`")
-                                    if diff < 1e-6: # Use a small epsilon for floating point comparison
+                                    if diff < 1e-6: 
                                         st.info("ℹ️ Embedding is (almost) identical – recent rebuild may not have changed it significantly.")
                                     else:
                                         st.success("✅ Embedding changed – rebuild successfully updated the graph.")
@@ -1098,16 +1053,16 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
         st.info("ℹ️ **Purpose**: Ensures all cases in the Neo4j graph have up-to-date embeddings generated by `kg_builder_2.py`.")
         
         if st.button("🔁 Recalculate All Embeddings in Graph"):
-            st.session_state.model_trained = False # Invalidate model if embeddings are recalculated
+            st.session_state.model_trained = False 
             st.session_state.model_results = None
-            st.session_state.saved_embedding_case1 = None # Invalidate saved embedding for comparison
+            st.session_state.saved_embedding_case1 = None 
 
             with st.spinner("Running full graph rebuild and embedding generation... This can take a considerable amount of time depending on graph size."):
                 result = subprocess.run(
                     [sys.executable, "kg_builder_2.py"],
                     capture_output=True,
                     text=True,
-                    timeout=1200 # Increased timeout for full rebuild (20 minutes)
+                    timeout=1200 
                 )
                 if result.returncode == 0:
                     st.success("✅ All embeddings recalculated and updated in the graph!")
@@ -1116,7 +1071,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error(f"❌ Failed to run kg_builder_2.py:\n{result.stderr}")
                     logger.error(f"Full graph rebuild (kg_builder_2.py) failed: {result.stderr}", exc_info=True)
                 
-            check_embedding_dimensions() # Check consistency after recalculation
+            check_embedding_dimensions() 
 
     # === Tab 3: Upload New Case ===
     with tab3:
@@ -1209,13 +1164,8 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.error("⚠️ The ASD detection model has not been trained yet. Please go to the 'Model Training' tab and train the model first.")
                     st.stop()
 
-                # Temporary upload_id for embedding generation. This ID will be used by the subprocess
-                # to identify this temporary case if it interacts with Neo4j temporarily.
                 temp_upload_id = "temp_prediction_" + str(uuid.uuid4())
 
-                # Call subprocess generate_case_embedding.py with upload_id and case_data JSON
-                # The generate_case_embedding.py script is expected to take the case_data as JSON
-                # and return the embedding as JSON to stdout. It should NOT permanently store data.
                 with st.spinner("Generating embedding for prediction... This involves temporary graph interaction."):
                     success, embedding_json_str = generate_embedding_via_subprocess(temp_upload_id, json.dumps(case_data))
 
@@ -1237,7 +1187,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 st.subheader("🧪 Embedding Diagnostics")
                 st.text("📦 Embedding vector (first 50 dimensions):")
-                st.write(embedding[:50].tolist()) # Display only first 50 for brevity
+                st.write(embedding[:50].tolist()) 
 
                 if np.isnan(embedding).any():
                     st.error("❌ Generated embedding contains NaN values. Prediction may be unreliable.")
@@ -1247,7 +1197,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 # *** Prediction ***
                 model = st.session_state.model_results["model"]
-                embedding_reshaped = embedding.reshape(1, -1)  # Reshape for single sample prediction
+                embedding_reshaped = embedding.reshape(1, -1)  
                 proba = model.predict_proba(embedding_reshaped)[0][1]
                 prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
 
@@ -1256,14 +1206,12 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 col1.metric("Prediction", prediction)
                 col2.metric("Confidence", f"{proba:.1%}" if prediction == "ASD Traits Detected" else f"{1-proba:.1%}")
 
-                # Distance from training mean
-                X_train_for_mean = st.session_state.model_results["X_test"] # Using X_test from training as a sample of the data distribution
+                X_train_for_mean = st.session_state.model_results["X_test"] 
                 if not X_train_for_mean.empty:
                     train_mean = X_train_for_mean.mean().values
                     dist = np.linalg.norm(embedding - train_mean)
                     st.text(f"📏 Euclidean Distance from Training Data Mean: {dist:.4f}")
-                    # A heuristic threshold for warning
-                    if dist > 5.0: # This threshold may need adjustment based on data
+                    if dist > 5.0: 
                         st.warning("⚠️ The generated embedding for this case is significantly distant from the mean of the training data. The prediction might be less reliable for this out-of-distribution case.")
                 else:
                     st.info("ℹ️ Cannot calculate distance from training data mean as training data is not available.")
@@ -1271,7 +1219,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 # Anomaly Detection
                 with st.spinner("Running anomaly detection..."):
                     num_existing_embeddings = len(get_existing_embeddings()) if get_existing_embeddings() is not None else 0
-                    iso_result = train_isolation_forest(num_existing_embeddings) # Pass num_embeddings as cache key
+                    iso_result = train_isolation_forest(num_existing_embeddings) 
                     if iso_result:
                         iso_forest, scaler = iso_result
                         embedding_scaled = scaler.transform(embedding_reshaped)
@@ -1332,7 +1280,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             - Which submitter type has the most cases?
             """)
 
-            # Use a single button row for example questions
             st.markdown("<div style='display: flex; flex-wrap: wrap; gap: 10px;'>", unsafe_allow_html=True)
             example_questions = [
                 "How many male toddlers have ASD traits?",
@@ -1344,9 +1291,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             for q in example_questions:
                 if st.button(q, key=f"example_{q}"):
                     st.session_state.preset_question = q
-                    st.session_state.last_cypher_results = None  # Reset previous results
-                    st.session_state.last_cypher_query = None # Reset previous query
-                    st.experimental_rerun() # Rerun to update the text_input with the preset question
+                    st.session_state.last_cypher_results = None 
+                    st.session_state.last_cypher_query = None 
+                    st.experimental_rerun() 
             st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -1375,7 +1322,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             else:
                 st.warning("Please enter a question.")
 
-        # Display results only if a query was run
         if st.session_state.last_cypher_query:
             st.markdown("---")
             st.subheader("Generated Cypher Query")
