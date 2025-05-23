@@ -1389,5 +1389,3 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
 if __name__ == "__main__":
     main()
-
-```
