@@ -101,10 +101,11 @@ class Neo4jService:
 @st.cache_resource
 def get_neo4j_service_cached():
     """Initializes and caches the Neo4j driver."""
-    # st.cache_resource manages connection lifecycle. No explicit close needed here.
-    # if 'neo4j_driver' in st.session_state: # REMOVED: This explicit close is generally not needed with @st.cache_resource
-    #     st.session_state.neo4j_driver.close()
-    return Neo4jService(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
+    uri = os.getenv("NEO4J_URI")
+    user = os.getenv("NEO4J_USER")
+    password_masked = '*' * len(os.getenv("NEO4J_PASSWORD")) if os.getenv("NEO4J_PASSWORD") else 'N/A'
+    logger.info(f"main_app.py connecting to: URI='{uri}', User='{user}', Pass='{password_masked}'")
+    return Neo4jService(uri, user, os.getenv("NEO4J_PASSWORD"))
 
 @st.cache_resource
 def get_openai_client_cached():
