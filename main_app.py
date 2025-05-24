@@ -1,3 +1,6 @@
+# === Global Service Declarations ===
+neo4j_service = None
+client = None
 import streamlit as st
 
 # --- CRITICAL: st.set_page_config() MUST BE THE FIRST STREAMLIT COMMAND ---
@@ -837,34 +840,27 @@ def nl_to_cypher(question: str) -> Optional[str]:
 
 # === Streamlit UI ===
 def main():
-    # Load environment variables first
-    try:
-        # Try loading from .env file in current directory
-        env_path = os.path.join(os.path.dirname(__file__), '.env')
-        if os.path.exists(env_path):
-            load_dotenv(env_path)
-        else:
-            # Fallback to loading from git repository path
-            git_env_path = os.path.expanduser('~/GiorgosBouh/llm2cypher-asd-app/.env')
-            if os.path.exists(git_env_path):
-                load_dotenv(git_env_path)
-            else:
-                st.error("❌ Could not find .env file in either current directory or ~/GiorgosBouh/llm2cypher-asd-app/")
-                st.stop()
-    except Exception as e:
-        st.error(f"❌ Failed to load environment variables: {str(e)}")
-        st.stop()
-
-    # Now validate the environment variables
-    required_env_vars = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "OPENAI_API_KEY"]
-    missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-    if missing_vars:
-        st.error(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
-        st.stop()
-
-    # Initialize Neo4j service with connection test
-    global neo4j_service, client
+    global neo4j_service, client  # Explicitly declare we're using the global variables
     
+    # 1. First load environment variables
+    try:
+        env_path = os.path.join(os.path.dirname(__file__), '.env')
+        if not os.path.exists(env_path):
+            st.error("❌ .env file not found in application directory")
+            st.stop()
+        load_dotenv(env_path)
+    except Exception as e:
+        st.error(f"❌ Failed to load .env file: {str(e)}")
+        st.stop()
+
+    # 2. Validate required environment variables
+    required_vars = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "OPENAI_API_KEY"]
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    if missing_vars:
+        st.error(f"❌ Missing environment variables: {', '.join(missing_vars)}")
+        st.stop()
+
+    # 3. Initialize Neo4j service
     if neo4j_service is None:
         try:
             neo4j_service = Neo4jService(
@@ -872,30 +868,26 @@ def main():
                 os.getenv("NEO4J_USER"),
                 os.getenv("NEO4J_PASSWORD")
             )
-            # Test connection immediately
-            try:
-                with neo4j_service.session() as session:
-                    result = session.run("RETURN 1 AS test").single()
-                    if not result or result["test"] != 1:
-                        raise Exception("Neo4j connection test failed")
-                st.sidebar.success("✅ Neo4j service initialized and connected.")
-            except Exception as e:
-                st.error(f"❌ Failed to connect to Neo4j: {str(e)}")
-                st.error("Please verify your Neo4j Aura credentials and ensure the instance is running")
-                st.stop()
+            # Test connection
+            with neo4j_service.session() as session:
+                result = session.run("RETURN 1 AS test").single()
+                if not result or result["test"] != 1:
+                    raise Exception("Connection test failed")
+            st.sidebar.success("✅ Neo4j connected successfully")
         except Exception as e:
-            st.error(f"❌ Failed to initialize Neo4j service: {str(e)}")
+            st.error(f"❌ Failed to initialize Neo4j: {str(e)}")
             st.stop()
-    
-    
-    # Initialize OpenAI client
+
+    # 4. Initialize OpenAI client
     if client is None:
         try:
             client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            st.sidebar.success("✅ OpenAI client initialized.")
+            st.sidebar.success("✅ OpenAI client initialized")
         except Exception as e:
             st.error(f"❌ Failed to initialize OpenAI client: {str(e)}")
             st.stop()
+
+    # Rest of your main function remains the same...
     # === END INITIALIZE SERVICES ===
 
     st.title("🧠 NeuroCypher ASD")
