@@ -90,34 +90,38 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 class Neo4jService:
     def __init__(self, uri: str, user: str, password: str):
         try:
-            # For AuraDB, use neo4j+s:// protocol
-            if not uri.startswith("neo4j+s://"):
-                st.warning("⚠️ Neo4j Aura requires neo4j+s:// protocol")
-            
-            self.driver = GraphDatabase.driver(
+            self._driver = GraphDatabase.driver(
                 uri,
                 auth=(user, password),
                 max_connection_lifetime=30 * 60,  # 30 minutes
                 connection_timeout=15,  # 15 seconds
                 connection_acquisition_timeout=2 * 60  # 2 minutes
             )
-            # Verify connection immediately
-            self.verify_connection()
+            # Verify connection works
+            self._verify_connection()
         except Exception as e:
-            st.error(f"❌ Failed to initialize Neo4j driver: {str(e)}")
-            raise
+            raise Exception(f"Failed to initialize Neo4j driver: {str(e)}")
 
-    def verify_connection(self):
+    def _verify_connection(self):
         """Verify the connection works"""
         try:
-            with self.driver.session() as session:
+            with self._driver.session() as session:
                 result = session.run("RETURN 1 AS test").single()
                 if not result or result["test"] != 1:
                     raise Exception("Connection verification failed")
         except Exception as e:
-            st.error(f"❌ Neo4j connection verification failed: {str(e)}")
-            raise
+            raise Exception(f"Neo4j connection verification failed: {str(e)}")
 
+    def session(self):
+        """Return a new session from the driver"""
+        if not hasattr(self, '_driver') or not self._driver:
+            raise Exception("Neo4j driver not initialized")
+        return self._driver.session()
+
+    def close(self):
+        """Close the driver connection"""
+        if hasattr(self, '_driver') and self._driver:
+            self._driver.close()
 # === Helper Functions ===
 
 def safe_neo4j_operation(func):
@@ -840,9 +844,9 @@ def nl_to_cypher(question: str) -> Optional[str]:
 
 # === Streamlit UI ===
 def main():
-    global neo4j_service, client  # Explicitly declare we're using the global variables
+    global neo4j_service, client
     
-    # 1. First load environment variables
+    # 1. Load environment variables
     try:
         env_path = os.path.join(os.path.dirname(__file__), '.env')
         if not os.path.exists(env_path):
@@ -868,24 +872,11 @@ def main():
                 os.getenv("NEO4J_USER"),
                 os.getenv("NEO4J_PASSWORD")
             )
-            # Test connection
-            with neo4j_service.session() as session:
-                result = session.run("RETURN 1 AS test").single()
-                if not result or result["test"] != 1:
-                    raise Exception("Connection test failed")
             st.sidebar.success("✅ Neo4j connected successfully")
         except Exception as e:
             st.error(f"❌ Failed to initialize Neo4j: {str(e)}")
             st.stop()
 
-    # 4. Initialize OpenAI client
-    if client is None:
-        try:
-            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            st.sidebar.success("✅ OpenAI client initialized")
-        except Exception as e:
-            st.error(f"❌ Failed to initialize OpenAI client: {str(e)}")
-            st.stop()
 
     # Rest of your main function remains the same...
     # === END INITIALIZE SERVICES ===
