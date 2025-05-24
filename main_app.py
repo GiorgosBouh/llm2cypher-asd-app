@@ -86,20 +86,34 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # === Neo4j Service Class ===
 class Neo4jService:
     def __init__(self, uri: str, user: str, password: str):
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        try:
+            # For AuraDB, use neo4j+s:// protocol
+            if not uri.startswith("neo4j+s://"):
+                st.warning("⚠️ Neo4j Aura requires neo4j+s:// protocol")
+            
+            self.driver = GraphDatabase.driver(
+                uri,
+                auth=(user, password),
+                max_connection_lifetime=30 * 60,  # 30 minutes
+                connection_timeout=15,  # 15 seconds
+                connection_acquisition_timeout=2 * 60  # 2 minutes
+            )
+            # Verify connection immediately
+            self.verify_connection()
+        except Exception as e:
+            st.error(f"❌ Failed to initialize Neo4j driver: {str(e)}")
+            raise
 
-    @contextmanager
-    def session(self):
-        with self.driver.session() as session:
-            yield session
-
-    def close(self):
-        self.driver.close()
-
-# === Initialize Services (GLOBAL DECLARATION, BUT NO INSTANTIATION YET) ===
-# We will instantiate these inside main() for this specific debug.
-neo4j_service: Optional[Neo4jService] = None
-client: Optional[OpenAI] = None
+    def verify_connection(self):
+        """Verify the connection works"""
+        try:
+            with self.driver.session() as session:
+                result = session.run("RETURN 1 AS test").single()
+                if not result or result["test"] != 1:
+                    raise Exception("Connection verification failed")
+        except Exception as e:
+            st.error(f"❌ Neo4j connection verification failed: {str(e)}")
+            raise
 
 # === Helper Functions ===
 
@@ -823,19 +837,34 @@ def nl_to_cypher(question: str) -> Optional[str]:
 
 # === Streamlit UI ===
 def main():
-    # st.set_page_config() is correctly placed at the very top of the script file
-    
-    # === Initialize Services (GLOBAL INSTANTIATION) ===
-    global neo4j_service, client
-    
-    # Validate environment variables first
+    # Load environment variables first
+    try:
+        # Try loading from .env file in current directory
+        env_path = os.path.join(os.path.dirname(__file__), '.env')
+        if os.path.exists(env_path):
+            load_dotenv(env_path)
+        else:
+            # Fallback to loading from git repository path
+            git_env_path = os.path.expanduser('~/GiorgosBouh/llm2cypher-asd-app/.env')
+            if os.path.exists(git_env_path):
+                load_dotenv(git_env_path)
+            else:
+                st.error("❌ Could not find .env file in either current directory or ~/GiorgosBouh/llm2cypher-asd-app/")
+                st.stop()
+    except Exception as e:
+        st.error(f"❌ Failed to load environment variables: {str(e)}")
+        st.stop()
+
+    # Now validate the environment variables
     required_env_vars = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "OPENAI_API_KEY"]
     missing_vars = [var for var in required_env_vars if not os.getenv(var)]
     if missing_vars:
         st.error(f"❌ Missing required environment variables: {', '.join(missing_vars)}")
         st.stop()
-        
+
     # Initialize Neo4j service with connection test
+    global neo4j_service, client
+    
     if neo4j_service is None:
         try:
             neo4j_service = Neo4jService(
@@ -846,14 +875,18 @@ def main():
             # Test connection immediately
             try:
                 with neo4j_service.session() as session:
-                    session.run("RETURN 1 AS test").single()
+                    result = session.run("RETURN 1 AS test").single()
+                    if not result or result["test"] != 1:
+                        raise Exception("Neo4j connection test failed")
                 st.sidebar.success("✅ Neo4j service initialized and connected.")
             except Exception as e:
                 st.error(f"❌ Failed to connect to Neo4j: {str(e)}")
+                st.error("Please verify your Neo4j Aura credentials and ensure the instance is running")
                 st.stop()
         except Exception as e:
             st.error(f"❌ Failed to initialize Neo4j service: {str(e)}")
             st.stop()
+    
     
     # Initialize OpenAI client
     if client is None:
