@@ -1,12 +1,10 @@
 import streamlit as st
 
 # --- CRITICAL: st.set_page_config() MUST BE THE FIRST STREAMLIT COMMAND ---
-# This line sets global Streamlit page configuration and must be called
-# only once, and as the very first Streamlit command in your script.
 st.set_page_config(layout="wide", page_title="NeuroCypher ASD")
 # --- END CRITICAL SECTION ---
 
-# --- Standard Library Imports ---
+# --- Standard Library Imports (KEEP ALL) ---
 import os
 import sys
 import uuid
@@ -17,7 +15,7 @@ import subprocess
 from contextlib import contextmanager
 from typing import Optional, Tuple, List 
 
-# --- Third-Party Library Imports ---
+# --- Third-Party Library Imports (KEEP ALL) ---
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -44,7 +42,7 @@ from xgboost import XGBClassifier
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline 
 
-# --- Configuration (Moved to top level after initial imports for clarity) ---
+# === Configuration ===
 class Config:
     EMBEDDING_DIM = 128
     RANDOM_STATE = np.random.randint(0, 1000) 
@@ -59,7 +57,7 @@ class Config:
     NODE2VEC_Q = 1
     EMBEDDING_BATCH_SIZE = 50
     MAX_RELATIONSHIPS = 100000
-    EMBEDDING_GENERATION_TIMEOUT = 300 # Timeout for subprocess calls in seconds
+    EMBEDDING_GENERATION_TIMEOUT = 300 
     LEAKAGE_CHECK = True
     SMOTE_K_NEIGHBORS = 3
 
@@ -71,14 +69,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # === Environment Setup ===
-load_dotenv() # Load environment variables early from .env file
+load_dotenv() 
 
 # Validate Environment Variables
 required_env_vars = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "OPENAI_API_KEY"]
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
     st.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-    st.stop() # Stop the app if crucial variables are missing
+    st.stop() 
 
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USER = os.getenv("NEO4J_USER")
@@ -98,31 +96,24 @@ class Neo4jService:
     def close(self):
         self.driver.close()
 
-# === Initialize Services (Cached) ===
-@st.cache_resource
-def get_neo4j_service_cached():
-    """Initializes and caches the Neo4j driver."""
-    uri = os.getenv("NEO4J_URI")
-    user = os.getenv("NEO4J_USER")
-    password_masked = '*' * len(os.getenv("NEO4J_PASSWORD")) if os.getenv("NEO4J_PASSWORD") else 'N/A'
-    logger.info(f"main_app.py connecting to Neo4j: URI='{uri}', User='{user}', Pass='{password_masked}'")
-    return Neo4jService(uri, user, os.getenv("NEO4J_PASSWORD"))
-
-@st.cache_resource
-def get_openai_client_cached():
-    """Initializes and caches the OpenAI client."""
-    return OpenAI(api_key=OPENAI_API_KEY)
-
-# Assign cached service instances to global variables.
-# These calls happen during script initialization, after st.set_page_config.
-neo4j_service = get_neo4j_service_cached()
-client = get_openai_client_cached()
+# === Initialize Services (GLOBAL DECLARATION, BUT NO INSTANTIATION YET) ===
+# We will instantiate these inside main() for this specific debug.
+neo4j_service: Optional[Neo4jService] = None
+client: Optional[OpenAI] = None
 
 # === Helper Functions ===
 
 def safe_neo4j_operation(func):
     """Decorator for Neo4j operations with error handling and logging."""
     def wrapper(*args, **kwargs):
+        # IMPORTANT: Ensure neo4j_service is available in the global scope if not passed
+        global neo4j_service # Declare global to ensure it's accessible
+
+        if neo4j_service is None or not isinstance(neo4j_service, Neo4jService):
+            st.error("❌ Neo4j service not initialized. Cannot perform database operation.")
+            logger.error(f"Attempted Neo4j operation '{func.__name__}' before service initialization.")
+            return None # Or raise an error
+        
         try:
             return func(*args, **kwargs)
         except Exception as e:
@@ -139,11 +130,10 @@ def check_embedding_dimensions():
             MATCH (c:Case) WHERE c.embedding IS NOT NULL
             RETURN c.id AS case_id, size(c.embedding) AS embedding_length
         """)
-        # Corrected to use Config.EMBEDDING_DIM
         wrong_dims = [(r["case_id"], r["embedding_length"]) for r in result if r["embedding_length"] != Config.EMBEDDING_DIM]
         if wrong_dims:
             st.warning(f"⚠️ Cases with wrong embedding size ({Config.EMBEDDING_DIM}): {len(wrong_dims)} cases found.")
-            st.write(f"Sample: {wrong_dims[:5]}") # Show first few for brevity in UI
+            st.write(f"Sample: {wrong_dims[:5]}") 
         else:
             st.success(f"✅ All embeddings have correct size ({Config.EMBEDDING_DIM}).")
 
@@ -157,7 +147,7 @@ def find_cases_missing_labels() -> List[int]:
             RETURN c.id AS case_id
         """)
         missing_cases = [record["case_id"] for record in result]
-        return missing_cases # Do not display messages here; `main()` will handle.
+        return missing_cases 
 
 @safe_neo4j_operation
 def refresh_screened_for_labels(csv_url: str) -> bool:
@@ -173,13 +163,11 @@ def refresh_screened_for_labels(csv_url: str) -> bool:
             st.error("❌ The CSV must contain 'Case_No' and 'Class_ASD_Traits' columns.")
             return False
 
-        # Ensure Case_No is integer type for matching with Neo4j 'id' property
         df["Case_No"] = pd.to_numeric(df["Case_No"], errors='coerce')
-        df.dropna(subset=["Case_No"], inplace=True) # Drop rows where Case_No could not be converted
+        df.dropna(subset=["Case_No"], inplace=True) 
         df["Case_No"] = df["Case_No"].astype(int)
 
         with neo4j_service.session() as session:
-            # Delete all existing SCREENED_FOR relationships
             session.run("""
                 MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait)
                 DELETE r
@@ -190,7 +178,7 @@ def refresh_screened_for_labels(csv_url: str) -> bool:
             for _, row in df.iterrows():
                 case_id = int(row["Case_No"])
                 label = str(row["Class_ASD_Traits"]).strip().capitalize()
-                if label in ["Yes", "No"]: # Only process valid labels
+                if label in ["Yes", "No"]: 
                     data_to_create.append({"case_id": case_id, "label": label})
             
             if not data_to_create:
@@ -199,7 +187,6 @@ def refresh_screened_for_labels(csv_url: str) -> bool:
 
             logger.info(f"Attempting to refresh labels for {len(data_to_create)} cases from CSV.")
 
-            # Use UNWIND for efficient batching of relationship creation
             result = session.run("""
                 UNWIND $data AS item
                 MATCH (c:Case {id: item.case_id}) 
@@ -250,17 +237,16 @@ def _call_embedding_subprocess_with_data(upload_id: str, case_data_json: Optiona
             return False, None
 
         env = os.environ.copy()
-        # Ensure subprocess uses the same Neo4j and OpenAI configs
         env.update({
             "NEO4J_URI": os.getenv("NEO4J_URI"),
             "NEO4J_USER": os.getenv("NEO4J_USER"),
             "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD"),
-            "PYTHONPATH": script_dir # Add script_dir to PYTHONPATH
+            "PYTHONPATH": script_dir 
         })
 
         cmd = [sys.executable, builder_path, upload_id]
         if case_data_json:
-            cmd.append(case_data_json) # Pass case data as JSON string for temporary use
+            cmd.append(case_data_json) 
 
         logger.info(f"Calling embedding subprocess: {' '.join(cmd)}")
         result = subprocess.run(
@@ -320,7 +306,6 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
     """Checks and attempts to fix label consistency between CSV and Neo4j graph."""
     inconsistent_cases = []
     with neo4j_service.session() as session:
-        # Ensure Case_No is int for consistency
         df["Case_No"] = pd.to_numeric(df["Case_No"], errors='coerce').astype(int) 
 
         for _, row in df.iterrows():
@@ -348,7 +333,7 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
         st.error("❌ Inconsistencies found between CSV and Neo4j labels (Class_ASD_Traits vs SCREENED_FOR):")
         for case_id, csv_label, graph_label in inconsistent_cases:
             st.error(f"- Case_No {case_id}: CSV='{csv_label}' | Neo4j='{graph_label}'")
-        st.stop() # Stop execution if inconsistencies found
+        st.stop() 
 
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
@@ -369,13 +354,10 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         df_raw.dropna(subset=["Case_No"], inplace=True)
         df_raw["Case_No"] = df_raw["Case_No"].astype(int)
 
-        # Check consistency of labels from CSV against graph data.
-        # This will attempt to fix missing labels in graph if present in CSV.
         check_label_consistency(df_raw.copy(), neo4j_service)
 
         neo4j_embeddings_data = []
         with neo4j_service.session() as session:
-            # Fetch all embeddings with their IDs
             result = session.run("""
                 MATCH (c:Case)
                 WHERE c.embedding IS NOT NULL
@@ -394,8 +376,6 @@ def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Ser
         embeddings_df = pd.DataFrame(neo4j_embeddings_data)
         embeddings_df.set_index("Case_No", inplace=True)
         
-        # Merge CSV data with embeddings based on Case_No.
-        # Only keep cases that have both CSV data and an embedding in Neo4j.
         df_merged = pd.merge(
             df_raw,
             embeddings_df,
@@ -448,7 +428,7 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
 
         df_combined = pd.merge(
             df_features,
-            X, # X's index is assumed to be Case_No
+            X, 
             left_on="Case_No",
             right_index=True,
             how="inner"
@@ -620,7 +600,6 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             
         # 3. Regenerate embeddings for the existing graph (without deleting the graph)
         with st.spinner("Regenerating embeddings for existing graph... This may take a while."):
-            # CORRECTED: Call kg_builder_2.py with the --generate-embeddings-only argument
             result = subprocess.run(
                 [sys.executable, "kg_builder_2.py", "--generate-embeddings-only"], 
                 capture_output=True,
@@ -1123,7 +1102,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 st.subheader("🧪 Embedding Diagnostics")
                 st.text("📦 Embedding vector (first 50 dimensions):")
-                st.write(embedding[:50].tolist()) # Limit display for long vectors for better UI
+                st.write(embedding[:50].tolist()) 
 
                 if np.isnan(embedding).any():
                     st.error("❌ Embedding contains NaN values.")
