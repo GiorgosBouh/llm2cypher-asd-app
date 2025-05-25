@@ -15,16 +15,6 @@ from dotenv import load_dotenv
 
 import argparse
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--no-labels', action='store_true', 
-                      help='Generate embeddings without label information')
-    args = parser.parse_args()
-    
-    if args.no_labels:
-        print("Running in no-labels mode - excluding all label information")
-        # Add your label-removal logic here
-        
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -57,7 +47,7 @@ class GraphBuilder:
         uri = os.getenv("NEO4J_URI")
         user = os.getenv("NEO4J_USER")
         password_masked = '*' * len(os.getenv("NEO4J_PASSWORD")) if os.getenv("NEO4J_PASSWORD") else 'N/A'
-        logger.info(f"kg_builder_2.py connecting to: URI='{uri}', User='{user}', Pass='{password_masked}'") # <--- Make sure this line is here
+        logger.info(f"kg_builder_2.py connecting to: URI='{uri}', User='{user}', Pass='{password_masked}'")
         return GraphDatabase.driver(
             uri,
             auth=(user, os.getenv("NEO4J_PASSWORD")),
@@ -107,7 +97,7 @@ class GraphBuilder:
         tx.run("MERGE (:ASD_Trait {label: 'Yes'})")
         tx.run("MERGE (:ASD_Trait {label: 'No'})")
 
-    def create_relationships(self, tx, df: pd.DataFrame) -> None:
+    def create_relationships(self, tx, df: pd.DataFrame, include_labels: bool = True) -> None:
         case_data = []
         answer_data = []
         demo_data = []
@@ -115,15 +105,19 @@ class GraphBuilder:
         
         for _, row in df.iterrows():
             case_id = int(row["Case_No"])
-            upload_id = str(case_id)
+            upload_id = str(case_id) # Using case_id as upload_id for consistency with existing graph
             
-            raw_trait = str(row.get("Class_ASD_Traits", "")).strip().lower()
-            if raw_trait == "yes":
-                asd_trait = "Yes"
-            elif raw_trait == "no":
-                asd_trait = "No"
+            # Handle ASD Trait based on include_labels flag
+            if include_labels:
+                raw_trait = str(row.get("Class_ASD_Traits", "")).strip().lower()
+                if raw_trait == "yes":
+                    asd_trait = "Yes"
+                elif raw_trait == "no":
+                    asd_trait = "No"
+                else:
+                    asd_trait = None
             else:
-                asd_trait = None
+                asd_trait = None # Do not include ASD_Trait relationship if no_labels is true
             
             case_data.append({
                 "id": case_id, 
@@ -154,7 +148,7 @@ class GraphBuilder:
                 "val": submitter_val
             })
         
-        logger.info(f"Preparing to create/merge {len(case_data)} Case nodes and their SCREENED_FOR relationships.")
+        logger.info(f"Preparing to create/merge {len(case_data)} Case nodes and their SCREENED_FOR relationships (include_labels={include_labels}).")
         tx.run("""
             UNWIND $data as row 
             MERGE (c:Case {id: row.id}) 
@@ -307,8 +301,10 @@ class GraphBuilder:
             G.add_nodes_from(case_ids, type="Case")
             logger.info("📊 Loaded %d Case nodes", len(case_ids))
             
+            # Fetch relationships, EXCLUDING SCREENED_FOR if the --no-labels flag is active
             relationships = session.run("""
                 MATCH (c:Case)-[r]->(n)
+                WHERE NOT (type(r) = 'SCREENED_FOR' AND $no_labels IS TRUE)
                 RETURN c.id AS source_id, 
                        type(r) AS rel_type,
                        CASE 
@@ -320,7 +316,7 @@ class GraphBuilder:
                        END AS target_id,
                        r.value AS value,
                        r.weight AS weight 
-            """)
+            """, no_labels=self.no_labels_flag) # Pass the flag to the Cypher query
             
             edge_count = 0
             for record in relationships:
@@ -453,6 +449,7 @@ class GraphBuilder:
 
     def build_full_graph(self) -> None:
         """Builds the entire graph from scratch, including deleting old data."""
+        self.no_labels_flag = False # Ensure labels are included for full graph build
         driver = None
         try:
             driver = self.connect_to_neo4j()
@@ -468,7 +465,7 @@ class GraphBuilder:
                 session.execute_write(self.create_nodes, df)
                 
                 logger.info("⏳ Creating all relationships...")
-                session.execute_write(self.create_relationships, df)
+                session.execute_write(self.create_relationships, df, include_labels=True) # Always include labels for full build
                 
                 logger.info("⏳ Creating similarity relationships...")
                 session.execute_write(self.create_similarity_relationships, df)
@@ -478,46 +475,73 @@ class GraphBuilder:
                 raise RuntimeError("Embedding generation failed or no embeddings were generated/stored.")
             
             logger.info("✅ Full graph built successfully!")
-            sys.exit(0)
+            # sys.exit(0) # Remove sys.exit here as it will terminate the subprocess prematurely
             
         except Exception as e:
             logger.critical("❌ Critical error during full graph build: %s", str(e), exc_info=True)
-            sys.exit(1)
+            # sys.exit(1) # Remove sys.exit here
+            raise # Re-raise the exception so subprocess.run can catch it
         finally:
             if driver:
                 driver.close()
 
     def generate_embeddings_only(self) -> None:
         """Generates embeddings for the *existing* graph without deleting/rebuilding."""
+        # This method is designed to be called when you want to generate embeddings for an *existing* graph.
+        # It's specifically used by Streamlit's train_asd_detection_model to prevent label leakage.
+        self.no_labels_flag = True # Set flag to exclude SCREENED_FOR relationships
         driver = None
         try:
             driver = self.connect_to_neo4j()
             
-            logger.info("⏳ Generating embeddings for existing graph...")
+            logger.info("⏳ Generating embeddings for existing graph (excluding SCREENED_FOR labels)...")
             if not self.generate_embeddings(driver):
                 raise RuntimeError("Embedding generation failed or no embeddings were generated/stored.")
             
             logger.info("✅ Embeddings for existing graph generated successfully!")
-            sys.exit(0)
+            # sys.exit(0) # Remove sys.exit here
             
         except Exception as e:
             logger.critical("❌ Critical error during embeddings-only generation: %s", str(e), exc_info=True)
-            sys.exit(1)
+            # sys.exit(1) # Remove sys.exit here
+            raise # Re-raise the exception so subprocess.run can catch it
         finally:
             if driver:
                 driver.close()
 
-# Modify the __main__ block to accept arguments
+# Main execution block for kg_builder_2.py
 if __name__ == "__main__":
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Builds a Neo4j Knowledge Graph and generates embeddings for ASD data.")
+    parser.add_argument('--no-labels', action='store_true', 
+                      help='Generate embeddings without label information (used for training to prevent leakage).')
+    parser.add_argument('--build-full-graph', action='store_true',
+                        help='Deletes existing data and rebuilds the entire graph from scratch, including labels.')
+    parser.add_argument('--generate-embeddings-only', action='store_true',
+                        help='Generates embeddings for the *existing* graph without deleting/rebuilding.')
+    args = parser.parse_args()
+
     builder = GraphBuilder()
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--build-full-graph":
+
+    # Pass the --no-labels flag state to the GraphBuilder instance
+    # This allows the _build_networkx_graph method to conditionally exclude relationships
+    builder.no_labels_flag = args.no_labels
+
+    try:
+        if args.build_full_graph:
+            logger.info("Running in --build-full-graph mode.")
             builder.build_full_graph()
-        elif sys.argv[1] == "--generate-embeddings-only":
+        elif args.generate_embeddings_only:
+            logger.info("Running in --generate-embeddings-only mode.")
             builder.generate_embeddings_only()
+        elif args.no_labels: # This condition handles the direct --no-labels call for generating embeddings without full rebuild
+             logger.info("Running in --no-labels mode to generate embeddings (without rebuilding the graph and excluding labels).")
+             builder.generate_embeddings_only() # This method already sets self.no_labels_flag to True
         else:
-            logger.error("Invalid argument. Use --build-full-graph or --generate-embeddings-only")
-            sys.exit(1)
-    else:
-        logger.info("No arguments provided. Defaulting to full graph build.")
-        builder.build_full_graph() # Default behavior if no args are given
+            logger.info("No specific arguments provided. Defaulting to full graph build.")
+            builder.build_full_graph()
+        
+        sys.exit(0) # Exit successfully if no exception
+    except Exception as e:
+        logger.error(f"Execution failed: {e}")
+        sys.exit(1) # Exit with error code if an exception occurs
