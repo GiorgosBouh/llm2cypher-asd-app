@@ -905,10 +905,10 @@ at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegea
         if missing_labels:
             st.warning(f"⚠️ There are {len(missing_labels)} cases without SCREENED_FOR label.")
             if st.button("🔄 Refresh All Labels from CSV"):
-            csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-            with st.spinner("Refreshing labels from CSV..."):
-                refresh_screened_for_labels(csv_url)
-                st.rerun()  # Refresh the UI to show updated status
+                csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+                with st.spinner("Refreshing labels from CSV..."):
+                    refresh_screened_for_labels(csv_url)
+                    st.rerun()  # Refresh the UI to show updated status
     else:
         st.success("✅ All cases have SCREENED_FOR labels.")
             
