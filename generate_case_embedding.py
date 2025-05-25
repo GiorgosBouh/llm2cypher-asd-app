@@ -41,7 +41,7 @@ class EmbeddingGenerator:
         return GraphDatabase.driver(
             os.getenv("NEO4J_URI"),
             auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD")),
-            connection_timeout=30,
+            connection_timeout=600,
             max_connection_lifetime=7200,
             max_connection_pool_size=50
         )

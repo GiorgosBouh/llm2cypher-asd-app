@@ -191,43 +191,40 @@ def find_cases_missing_labels() -> list:
 
 @safe_neo4j_operation
 def refresh_screened_for_labels(csv_url: str):
-    """
-    Atomically removes all existing SCREENED_FOR relationships
-    και ξαναδημιουργεί τις σωστές βάσει του CSV.
-    """
+    """Refresh all SCREENED_FOR relationships from CSV"""
+    try:
+        df = pd.read_csv(csv_url, delimiter=";")
+        if "Case_No" not in df.columns or "Class_ASD_Traits" not in df.columns:
+            st.error("CSV must contain 'Case_No' and 'Class_ASD_Traits' columns")
+            return
 
-    df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
-    df.columns = [col.strip() for col in df.columns]
-
-    if "Case_No" not in df.columns or "Class_ASD_Traits" not in df.columns:
-        st.error("❌ Το CSV πρέπει να περιέχει τις στήλες 'Case_No' και 'Class_ASD_Traits'")
-        return
-
-    with neo4j_service.session() as session:
-        # Διαγραφή όλων των σχέσεων
-        session.run("""
-            MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait)
-            DELETE r
-        """)
-        logger.info("✅ Παλιές σχέσεις SCREENED_FOR διαγράφηκαν.")
-
-        # Επανεγγραφή νέων σχέσεων με batch
-        tx = session.begin_transaction()
-
-        for _, row in df.iterrows():
-            case_id = int(row["Case_No"])
-            label = str(row["Class_ASD_Traits"]).strip().capitalize()  # "Yes" ή "No"
-
-            if label in ["Yes", "No"]:
-                tx.run("""
-                    MATCH (c:Case {id: $case_id})
-                    MERGE (t:ASD_Trait {label: $label})
-                    MERGE (c)-[:SCREENED_FOR]->(t)
-                """, case_id=case_id, label=label)
-
-        tx.commit()
-        logger.info("✅ Νέες σχέσεις SCREENED_FOR δημιουργήθηκαν με βάση το CSV.")
-        st.success("✅ Ολοκληρώθηκε η ανανέωση των σχέσεων SCREENED_FOR.")        
+        with neo4j_service.session() as session:
+            # Remove all existing relationships
+            session.run("""
+                MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait)
+                DELETE r
+            """)
+            
+            # Batch create new relationships
+            batch_size = 100
+            for i in range(0, len(df), batch_size):
+                batch = df.iloc[i:i+batch_size]
+                queries = []
+                for _, row in batch.iterrows():
+                    case_id = int(row["Case_No"])
+                    label = str(row["Class_ASD_Traits"]).strip().capitalize()
+                    if label in ["Yes", "No"]:
+                        queries.append(f"""
+                            MATCH (c:Case {{id: {case_id}}})
+                            MERGE (t:ASD_Trait {{label: "{label}"}})
+                            MERGE (c)-[:SCREENED_FOR]->(t)
+                        """)
+                if queries:
+                    session.run("; ".join(queries))
+                    
+        st.success(f"Updated {len(df)} SCREENED_FOR relationships")
+    except Exception as e:
+        st.error(f"Error refreshing labels: {str(e)}")       
 
 # === Data Insertion ===
 @safe_neo4j_operation
