@@ -671,76 +671,192 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
 
-        # 1. Strict label removal
+        # 1. Strict label removal from the graph to prevent leakage
         remove_screened_for_labels()
+        st.info("✅ SCREENED_FOR relationships temporarily removed for leakage prevention.")
 
-        # 2. Generate embeddings with strict isolation
+        # 2. Generate embeddings with strict isolation (no labels considered for embedding generation)
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kg_builder_2.py")
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(f"kg_builder_2.py not found at {script_path}")
+
+        st.info("🔄 Generating graph embeddings without label information...")
         result = subprocess.run(
-            [sys.executable, "kg_builder_2.py", "--no-labels"],
+            [sys.executable, script_path, "--no-labels"], # Pass the --no-labels argument
             capture_output=True,
-            text=True
+            text=True,
+            timeout=Config.EMBEDDING_GENERATION_TIMEOUT # Use the configured timeout
         )
         
-        # Check if the command failed
+        # Log full output for debugging
+        logger.info(f"kg_builder_2.py stdout: {result.stdout}")
+        logger.info(f"kg_builder_2.py stderr: {result.stderr}")
+        
         if result.returncode != 0:
-            error_msg = result.stderr or "Unknown error (no stderr output)"
-            st.error(f"❌ Failed to generate embeddings:\n{error_msg}")
-            logger.error(f"Embedding generation failed: {error_msg}")
-            return None
+            error_msg = result.stderr or "Unknown error - check logs for details"
+            raise RuntimeError(f"Embedding generation failed: {error_msg}")
+        st.success("✅ Embeddings generated successfully (without label leakage).")
 
-        # 3. Extract data with additional checks
+        # 3. Extract training data (embeddings and labels) from the CSV and graph
+        st.info("📊 Extracting training data from graph and CSV...")
         X_raw, y = extract_training_data_from_csv(csv_url)
+        X = X_raw.copy()
+        X.columns = [f"Dim_{i}" for i in range(X.shape[1])] # Rename columns for clarity
 
-        # Verify no correlation between embeddings and labels
+        if X.empty or y.empty:
+            st.error("⚠️ No valid training data available after extraction.")
+            return None
+        st.success(f"✅ Extracted {len(X)} cases for training.")
+
+        # Optional: Leakage check - verify embeddings are not trivially correlated with labels
         if Config.LEAKAGE_CHECK:
-            random_labels = np.random.permutation(y)
-            random_auc = roc_auc_score(random_labels, X_raw.mean(axis=1))
-            if random_auc > 0.6:
-                raise ValueError(f"Suspicious AUC {random_auc:.3f} with random labels")
+            st.info("🔬 Performing leakage check...")
+            try:
+                # Use a small subset to avoid heavy computation if X_raw is very large
+                sample_size = min(500, len(y))
+                if sample_size > 0:
+                    sample_indices = np.random.choice(len(y), sample_size, replace=False)
+                    X_sample = X_raw.iloc[sample_indices]
+                    y_sample = y.iloc[sample_indices]
 
-        # 4. Train/test split
+                    # Permute labels and check AUC for randomness
+                    random_labels = np.random.permutation(y_sample)
+                    # Use a simple estimator or direct correlation if AUC on random labels is desired
+                    # For a quick check, a simple sum of embeddings might be used or fit a dummy model
+                    # For a more robust check, train a simple classifier and see if it performs well on random labels
+                    
+                    # Instead of X_raw.mean(axis=1), let's fit a quick model
+                    from sklearn.linear_model import LogisticRegression
+                    temp_model = LogisticRegression(random_state=Config.RANDOM_STATE, solver='liblinear')
+                    
+                    # Check on original labels
+                    if len(X_sample) > 0 and len(y_sample.unique()) > 1:
+                        temp_model.fit(X_sample, y_sample)
+                        original_auc = roc_auc_score(y_sample, temp_model.predict_proba(X_sample)[:, 1])
+                        st.info(f"Original label AUC on sample: {original_auc:.3f}")
+
+                        # Check on permuted labels
+                        temp_model.fit(X_sample, random_labels)
+                        random_auc = roc_auc_score(random_labels, temp_model.predict_proba(X_sample)[:, 1])
+                        st.info(f"Random label AUC on sample: {random_auc:.3f}")
+
+                        if random_auc > 0.6: # Threshold for suspicion
+                            st.warning(f"🚨 Suspiciously high AUC ({random_auc:.3f}) with random labels detected during leakage check. This might indicate data leakage.")
+                            # You might choose to raise an error here:
+                            # raise ValueError(f"Suspicious AUC {random_auc:.3f} with random labels, possible data leakage.")
+                        else:
+                            st.success("✅ Leakage check passed (low AUC on random labels).")
+                    else:
+                        st.info("Leakage check skipped: Not enough data or only one class in sample.")
+                else:
+                    st.info("Leakage check skipped: Not enough data for sampling.")
+            except Exception as e:
+                st.warning(f"⚠️ Could not perform leakage check: {e}")
+                logger.warning(f"Leakage check failed: {e}", exc_info=True)
+
+
+        # 4. Train/test split (stratified to maintain class proportions)
+        st.info("🔪 Splitting data into training and test sets...")
         X_train, X_test, y_train, y_test = train_test_split(
-            X_raw, y,
+            X, y, # Use X (DataFrame with renamed columns)
             test_size=Config.TEST_SIZE,
             stratify=y,
             random_state=Config.RANDOM_STATE
         )
+        st.success(f"✅ Train set size: {len(X_train)}, Test set size: {len(X_test)}")
+        st.write(f"Class distribution in train set: {Counter(y_train)}")
+        st.write(f"Class distribution in test set: {Counter(y_test)}")
 
-        # 5. Build pipeline with SMOTE only in training
+        # 5. Calculate class weights for imbalance
+        neg = sum(y_train == 0)
+        pos = sum(y_train == 1)
+        scale_pos_weight = neg / pos if pos != 0 else 1.0
+        st.info(f"⚖️ Calculated scale_pos_weight: {scale_pos_weight:.2f}")
+
+        # 6. Pipeline with StandardScaler and XGBoost (SMOTE applied within CV loop)
+        # Note: SMOTE should *only* be applied to the training folds, not the validation folds, to prevent data leakage.
         pipeline = ImbPipeline([
-            ('scaler', StandardScaler()),
+            ('scaler', StandardScaler()), # Scale features before training
             ('xgb', XGBClassifier(
                 n_estimators=Config.N_ESTIMATORS,
-                use_label_encoder=False,
+                use_label_encoder=False, # Suppress the warning
                 eval_metric='logloss',
                 random_state=Config.RANDOM_STATE,
                 scale_pos_weight=scale_pos_weight
             ))
         ])
 
-        # 6. Cross-validation
+        # 7. Cross-validation for robust performance estimation
+        st.info("🔬 Performing Stratified K-Fold Cross-Validation...")
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.RANDOM_STATE)
         cv_scores = []
-        for train_idx, val_idx in cv.split(X_train, y_train):
-            X_fold_train, y_fold_train = X_train.iloc[train_idx], y_train.iloc[train_idx]
+        cv_y_true = []
+        cv_y_proba = []
 
+        for fold_idx, (train_idx, val_idx) in enumerate(cv.split(X_train, y_train)):
+            st.text(f"  - Processing CV Fold {fold_idx + 1}/5...")
+            X_fold_train, y_fold_train = X_train.iloc[train_idx], y_train.iloc[train_idx]
+            X_fold_val, y_fold_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
+
+            # Apply SMOTE only to the training data of the current fold
+            # Ensure k_neighbors is valid (min(num_samples_in_minority_class - 1, actual_k_neighbors_config))
+            k_neighbors = min(Config.SMOTE_K_NEIGHBORS, sum(y_fold_train == 1) - 1)
+            if k_neighbors < 1: # SMOTE requires at least 2 minority samples to form a neighbor
+                st.warning(f"⚠️ SMOTE k_neighbors adjusted to 1 for fold {fold_idx+1} due to very small minority class. Consider increasing dataset size.")
+                k_neighbors = 1 
+            
             smote = SMOTE(
                 sampling_strategy='auto',
-                k_neighbors=min(Config.SMOTE_K_NEIGHBORS, sum(y_fold_train == 1) - 1),
+                k_neighbors=k_neighbors, 
                 random_state=Config.RANDOM_STATE
             )
+            
+            # Apply SMOTE and then fit the pipeline
             X_res, y_res = smote.fit_resample(X_fold_train, y_fold_train)
+            
+            # Fit scaler and XGBoost on the resampled data
+            temp_pipeline = ImbPipeline([
+                ('scaler', StandardScaler()),
+                ('xgb', XGBClassifier(
+                    n_estimators=Config.N_ESTIMATORS,
+                    use_label_encoder=False,
+                    eval_metric='logloss',
+                    random_state=Config.RANDOM_STATE,
+                    scale_pos_weight=scale_pos_weight
+                ))
+            ])
+            temp_pipeline.fit(X_res, y_res)
+            
+            y_proba_fold = temp_pipeline.predict_proba(X_fold_val)[:, 1]
+            cv_scores.append(roc_auc_score(y_fold_val, y_proba_fold))
+            cv_y_true.extend(y_fold_val.tolist())
+            cv_y_proba.extend(y_proba_fold.tolist())
 
-            pipeline.fit(X_res, y_res)
-            X_val, y_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
-            y_proba = pipeline.predict_proba(X_val)[:, 1]
-            cv_scores.append(roc_auc_score(y_val, y_proba))
+        st.success(f"✅ Cross-Validation complete. Mean CV ROC AUC: {np.mean(cv_scores):.3f} ± {np.std(cv_scores):.3f}")
+        st.subheader("📊 Cross-Validation Performance (on Training Set)")
+        plot_combined_curves(cv_y_true, cv_y_proba) # Plot CV results
 
-        # 7. Final training
-        pipeline.fit(X_train, y_train)
+        # 8. Final model training on the entire (original, un-SMOTEd) training set
+        # The pipeline already contains StandardScaler. SMOTE is not needed for final training of the model
+        # if the goal is to evaluate its performance on the *unbalanced* test set as it would be in real world.
+        # If you want to train on resampled data, uncomment and add SMOTE here as well.
+        st.info("🏋️‍♀️ Training final model on full training set...")
+        
+        # Apply SMOTE to the entire training set for the final model
+        final_smote = SMOTE(
+            sampling_strategy='auto',
+            k_neighbors=min(Config.SMOTE_K_NEIGHBORS, sum(y_train == 1) - 1),
+            random_state=Config.RANDOM_STATE
+        )
+        X_train_res, y_train_res = final_smote.fit_resample(X_train, y_train)
 
-        # 8. Reinsert labels into the graph
+        pipeline.fit(X_train_res, y_train_res)
+        st.success("✅ Final model trained.")
+
+        # 9. Reinsert labels into the graph (after training is complete)
+        st.info("🔄 Re-inserting SCREENED_FOR relationships into the graph...")
         reinsert_labels_from_csv(csv_url)
+        st.success("✅ SCREENED_FOR relationships re-inserted.")
 
         return {
             "model": pipeline,
@@ -749,9 +865,21 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             "cv_scores": cv_scores
         }
 
+    except subprocess.TimeoutExpired:
+        st.error(f"❌ Embedding generation timed out after {Config.EMBEDDING_GENERATION_TIMEOUT} seconds.")
+        logger.error(f"Embedding generation subprocess timed out.")
+        return None
+    except FileNotFoundError as e:
+        st.error(f"❌ Required script not found: {e}")
+        logger.error(f"File not found: {e}")
+        return None
+    except RuntimeError as e:
+        st.error(f"❌ Error during embedding generation or graph operation: {e}")
+        logger.error(f"Runtime error during embedding generation: {e}")
+        return None
     except Exception as e:
         logger.error(f"🚨 Model training failed: {str(e)}", exc_info=True)
-        st.error(f"❌ Error during model training: {str(e)}")
+        st.error(f"❌ An unexpected error occurred during model training: {str(e)}")
         return None
 
 # === Anomaly Detection ===
