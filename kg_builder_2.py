@@ -41,6 +41,8 @@ class GraphBuilder:
         self.MAX_SIMILAR_PAIRS = 10000
         self.MIN_SIMILAR_ANSWERS = 7  # For similarity relationships
         self.BATCH_SIZE = 500
+        # Initialize no_labels_flag here so it always exists
+        self.no_labels_flag = False 
 
     def connect_to_neo4j(self) -> GraphDatabase.driver:
         """Create Neo4j driver with environment variables"""
@@ -301,10 +303,15 @@ class GraphBuilder:
             G.add_nodes_from(case_ids, type="Case")
             logger.info("📊 Loaded %d Case nodes", len(case_ids))
             
-            # Fetch relationships, EXCLUDING SCREENED_FOR if the --no-labels flag is active
-            relationships = session.run("""
+            # Fetch relationships, EXCLUDING SCREENED_FOR if the --no-labels flag is true
+            # Corrected Cypher syntax for conditional WHERE clause with boolean parameter
+            query = """
                 MATCH (c:Case)-[r]->(n)
-                WHERE NOT (type(r) = 'SCREENED_FOR' AND $no_labels IS TRUE)
+                """
+            if self.no_labels_flag:
+                query += "WHERE type(r) <> 'SCREENED_FOR'\n"
+            
+            query += """
                 RETURN c.id AS source_id, 
                        type(r) AS rel_type,
                        CASE 
@@ -316,7 +323,9 @@ class GraphBuilder:
                        END AS target_id,
                        r.value AS value,
                        r.weight AS weight 
-            """, no_labels=self.no_labels_flag) # Pass the flag to the Cypher query
+            """
+            
+            relationships = session.run(query) # No need to pass no_labels parameter if it's handled by string formatting
             
             edge_count = 0
             for record in relationships:
@@ -475,11 +484,9 @@ class GraphBuilder:
                 raise RuntimeError("Embedding generation failed or no embeddings were generated/stored.")
             
             logger.info("✅ Full graph built successfully!")
-            # sys.exit(0) # Remove sys.exit here as it will terminate the subprocess prematurely
             
         except Exception as e:
             logger.critical("❌ Critical error during full graph build: %s", str(e), exc_info=True)
-            # sys.exit(1) # Remove sys.exit here
             raise # Re-raise the exception so subprocess.run can catch it
         finally:
             if driver:
@@ -499,11 +506,9 @@ class GraphBuilder:
                 raise RuntimeError("Embedding generation failed or no embeddings were generated/stored.")
             
             logger.info("✅ Embeddings for existing graph generated successfully!")
-            # sys.exit(0) # Remove sys.exit here
             
         except Exception as e:
             logger.critical("❌ Critical error during embeddings-only generation: %s", str(e), exc_info=True)
-            # sys.exit(1) # Remove sys.exit here
             raise # Re-raise the exception so subprocess.run can catch it
         finally:
             if driver:
