@@ -811,7 +811,8 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, StandardScaler]]:
     """Trains anomaly detection model"""
-        embeddings = get_existing_embeddings()
+    embeddings = get_existing_embeddings()
+
     if embeddings is None or len(embeddings) < Config.MIN_CASES_FOR_ANOMALY_DETECTION:
         st.warning(f"⚠️ Need at least {Config.MIN_CASES_FOR_ANOMALY_DETECTION} cases for anomaly detection")
         return None
@@ -819,7 +820,7 @@ def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, St
     scaler = StandardScaler()
     embeddings_scaled = scaler.fit_transform(embeddings)
 
-    contamination = min(0.1, 5.0 / len(embeddings))
+    contamination = min(0.1, 5.0 / len(embeddings))  # ensures max 5 anomalies or 10% contamination
     iso_forest = IsolationForest(
         contamination=contamination,
         random_state=Config.RANDOM_STATE
