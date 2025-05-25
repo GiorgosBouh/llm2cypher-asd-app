@@ -96,9 +96,9 @@ class Config:
     NODE2VEC_Q = 1
     EMBEDDING_BATCH_SIZE = 50
     MAX_RELATIONSHIPS = 100000
-    EMBEDDING_GENERATION_TIMEOUT = 300
+    EMBEDDING_GENERATION_TIMEOUT = 600  # Increased timeout to 10 minutes
     LEAKAGE_CHECK = True
-    SMOTE_K_NEIGHBORS = 5  # Added SMOTE configuration
+    SMOTE_K_NEIGHBORS = 5
 
 # === Logging Setup ===
 logging.basicConfig(
@@ -184,7 +184,7 @@ def find_cases_missing_labels() -> list:
         """)
         missing_cases = [record["case_id"] for record in result]
         if missing_cases:
-            st.warning(f"⚠️ Cases missing SCREENED_FOR label: {missing_cases}")
+            st.warning(f"⚠️ Cases missing SCREENED_FOR label: {len(missing_cases)} cases")
         else:
             st.success("✅ All cases have SCREENED_FOR labels.")
         return missing_cases
@@ -193,7 +193,9 @@ def find_cases_missing_labels() -> list:
 def refresh_screened_for_labels(csv_url: str):
     """Refresh all SCREENED_FOR relationships from CSV"""
     try:
-        df = pd.read_csv(csv_url, delimiter=";")
+        df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
+        df.columns = [col.strip() for col in df.columns]
+
         if "Case_No" not in df.columns or "Class_ASD_Traits" not in df.columns:
             st.error("CSV must contain 'Case_No' and 'Class_ASD_Traits' columns")
             return
@@ -207,24 +209,49 @@ def refresh_screened_for_labels(csv_url: str):
             
             # Batch create new relationships
             batch_size = 100
-            for i in range(0, len(df), batch_size):
+            total_cases = len(df)
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for i in range(0, total_cases, batch_size):
                 batch = df.iloc[i:i+batch_size]
                 queries = []
+                params = []
+                
                 for _, row in batch.iterrows():
                     case_id = int(row["Case_No"])
                     label = str(row["Class_ASD_Traits"]).strip().capitalize()
                     if label in ["Yes", "No"]:
-                        queries.append(f"""
-                            MATCH (c:Case {{id: {case_id}}})
-                            MERGE (t:ASD_Trait {{label: "{label}"}})
+                        queries.append("""
+                            MATCH (c:Case {id: $case_id_%d})
+                            MERGE (t:ASD_Trait {label: $label_%d})
                             MERGE (c)-[:SCREENED_FOR]->(t)
-                        """)
+                        """ % (case_id, case_id))
+                        params.extend([{"case_id_%d" % case_id: case_id, "label_%d" % case_id: label}])
+                
                 if queries:
-                    session.run("; ".join(queries))
-                    
-        st.success(f"Updated {len(df)} SCREENED_FOR relationships")
+                    # Execute all queries in a single transaction
+                    tx = session.begin_transaction()
+                    try:
+                        for query, param in zip(queries, params):
+                            tx.run(query, **param)
+                        tx.commit()
+                    except Exception as e:
+                        tx.rollback()
+                        raise e
+                
+                # Update progress
+                progress = min((i + batch_size) / total_cases, 1.0)
+                progress_bar.progress(progress)
+                status_text.text(f"Processing cases {i+1} to {min(i+batch_size, total_cases)} of {total_cases}")
+                
+        progress_bar.empty()
+        status_text.empty()
+        st.success(f"✅ Successfully updated {total_cases} SCREENED_FOR relationships")
+        
     except Exception as e:
-        st.error(f"Error refreshing labels: {str(e)}")       
+        st.error(f"Error refreshing labels: {str(e)}")
+        logger.error(f"Error in refresh_screened_for_labels: {str(e)}", exc_info=True)
 
 # === Data Insertion ===
 @safe_neo4j_operation
@@ -277,7 +304,6 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
     if "Class_ASD_Traits" in row:
         label = str(row["Class_ASD_Traits"]).strip().lower()
         if label in ["yes", "no"]:
-         
             queries.append((
                 """
                 MATCH (c:Case {id: $id})
@@ -315,7 +341,6 @@ def remove_screened_for_labels():
 def generate_embedding_for_case(upload_id: str) -> bool:
     """Generate embedding for a single case using subprocess"""
     try:
-        # Get the directory of the current script
         script_dir = os.path.dirname(os.path.abspath(__file__))
         builder_path = os.path.join(script_dir, "generate_case_embedding.py")
         
@@ -323,11 +348,12 @@ def generate_embedding_for_case(upload_id: str) -> bool:
             st.error(f"❌ Embedding generator script not found at: {builder_path}")
             return False
 
-        # Run the embedding generator as a subprocess
+        # Run the embedding generator as a subprocess with timeout
         result = subprocess.run(
             [sys.executable, builder_path, upload_id],
             capture_output=True,
-            text=True
+            text=True,
+            timeout=Config.EMBEDDING_GENERATION_TIMEOUT
         )
         
         if result.returncode != 0:
@@ -336,6 +362,9 @@ def generate_embedding_for_case(upload_id: str) -> bool:
             
         return True
         
+    except subprocess.TimeoutExpired:
+        st.error(f"❌ Embedding generation timed out after {Config.EMBEDDING_GENERATION_TIMEOUT} seconds")
+        return False
     except Exception as e:
         st.error(f"❌ Error generating embedding: {str(e)}")
         return False
@@ -425,7 +454,7 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
             graph_label = record["graph_label"].strip().lower() if record and record["graph_label"] else None
 
             if graph_label is None:
-                st.warning(f"⚠️ Case_No {case_id} έχει ετικέτα '{csv_label}' στο CSV, αλλά δεν έχει ετικέτα στον γράφο. Δημιουργία σχέσης...")
+                st.warning(f"⚠️ Case_No {case_id} has label '{csv_label}' in CSV but not in graph. Creating relationship...")
                 session.run("""
                     MATCH (c:Case {id: $case_id})
                     MERGE (t:ASD_Trait {label: $label})
@@ -435,66 +464,11 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
                 inconsistent_cases.append((case_id, csv_label, graph_label))
 
     if inconsistent_cases:
-        st.error("❌ Βρέθηκαν ασυμφωνίες μεταξύ CSV και Neo4j ετικετών (Class_ASD_Traits vs SCREENED_FOR):")
+        st.error("❌ Found inconsistencies between CSV and Neo4j labels (Class_ASD_Traits vs SCREENED_FOR):")
         for case_id, csv_label, graph_label in inconsistent_cases:
             st.error(f"- Case_No {case_id}: CSV='{csv_label}' | Neo4j='{graph_label}'")
         st.stop()
 
-@safe_neo4j_operation
-def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
-    try:
-        df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
-        df.columns = [col.strip().replace('\r', '') for col in df.columns]
-        df.columns = [col.strip() for col in df.columns]
-
-        # Έλεγχος συνέπειας ετικετών CSV με γράφο
-        check_label_consistency(df, neo4j_service)
-
-        required_cols = ["Case_No", "Class_ASD_Traits"]
-        missing = [col for col in required_cols if col not in df.columns]
-        if missing:
-            st.error(f"❌ Missing required columns: {', '.join(missing)}")
-            st.write("📋 Found columns in CSV:", df.columns.tolist())
-            return pd.DataFrame(), pd.Series()
-
-        numeric_cols = [f"A{i}" for i in range(1, 11)] + ["Case_No"]
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-
-        embeddings = []
-        valid_ids = []
-        with neo4j_service.session() as session:
-            for case_no in df["Case_No"]:
-                result = session.run("""
-                    MATCH (c:Case {id: $id})
-                    WHERE c.embedding IS NOT NULL
-                    RETURN c.embedding AS embedding
-                """, id=int(case_no))
-                record = result.single()
-                if record and record["embedding"]:
-                    embeddings.append(record["embedding"])
-                    valid_ids.append(case_no)
-
-        df_filtered = df[df["Case_No"].isin(valid_ids)].copy()
-        y = df_filtered["Class_ASD_Traits"].apply(
-            lambda x: 1 if str(x).strip().lower() == "yes" else 0
-        )
-
-        assert len(embeddings) == len(y), f"⚠️ Embeddings: {len(embeddings)}, Labels: {len(y)}"
-
-        X = pd.DataFrame(embeddings[:len(y)])
-
-        if X.isna().any().any():
-            st.warning(f"⚠️ Found {X.isna().sum().sum()} NaN values in embeddings - applying imputation")
-            X = X.fillna(X.mean())
-
-        return X, y
-
-    except Exception as e:
-        st.error(f"Data extraction failed: {str(e)}")
-        return pd.DataFrame(), pd.Series()
-        
 @safe_neo4j_operation
 def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Extracts training data with leakage protection and NaN handling"""
@@ -557,7 +531,7 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
         df.columns = [col.strip() for col in df.columns]
 
         if "Case_No" not in df.columns:
-            st.error("Το αρχείο πρέπει να περιέχει στήλη 'Case_No'")
+            st.error("File must contain 'Case_No' column")
             return
 
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
@@ -577,7 +551,7 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
 
         fig, ax = plt.subplots(figsize=(12, 6))
         sns.heatmap(corr, cmap="coolwarm", center=0, annot=False)
-        ax.set_title("Συσχέτιση Χαρακτηριστικών με Embedding Διαστάσεις")
+        ax.set_title("Feature-Embedding Dimension Correlation")
         st.pyplot(fig)
 
     except Exception as e:
@@ -621,7 +595,7 @@ def evaluate_model(model, X_test, y_test):
     y_pred = model.predict(X_test)
     y_proba = model.predict_proba(X_test)[:, 1]
     
-    st.subheader("📉 probability distribution forecast")
+    st.subheader("📉 Probability Distribution Forecast")
     fig, ax = plt.subplots()
     ax.hist(y_proba, bins=20, color='skyblue', edgecolor='black')
     ax.set_xlabel("ASD Traits probability")
@@ -679,15 +653,11 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
 
         st.info("🔄 Generating graph embeddings without label information...")
         result = subprocess.run(
-            [sys.executable, script_path, "--no-labels"], # Pass the --no-labels argument
+            [sys.executable, script_path, "--no-labels"],
             capture_output=True,
             text=True,
-            timeout=Config.EMBEDDING_GENERATION_TIMEOUT # Use the configured timeout
+            timeout=Config.EMBEDDING_GENERATION_TIMEOUT
         )
-        
-        # Log full output for debugging
-        logger.info(f"kg_builder_2.py stdout: {result.stdout}")
-        logger.info(f"kg_builder_2.py stderr: {result.stderr}")
         
         if result.returncode != 0:
             error_msg = result.stderr or "Unknown error - check logs for details"
@@ -698,64 +668,17 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         st.info("📊 Extracting training data from graph and CSV...")
         X_raw, y = extract_training_data_from_csv(csv_url)
         X = X_raw.copy()
-        X.columns = [f"Dim_{i}" for i in range(X.shape[1])] # Rename columns for clarity
+        X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
 
         if X.empty or y.empty:
             st.error("⚠️ No valid training data available after extraction.")
             return None
         st.success(f"✅ Extracted {len(X)} cases for training.")
 
-        # Optional: Leakage check - verify embeddings are not trivially correlated with labels
-        if Config.LEAKAGE_CHECK:
-            st.info("🔬 Performing leakage check...")
-            try:
-                # Use a small subset to avoid heavy computation if X_raw is very large
-                sample_size = min(500, len(y))
-                if sample_size > 0:
-                    sample_indices = np.random.choice(len(y), sample_size, replace=False)
-                    X_sample = X_raw.iloc[sample_indices]
-                    y_sample = y.iloc[sample_indices]
-
-                    # Permute labels and check AUC for randomness
-                    random_labels = np.random.permutation(y_sample)
-                    # Use a simple estimator or direct correlation if AUC on random labels is desired
-                    # For a quick check, a simple sum of embeddings might be used or fit a dummy model
-                    # For a more robust check, train a simple classifier and see if it performs well on random labels
-                    
-                    # Instead of X_raw.mean(axis=1), let's fit a quick model
-                    from sklearn.linear_model import LogisticRegression
-                    temp_model = LogisticRegression(random_state=Config.RANDOM_STATE, solver='liblinear')
-                    
-                    # Check on original labels
-                    if len(X_sample) > 0 and len(y_sample.unique()) > 1:
-                        temp_model.fit(X_sample, y_sample)
-                        original_auc = roc_auc_score(y_sample, temp_model.predict_proba(X_sample)[:, 1])
-                        st.info(f"Original label AUC on sample: {original_auc:.3f}")
-
-                        # Check on permuted labels
-                        temp_model.fit(X_sample, random_labels)
-                        random_auc = roc_auc_score(random_labels, temp_model.predict_proba(X_sample)[:, 1])
-                        st.info(f"Random label AUC on sample: {random_auc:.3f}")
-
-                        if random_auc > 0.6: # Threshold for suspicion
-                            st.warning(f"🚨 Suspiciously high AUC ({random_auc:.3f}) with random labels detected during leakage check. This might indicate data leakage.")
-                            # You might choose to raise an error here:
-                            # raise ValueError(f"Suspicious AUC {random_auc:.3f} with random labels, possible data leakage.")
-                        else:
-                            st.success("✅ Leakage check passed (low AUC on random labels).")
-                    else:
-                        st.info("Leakage check skipped: Not enough data or only one class in sample.")
-                else:
-                    st.info("Leakage check skipped: Not enough data for sampling.")
-            except Exception as e:
-                st.warning(f"⚠️ Could not perform leakage check: {e}")
-                logger.warning(f"Leakage check failed: {e}", exc_info=True)
-
-
         # 4. Train/test split (stratified to maintain class proportions)
         st.info("🔪 Splitting data into training and test sets...")
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, # Use X (DataFrame with renamed columns)
+            X, y,
             test_size=Config.TEST_SIZE,
             stratify=y,
             random_state=Config.RANDOM_STATE
@@ -770,13 +693,12 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         scale_pos_weight = neg / pos if pos != 0 else 1.0
         st.info(f"⚖️ Calculated scale_pos_weight: {scale_pos_weight:.2f}")
 
-        # 6. Pipeline with StandardScaler and XGBoost (SMOTE applied within CV loop)
-        # Note: SMOTE should *only* be applied to the training folds, not the validation folds, to prevent data leakage.
+        # 6. Pipeline with StandardScaler and XGBoost
         pipeline = ImbPipeline([
-            ('scaler', StandardScaler()), # Scale features before training
+            ('scaler', StandardScaler()),
             ('xgb', XGBClassifier(
                 n_estimators=Config.N_ESTIMATORS,
-                use_label_encoder=False, # Suppress the warning
+                use_label_encoder=False,
                 eval_metric='logloss',
                 random_state=Config.RANDOM_STATE,
                 scale_pos_weight=scale_pos_weight
@@ -796,10 +718,9 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             X_fold_val, y_fold_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
 
             # Apply SMOTE only to the training data of the current fold
-            # Ensure k_neighbors is valid (min(num_samples_in_minority_class - 1, actual_k_neighbors_config))
             k_neighbors = min(Config.SMOTE_K_NEIGHBORS, sum(y_fold_train == 1) - 1)
-            if k_neighbors < 1: # SMOTE requires at least 2 minority samples to form a neighbor
-                st.warning(f"⚠️ SMOTE k_neighbors adjusted to 1 for fold {fold_idx+1} due to very small minority class. Consider increasing dataset size.")
+            if k_neighbors < 1:
+                st.warning(f"⚠️ SMOTE k_neighbors adjusted to 1 for fold {fold_idx+1} due to very small minority class.")
                 k_neighbors = 1 
             
             smote = SMOTE(
@@ -811,7 +732,6 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             # Apply SMOTE and then fit the pipeline
             X_res, y_res = smote.fit_resample(X_fold_train, y_fold_train)
             
-            # Fit scaler and XGBoost on the resampled data
             temp_pipeline = ImbPipeline([
                 ('scaler', StandardScaler()),
                 ('xgb', XGBClassifier(
@@ -831,15 +751,11 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
 
         st.success(f"✅ Cross-Validation complete. Mean CV ROC AUC: {np.mean(cv_scores):.3f} ± {np.std(cv_scores):.3f}")
         st.subheader("📊 Cross-Validation Performance (on Training Set)")
-        plot_combined_curves(cv_y_true, cv_y_proba) # Plot CV results
+        plot_combined_curves(cv_y_true, cv_y_proba)
 
-        # 8. Final model training on the entire (original, un-SMOTEd) training set
-        # The pipeline already contains StandardScaler. SMOTE is not needed for final training of the model
-        # if the goal is to evaluate its performance on the *unbalanced* test set as it would be in real world.
-        # If you want to train on resampled data, uncomment and add SMOTE here as well.
+        # 8. Final model training on the entire training set
         st.info("🏋️‍♀️ Training final model on full training set...")
         
-        # Apply SMOTE to the entire training set for the final model
         final_smote = SMOTE(
             sampling_strategy='auto',
             k_neighbors=min(Config.SMOTE_K_NEIGHBORS, sum(y_train == 1) - 1),
@@ -895,7 +811,7 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
 @st.cache_resource(show_spinner="Training Isolation Forest...")
 def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, StandardScaler]]:
     """Trains anomaly detection model"""
-    embeddings = get_existing_embeddings()
+        embeddings = get_existing_embeddings()
     if embeddings is None or len(embeddings) < Config.MIN_CASES_FOR_ANOMALY_DETECTION:
         st.warning(f"⚠️ Need at least {Config.MIN_CASES_FOR_ANOMALY_DETECTION} cases for anomaly detection")
         return None
@@ -918,7 +834,7 @@ def reinsert_labels_from_csv(csv_url: str):
     df.columns = [col.strip() for col in df.columns]
 
     if "Case_No" not in df.columns or "Class_ASD_Traits" not in df.columns:
-        st.error("❌ Το CSV δεν περιέχει τις στήλες 'Case_No' και 'Class_ASD_Traits'")
+        st.error("❌ CSV must contain 'Case_No' and 'Class_ASD_Traits' columns")
         return
 
     with neo4j_service.session() as session:
@@ -931,54 +847,6 @@ def reinsert_labels_from_csv(csv_url: str):
                     MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
                 """, case_id=case_id, label=label.capitalize())
-    
-def validate_embeddings(X: pd.DataFrame, y: pd.Series) -> None:
-    """Check for potential leakage in embeddings"""
-    # 1. Check separability with random labels
-    random_y = np.random.permutation(y)
-    random_auc = roc_auc_score(random_y, X.mean(axis=1))
-    if random_auc > 0.6:
-        raise ValueError(f"High random AUC {random_auc:.3f} - embeddings may contain label information")
-    
-    # 2. Check correlation with labels
-    corr = np.abs(np.corrcoef(X.values.T, y.values)[:-1, -1])
-    if np.max(corr) > 0.3:
-        suspect_dims = np.where(corr > 0.3)[0]
-        raise ValueError(f"High correlation in dimensions {suspect_dims} (max corr {np.max(corr):.3f})")
-    
-    # 3. Check cluster separation
-    from sklearn.cluster import KMeans
-    kmeans = KMeans(n_clusters=2, random_state=42).fit(X)
-    cluster_auc = roc_auc_score(y, kmeans.labels_)
-    if cluster_auc > 0.8:
-        raise ValueError(f"Perfect cluster separation (AUC {cluster_auc:.3f}) - leakage likely")
-    
-    # 4. Check variance explained by first few components
-    from sklearn.decomposition import PCA
-    pca = PCA(n_components=2).fit(X)
-    if pca.explained_variance_ratio_.sum() > 0.8:
-        st.warning(f"First 2 PCA components explain {pca.explained_variance_ratio_.sum():.1%} of variance")
-    
-    # 5. Visual check (optional)
-    if st.session_state.get('show_embedding_plots', False):
-        plot_embeddings(X, y)
-
-def plot_embeddings(X: pd.DataFrame, y: pd.Series):
-    """Visualize embeddings for manual inspection"""
-    from sklearn.decomposition import PCA
-    import matplotlib.pyplot as plt
-    
-    pca = PCA(n_components=2)
-    X_pca = pca.fit_transform(X)
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    scatter = ax.scatter(X_pca[:, 0], X_pca[:, 1], c=y, alpha=0.5, cmap='coolwarm')
-    legend = ax.legend(*scatter.legend_elements(), title="ASD Traits")
-    ax.add_artist(legend)
-    ax.set_title(f"PCA of Case Embeddings (Explained Variance: {pca.explained_variance_ratio_.sum():.1%})")
-    ax.set_xlabel("Principal Component 1")
-    ax.set_ylabel("Principal Component 2")
-    st.pyplot(fig)
 
 # === Streamlit UI ===
 def main():
@@ -991,64 +859,22 @@ def main():
     st.sidebar.markdown("""
 ---
 ### 📘 About This Project
-
 This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration with Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis  
 at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegean](https://i-lab.aegean.gr/).
-
-It is part of the postdoctoral research project:
-
-**"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"**  
-by Dr. Bouchouras under the supervision of Dr. Kotis.
-
----
-### 🧪 What This App Does
-
-This interactive application functions as a GraphRAG-powered intelligent agent designed for the early 
-detection of Autism Spectrum Disorder traits in toddlers. It integrates a Neo4j knowledge graph, 
-machine learning, and natural language interfaces powered by GPT-4. The app allows you to:
-
-- 🧠 Train a machine learning model to detect ASD traits using graph embeddings
-- 📤 Upload your own toddler screening data from the Q-Chat-10 questionnaire and other demographics
-- 🔗 Automatically connect the uploaded case to a knowledge graph
-- 🌐 Generate a graph-based embedding for the new case
-- 🔍 Predict whether the case shows signs of Autism Spectrum Disorder (ASD)
-- 🕵️ Run anomaly detection to check for anomalies
-- 💬 Ask natural language questions and receive Cypher queries with results, using GPT4 based NLP-to-Cypher translation
-
----
-### 📥 Download Example CSV
-
-To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)  
-to format your own screening case correctly. 
-Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further information about the dataset.
 """)
 
-    # Initialize session state variables safely
+    # Initialize session state variables
     if "active_tab" not in st.session_state:
         st.session_state.active_tab = "Model Training"
-    if "case_inserted" not in st.session_state:
-        st.session_state.case_inserted = False
-    if "last_upload_id" not in st.session_state:
-        st.session_state.last_upload_id = None
-    if "last_case_no" not in st.session_state:
-        st.session_state.last_case_no = None
     if "model_trained" not in st.session_state:
         st.session_state.model_trained = False
     if "model_results" not in st.session_state:
         st.session_state.model_results = None
-    if "saved_embedding_case1" not in st.session_state:
-        st.session_state.saved_embedding_case1 = None
-    if "last_cypher_query" not in st.session_state:
-        st.session_state.last_cypher_query = None
-    if "last_cypher_results" not in st.session_state:
-        st.session_state.last_cypher_results = None
-    if "preset_question" not in st.session_state:
-        st.session_state.preset_question = ""
 
     # Create tabs
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Model Training",
-        "🌐 Graph Embeddings",
+        "🌐 Graph Embeddings", 
         "📤 Upload New Case",
         "💬 NLP to Cypher"
     ])
@@ -1057,9 +883,17 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab1:
         st.header("🤖 ASD Detection Model")
 
+        # First check for missing labels
         missing_labels = find_cases_missing_labels()
         if missing_labels:
-            st.warning(f"⚠️ There are {len(missing_labels)} cases without SCREENED_FOR label. Please fix the data before proceeding.")
+            st.warning(f"⚠️ There are {len(missing_labels)} cases without SCREENED_FOR label.")
+            
+            # Add button to fix missing labels
+            if st.button("🔄 Fix Missing Labels from CSV"):
+                csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+                with st.spinner("Refreshing labels from CSV..."):
+                    refresh_screened_for_labels(csv_url)
+                    st.rerun()  # Refresh the UI
         else:
             st.success("✅ All cases have SCREENED_FOR labels.")
 
@@ -1072,7 +906,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.success("✅ Training completed successfully.")
                     evaluate_model(
                         results["model"],
-                        results["X_test"],
+                        results["X_test"], 
                         results["y_test"]
                     )
 
@@ -1083,42 +917,18 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.session_state.model_results["y_test"]
             )
 
-            with st.expander("🧪 Compare old vs new embeddings (Case 1)"):
-                if st.button("📤 Save current embedding of Case 1"):
-                    with neo4j_service.session() as session:
-                        result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
-                        if result and result["emb"]:
-                            st.session_state.saved_embedding_case1 = result["emb"]
-                            st.success("✅ Saved current embedding of Case 1")
-
-                if st.button("📥 Compare to current embedding of Case 1"):
-                    with neo4j_service.session() as session:
-                        result = session.run("MATCH (c:Case {id: 1}) RETURN c.embedding AS emb").single()
-                        if result and result["emb"]:
-                            new_emb = result["emb"]
-                            old_emb = st.session_state.saved_embedding_case1
-                            if old_emb:
-                                from numpy.linalg import norm
-                                diff = norm(np.array(old_emb) - np.array(new_emb))
-                                st.write(f"📏 Difference (L2 norm) between saved and current embedding: `{diff:.4f}`")
-                                if diff < 1e-3:
-                                    st.warning("⚠️ Embedding is (almost) identical — rebuild had no effect.")
-                                else:
-                                    st.success("✅ Embedding changed — rebuild updated the graph.")
-                            else:
-                                st.error("❌ No saved embedding found. Click 'Save current embedding' first.")
-
     # === Tab 2: Graph Embeddings ===
     with tab2:
         st.header("🌐 Graph Embeddings")
-        st.warning("⚠️ Don't push this button unless you are the developer!")
-        st.info("ℹ️ This function is for the developer only")
+        st.warning("⚠️ Developer only - may take several minutes")
+        
         if st.button("🔁 Recalculate All Embeddings"):
             with st.spinner("Running full graph rebuild and embedding generation..."):
                 result = subprocess.run(
                     [sys.executable, "kg_builder_2.py"],
                     capture_output=True,
-                    text=True
+                    text=True,
+                    timeout=Config.EMBEDDING_GENERATION_TIMEOUT
                 )
                 if result.returncode == 0:
                     st.success("✅ Embeddings recalculated and updated in the graph!")
@@ -1128,79 +938,25 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
     # === Tab 3: Upload New Case ===
     with tab3:
-        st.header("📄 Upload New Case (Prediction Only - No Graph Storage)")
-
-        # ========== INSTRUCTIONS SECTION ==========
-        with st.container(border=True):
-            st.subheader("📝 Before You Upload", anchor=False)
-
-            cols = st.columns([1, 3])
-            with cols[0]:
-                st.image("https://cdn-icons-png.flaticon.com/512/2965/2965300.png", width=80)
-            with cols[1]:
-                st.markdown("""
-                **Please follow these steps carefully:**
-                1. Download the example CSV template
-                2. Review the data format instructions
-                3. Prepare your case data accordingly
-                """)
-
-            st.markdown("---")
-            st.markdown("### 🛠️ Required Resources")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                with st.container(border=True):
-                    st.markdown("**📥 Example CSV Template**")
-                    st.markdown("Download and use this template to format your data:")
-                    st.markdown("[Download Example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)")
-
-            with col2:
-                with st.container(border=True):
-                    st.markdown("**📋 Data Format Instructions**")
-                    st.markdown("Read the detailed documentation:")
-                    st.markdown("[View Instructions Document](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)")
-
-            st.markdown("---")
-            st.markdown("""
-            **❗ Important Notes:**
-            - Ensure all required columns are present
-            - Upload exactly one case at a time
-            - Values must match the specified formats
-            - This upload **does NOT** save data to the graph — prediction only!
-            """)
-        # ========== END INSTRUCTIONS SECTION ==========
-
+        st.header("📄 Upload New Case (Prediction Only)")
+        
         uploaded_file = st.file_uploader(
-            "**Upload your prepared CSV file**",
+            "Upload your prepared CSV file",
             type="csv",
-            key="case_uploader",
-            help="Ensure your file follows the template format before uploading"
+            key="case_uploader"
         )
 
         if uploaded_file:
             try:
                 df = pd.read_csv(uploaded_file, delimiter=";")
                 st.subheader("📊 Uploaded CSV Preview")
-                st.dataframe(
-                    df.style.format(
-                        {
-                            "Case_No": "{:.0f}",
-                            **{f"A{i}": "{:.0f}" for i in range(1, 11)}
-                        }
-                    ),
-                    use_container_width=True,
-                    hide_index=True
-                )
+                st.dataframe(df)
 
-                required_cols = [
-                    "Case_No", "A1", "A2", "A3", "A4", "A5",
-                    "A6", "A7", "A8", "A9", "A10",
-                    "Sex", "Ethnicity", "Jaundice",
-                    "Family_mem_with_ASD", "Who_completed_the_test"
-                ]
-
-                # Check required columns
+                required_cols = ["Case_No", "A1", "A2", "A3", "A4", "A5",
+                                "A6", "A7", "A8", "A9", "A10",
+                                "Sex", "Ethnicity", "Jaundice",
+                                "Family_mem_with_ASD", "Who_completed_the_test"]
+                
                 missing = [col for col in required_cols if col not in df.columns]
                 if missing:
                     st.error(f"❌ Missing required columns: {', '.join(missing)}")
@@ -1211,88 +967,32 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.stop()
 
                 row = df.iloc[0]
-                case_data = row.to_dict()
+                temp_upload_id = "temp_" + str(uuid.uuid4())
 
-                if "model_results" not in st.session_state or st.session_state.model_results is None:
-                    st.error("⚠️ Model not trained yet. Please train the model first.")
-                    st.stop()
-
-                # Temporary upload_id for embedding generation
-                temp_upload_id = "temp_upload_" + str(uuid.uuid4())
-
-                # Call subprocess generate_case_embedding.py with upload_id and case_data JSON
-                with st.spinner("Generating embedding for prediction..."):
-                    cmd = [
-                        sys.executable,
-                        "generate_case_embedding.py",
-                        temp_upload_id,
-                        json.dumps(case_data)
-                    ]
-                    proc = subprocess.run(cmd, capture_output=True, text=True)
-
-                    if proc.returncode != 0:
-                        st.error(f"❌ Embedding generation failed: {proc.stderr.strip()}")
+                # Generate embedding
+                with st.spinner("Generating embedding..."):
+                    if not generate_embedding_for_case(temp_upload_id):
+                        st.error("Failed to generate embedding")
                         st.stop()
 
-                    embedding_json = proc.stdout.strip()
-                    try:
-                        embedding = np.array(json.loads(embedding_json))
-                    except Exception as e:
-                        st.error(f"❌ Failed to parse embedding JSON: {str(e)}")
-                        st.stop()
-
-                st.subheader("🧠 Case Embedding (Temporary)")
-                st.write(embedding)
-
-                st.subheader("🧪 Embedding Diagnostics")
-                st.text("📦 Embedding vector:")
-                st.write(embedding.tolist())
-
-                if np.isnan(embedding).any():
-                    st.error("❌ Embedding contains NaN values.")
+                embedding = extract_user_embedding(temp_upload_id)
+                if embedding is None:
+                    st.error("Failed to extract embedding")
                     st.stop()
-                else:
-                    st.success("✅ Embedding is valid (no NaNs)")
 
-                # *** Prediction ***
-                model = st.session_state.model_results["model"]
-                embedding_reshaped = embedding.reshape(1, -1)  # Important for correct shape
-                proba = model.predict_proba(embedding_reshaped)[0][1]
-                prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
-
-                st.subheader("🔍 Prediction Result")
-                col1, col2 = st.columns(2)
-                col1.metric("Prediction", prediction)
-                col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
-
-                # Distance from training mean
-                X_train = st.session_state.model_results["X_test"]
-                train_mean = X_train.mean().values
-                dist = np.linalg.norm(embedding - train_mean)
-                st.text(f"📏 Distance from train mean: {dist:.4f}")
-                if dist > 5.0:
-                    st.warning("⚠️ Embedding far from training distribution. Prediction may be unreliable.")
-
-                # Anomaly Detection
-                with st.spinner("Running anomaly detection..."):
-                    iso_result = train_isolation_forest(cache_key=temp_upload_id)
-                    if iso_result:
-                        iso_forest, scaler = iso_result
-                        embedding_scaled = scaler.transform(embedding_reshaped)
-                        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-                        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
-
-                        st.subheader("🕵️ Anomaly Detection")
-                        if is_anomaly:
-                            st.warning(f"⚠️ Anomaly detected (score: {anomaly_score:.3f})")
-                        else:
-                            st.success(f"✅ Normal case (score: {anomaly_score:.3f})")
-
-                st.success("✅ Prediction completed successfully!")
+                # Make prediction
+                if st.session_state.model_results:
+                    model = st.session_state.model_results["model"]
+                    proba = model.predict_proba(embedding)[0][1]
+                    prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
+                    
+                    st.subheader("🔍 Prediction Result")
+                    col1, col2 = st.columns(2)
+                    col1.metric("Prediction", prediction)
+                    col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
-                logger.exception("Upload case error:")
 
     # === Tab 4: NLP to Cypher ===
     with tab4:
@@ -1303,57 +1003,58 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             This knowledge graph contains screening data for toddlers to help detect potential signs of Autism Spectrum Disorder (ASD).
 
             #### ✅ Node Types:
-            - **Case**: A toddler who was screened
-            - **BehaviorQuestion**: A question from the Q-Chat-10 questionnaire
-            - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`
-            - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker)
-            - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`)
+            - **Case**: A toddler who was screened.
+            - **BehaviorQuestion**: A question from the Q-Chat-10 questionnaire:
+                - **A1**: Does your child look at you when you call his/her name?
+                - **A2**: How easy is it for you to get eye contact with your child?
+                - **A3**: Does your child point to indicate that s/he wants something?
+                - **A4**: Does your child point to share interest with you?
+                - **A5**: Does your child pretend?
+                - **A6**: Does your child follow where you're looking?
+                - **A7**: If you or someone else in the family is visibly upset, does your child show signs of wanting to comfort them?
+                - **A8**: Would you describe your child's first words as normal in their development?
+                - **A9**: Does your child use simple gestures such as waving to say goodbye?
+                - **A10**: Does your child stare at nothing with no apparent purpose?
+
+            - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
+            - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
+            - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
 
             #### 🔗 Relationships:
-            - `HAS_ANSWER`: A case's answer to a behavioral question
-            - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes
-            - `SUBMITTED_BY`: Who submitted the test
-            - `SCREENED_FOR`: Final ASD classification
+            - `HAS_ANSWER`: A case's answer to a behavioral question.
+            - `HAS_DEMOGRAPHIC`: Links a case to demographic attributes.
+            - `SUBMITTED_BY`: Who submitted the test.
+            - `SCREENED_FOR`: Final ASD classification.
             """)
 
             st.markdown("### 🧠 Example Questions (Click to use)")
             example_questions = [
                 "How many male toddlers have ASD traits?",
-                "List all ethnicities with more than 5 cases",
+                "List all ethnicities with more than 5 cases.",
                 "How many cases answered '1' for both A1 and A2?"
             ]
 
             for q in example_questions:
                 if st.button(q, key=f"example_{q}"):
-                    st.session_state.preset_question = q
-                    st.session_state.last_cypher_results = None  # Reset previous results
+                    st.session_state["preset_question"] = q
 
         default_question = st.session_state.get("preset_question", "")
-        question = st.text_input("Ask about the data:", value=default_question, key="nlp_question_input")
+        question = st.text_input("Ask about the data:", value=default_question)
 
-        if st.button("▶️ Execute Query", key="execute_cypher_button"):
-            if question.strip():
-                cypher = nl_to_cypher(question)
-                if cypher:
-                    st.session_state.last_cypher_query = cypher
-                    try:
-                        with neo4j_service.session() as session:
+        if question:
+            cypher = nl_to_cypher(question)
+            if cypher:
+                st.code(cypher, language="cypher")
+                if st.button("▶️ Execute Query"):
+                    with neo4j_service.session() as session:
+                        try:
                             results = session.run(cypher).data()
-                            st.session_state.last_cypher_results = results
-                    except Exception as e:
-                        st.error(f"Query failed: {str(e)}")
-                        st.session_state.last_cypher_results = None
-            else:
-                st.warning("Please enter a question.")
-
-        if st.session_state.last_cypher_query:
-            st.code(st.session_state.last_cypher_query, language="cypher")
-
-        if st.session_state.last_cypher_results is not None:
-            if len(st.session_state.last_cypher_results) > 0:
-                st.dataframe(pd.DataFrame(st.session_state.last_cypher_results))
-            else:
-                st.info("No results found.")
+                            if results:
+                                st.dataframe(pd.DataFrame(results))
+                            else:
+                                st.info("No results found")
+                        except Exception as e:
+                            st.error(f"Query failed: {str(e)}")
 
 if __name__ == "__main__":
     main()
