@@ -191,68 +191,84 @@ def find_cases_missing_labels() -> list:
 
 @safe_neo4j_operation
 def refresh_screened_for_labels(csv_url: str):
-    """Refresh all SCREENED_FOR relationships from CSV"""
+    """Refresh all SCREENED_FOR relationships from CSV with batch processing"""
     try:
+        # Load CSV data
         df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
         df.columns = [col.strip() for col in df.columns]
 
+        # Validate required columns
         if "Case_No" not in df.columns or "Class_ASD_Traits" not in df.columns:
-            st.error("CSV must contain 'Case_No' and 'Class_ASD_Traits' columns")
+            st.error("❌ CSV must contain 'Case_No' and 'Class_ASD_Traits' columns")
             return
 
+        # Prepare data - filter valid cases
+        valid_cases = []
+        for _, row in df.iterrows():
+            try:
+                case_id = int(row["Case_No"])
+                label = str(row["Class_ASD_Traits"]).strip().lower()
+                if label in ["yes", "no"]:
+                    valid_cases.append((case_id, label.capitalize()))
+            except (ValueError, AttributeError):
+                continue
+
+        if not valid_cases:
+            st.error("❌ No valid cases found in CSV")
+            return
+
+        total_cases = len(valid_cases)
+        st.info(f"🔄 Processing {total_cases} cases...")
+
+        # Process in batches
+        batch_size = 100
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+
         with neo4j_service.session() as session:
-            # Remove all existing relationships
+            # First remove all existing SCREENED_FOR relationships
             session.run("""
                 MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait)
                 DELETE r
             """)
-            
-            # Batch create new relationships
-            batch_size = 100
-            total_cases = len(df)
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
+
+            # Create all ASD_Trait nodes in one go
+            session.run("""
+                MERGE (:ASD_Trait {label: 'Yes'})
+                MERGE (:ASD_Trait {label: 'No'})
+            """)
+
+            # Process cases in batches
             for i in range(0, total_cases, batch_size):
-                batch = df.iloc[i:i+batch_size]
-                queries = []
-                params = []
+                batch = valid_cases[i:i + batch_size]
                 
-                for _, row in batch.iterrows():
-                    case_id = int(row["Case_No"])
-                    label = str(row["Class_ASD_Traits"]).strip().capitalize()
-                    if label in ["Yes", "No"]:
-                        queries.append("""
-                            MATCH (c:Case {id: $case_id_%d})
-                            MERGE (t:ASD_Trait {label: $label_%d})
-                            MERGE (c)-[:SCREENED_FOR]->(t)
-                        """ % (case_id, case_id))
-                        params.extend([{"case_id_%d" % case_id: case_id, "label_%d" % case_id: label}])
+                # Create parameterized query
+                query = """
+                UNWIND $cases AS case
+                MATCH (c:Case {id: case.id})
+                MATCH (t:ASD_Trait {label: case.label})
+                MERGE (c)-[:SCREENED_FOR]->(t)
+                """
                 
-                if queries:
-                    # Execute all queries in a single transaction
-                    tx = session.begin_transaction()
-                    try:
-                        for query, param in zip(queries, params):
-                            tx.run(query, **param)
-                        tx.commit()
-                    except Exception as e:
-                        tx.rollback()
-                        raise e
+                params = {
+                    "cases": [{"id": case_id, "label": label} 
+                             for case_id, label in batch]
+                }
+                
+                session.run(query, params)
                 
                 # Update progress
                 progress = min((i + batch_size) / total_cases, 1.0)
                 progress_bar.progress(progress)
-                status_text.text(f"Processing cases {i+1} to {min(i+batch_size, total_cases)} of {total_cases}")
-                
+                status_text.text(f"Processed {min(i + batch_size, total_cases)} of {total_cases} cases")
+
         progress_bar.empty()
         status_text.empty()
         st.success(f"✅ Successfully updated {total_cases} SCREENED_FOR relationships")
-        
-    except Exception as e:
-        st.error(f"Error refreshing labels: {str(e)}")
-        logger.error(f"Error in refresh_screened_for_labels: {str(e)}", exc_info=True)
 
+    except Exception as e:
+        st.error(f"❌ Error refreshing labels: {str(e)}")
+        logger.error(f"Error in refresh_screened_for_labels: {str(e)}", exc_info=True)
 # === Data Insertion ===
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
@@ -888,6 +904,13 @@ at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegea
         missing_labels = find_cases_missing_labels()
         if missing_labels:
             st.warning(f"⚠️ There are {len(missing_labels)} cases without SCREENED_FOR label.")
+            if st.button("🔄 Refresh All Labels from CSV"):
+            csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+            with st.spinner("Refreshing labels from CSV..."):
+                refresh_screened_for_labels(csv_url)
+                st.rerun()  # Refresh the UI to show updated status
+    else:
+        st.success("✅ All cases have SCREENED_FOR labels.")
             
             # Add button to fix missing labels
             if st.button("🔄 Fix Missing Labels from CSV"):
