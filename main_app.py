@@ -693,7 +693,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
 
         # 4. Extract data with additional checks
         X_raw, y = extract_training_data_from_csv(csv_url)
-        
+
         # Verify no correlation between embeddings and labels
         if Config.LEAKAGE_CHECK:
             random_labels = np.random.permutation(y)
@@ -721,31 +721,28 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             ))
         ])
 
-        # 7. Cross-val with pre-smote
+        # 7. Cross-validation with SMOTE
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.RANDOM_STATE)
         cv_scores = []
         for train_idx, val_idx in cv.split(X_train, y_train):
             X_fold_train, y_fold_train = X_train.iloc[train_idx], y_train.iloc[train_idx]
-            
-            # SMOTE only on training fold
+
             smote = SMOTE(
                 sampling_strategy='auto',
                 k_neighbors=min(Config.SMOTE_K_NEIGHBORS, sum(y_fold_train == 1) - 1),
                 random_state=Config.RANDOM_STATE
             )
             X_res, y_res = smote.fit_resample(X_fold_train, y_fold_train)
-            
-            # Fit and evaluate
+
             pipeline.fit(X_res, y_res)
             X_val, y_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
             y_proba = pipeline.predict_proba(X_val)[:, 1]
             cv_scores.append(roc_auc_score(y_val, y_proba))
 
-        # 8. Final training with proper separation
+        # 8. Final training
         pipeline.fit(X_train, y_train)
-        test_proba = pipeline.predict_proba(X_test)[:, 1]
-        
-        # 9. Reinsert labels only after all training
+
+        # 9. Reinsert labels into the graph
         reinsert_labels_from_csv(csv_url)
 
         return {
@@ -754,6 +751,11 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             "y_test": y_test,
             "cv_scores": cv_scores
         }
+
+    except Exception as e:
+        logger.error(f"🚨 Model training failed: {str(e)}", exc_info=True)
+        st.error(f"❌ Error during model training: {str(e)}")
+        return None
 
 # === Anomaly Detection ===
 @safe_neo4j_operation
@@ -855,7 +857,7 @@ def plot_embeddings(X: pd.DataFrame, y: pd.Series):
     ax.set_xlabel("Principal Component 1")
     ax.set_ylabel("Principal Component 2")
     st.pyplot(fig)
-    
+
 # === Streamlit UI ===
 def main():
     st.title("🧠 NeuroCypher ASD")
