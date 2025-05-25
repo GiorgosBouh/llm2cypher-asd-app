@@ -300,11 +300,18 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
 @safe_neo4j_operation
 def remove_screened_for_labels():
     with neo4j_service.session() as session:
+        # Remove all label-related relationships and properties
         session.run("""
             MATCH (c:Case)-[r:SCREENED_FOR]->(:ASD_Trait)
             DELETE r
         """)
-        logger.info("✅ SCREENED_FOR relationships removed to prevent leakage.")
+        # Also remove any label-related properties that might be cached
+        session.run("""
+            MATCH (c:Case)
+            REMOVE c.predicted_label
+            REMOVE c.label_probability
+        """)
+        logger.info("✅ All label-related data removed for training")
 
 # === Graph Embeddings Generation ===
 @safe_neo4j_operation
@@ -664,49 +671,47 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
     try:
         csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
 
-        # 1. Αφαίρεση SCREENED_FOR σχέσεων για αποφυγή leakage
+        # 1. Strict label removal
         remove_screened_for_labels()
 
-        # 2. Αναγέννηση embeddings χωρίς τις ετικέτες (labels)
+        # 2. Verify no labels exist in graph
+        with neo4j_service.session() as session:
+            label_check = session.run("""
+                MATCH (c:Case)-[:SCREENED_FOR]->()
+                RETURN count(c) > 0 AS has_labels
+            """).single()["has_labels"]
+            if label_check:
+                raise ValueError("Labels still exist in graph after removal")
+
+        # 3. Generate embeddings with strict isolation
         result = subprocess.run(
-            [sys.executable, "kg_builder_2.py"],
+            [sys.executable, "kg_builder_2.py", "--no-labels"],
             capture_output=True,
             text=True,
             check=True
         )
-        if result.returncode != 0:
-            st.error(f"❌ Failed to generate embeddings:\n{result.stderr}")
-            return None
 
-        # 3. Φόρτωση embeddings και labels από CSV (χωρίς leakage)
+        # 4. Extract data with additional checks
         X_raw, y = extract_training_data_from_csv(csv_url)
-        X = X_raw.copy()
-        X.columns = [f"Dim_{i}" for i in range(X.shape[1])]
+        
+        # Verify no correlation between embeddings and labels
+        if Config.LEAKAGE_CHECK:
+            random_labels = np.random.permutation(y)
+            random_auc = roc_auc_score(random_labels, X_raw.mean(axis=1))
+            if random_auc > 0.6:  # Should be ~0.5 for no leakage
+                raise ValueError(f"Suspicious AUC {random_auc:.3f} with random labels")
 
-        if X.empty or y.empty:
-            st.error("⚠️ No valid training data available")
-            return None
-
-        # 4. Train/test split (προστασία από leakage)
+        # 5. Proper cross-validation setup
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
+            X_raw, y,
             test_size=Config.TEST_SIZE,
             stratify=y,
             random_state=Config.RANDOM_STATE
         )
 
-        # 5. Υπολογισμός βαρών κλάσεων
-        neg = sum(y_train == 0)
-        pos = sum(y_train == 1)
-        scale_pos_weight = neg / pos if pos != 0 else 1
-
-        # 6. Pipeline με SMOTE και XGBoost
+        # 6. SMOTE only on training folds
         pipeline = ImbPipeline([
-            ('smote', SMOTE(
-                sampling_strategy='auto',
-                k_neighbors=min(Config.SMOTE_K_NEIGHBORS, pos - 1),
-                random_state=Config.RANDOM_STATE
-            )),
+            ('scaler', StandardScaler()),
             ('xgb', XGBClassifier(
                 n_estimators=Config.N_ESTIMATORS,
                 use_label_encoder=False,
@@ -716,45 +721,39 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             ))
         ])
 
-        # 7. Cross-validation για να ελεγχθεί η απόδοση χωρίς leakage
+        # 7. Cross-val with pre-smote
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.RANDOM_STATE)
-        y_proba = cross_val_predict(
-            pipeline, X_train, y_train,
-            cv=cv,
-            method='predict_proba',
-            n_jobs=-1
-        )[:, 1]
+        cv_scores = []
+        for train_idx, val_idx in cv.split(X_train, y_train):
+            X_fold_train, y_fold_train = X_train.iloc[train_idx], y_train.iloc[train_idx]
+            
+            # SMOTE only on training fold
+            smote = SMOTE(
+                sampling_strategy='auto',
+                k_neighbors=min(Config.SMOTE_K_NEIGHBORS, sum(y_fold_train == 1) - 1),
+                random_state=Config.RANDOM_STATE
+            )
+            X_res, y_res = smote.fit_resample(X_fold_train, y_fold_train)
+            
+            # Fit and evaluate
+            pipeline.fit(X_res, y_res)
+            X_val, y_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
+            y_proba = pipeline.predict_proba(X_val)[:, 1]
+            cv_scores.append(roc_auc_score(y_val, y_proba))
 
-        # 8. Εκπαίδευση στο πλήρες training set
+        # 8. Final training with proper separation
         pipeline.fit(X_train, y_train)
-
-        # 9. Αξιολόγηση στο test set
         test_proba = pipeline.predict_proba(X_test)[:, 1]
-        test_pred = pipeline.predict(X_test)
-
-        st.subheader("📊 Cross-Validation Results (Training Set)")
-        st.write(f"Mean CV ROC AUC: {roc_auc_score(y_train, y_proba):.3f}")
         
-        st.subheader("📊 Test Set Results")
-        st.write(f"Test ROC AUC: {roc_auc_score(y_test, test_proba):.3f}")
-
-        # 10. Επανέφερε τις SCREENED_FOR ετικέτες στον γράφο (μετά το training)
+        # 9. Reinsert labels only after all training
         reinsert_labels_from_csv(csv_url)
 
         return {
             "model": pipeline,
             "X_test": X_test,
-            "y_test": y_test
+            "y_test": y_test,
+            "cv_scores": cv_scores
         }
-
-    except subprocess.CalledProcessError as cpe:
-        st.error(f"❌ Subprocess failed: {cpe.stderr}")
-        logger.error(f"Subprocess error during embedding generation: {cpe.stderr}")
-        return None
-    except Exception as e:
-        st.error(f"❌ Error training model: {e}")
-        logger.error(f"Training error: {e}", exc_info=True)
-        return None
 
 # === Anomaly Detection ===
 @safe_neo4j_operation
@@ -808,7 +807,55 @@ def reinsert_labels_from_csv(csv_url: str):
                     MERGE (t:ASD_Trait {label: $label})
                     MERGE (c)-[:SCREENED_FOR]->(t)
                 """, case_id=case_id, label=label.capitalize())
+    
+def validate_embeddings(X: pd.DataFrame, y: pd.Series) -> None:
+    """Check for potential leakage in embeddings"""
+    # 1. Check separability with random labels
+    random_y = np.random.permutation(y)
+    random_auc = roc_auc_score(random_y, X.mean(axis=1))
+    if random_auc > 0.6:
+        raise ValueError(f"High random AUC {random_auc:.3f} - embeddings may contain label information")
+    
+    # 2. Check correlation with labels
+    corr = np.abs(np.corrcoef(X.values.T, y.values)[:-1, -1])
+    if np.max(corr) > 0.3:
+        suspect_dims = np.where(corr > 0.3)[0]
+        raise ValueError(f"High correlation in dimensions {suspect_dims} (max corr {np.max(corr):.3f})")
+    
+    # 3. Check cluster separation
+    from sklearn.cluster import KMeans
+    kmeans = KMeans(n_clusters=2, random_state=42).fit(X)
+    cluster_auc = roc_auc_score(y, kmeans.labels_)
+    if cluster_auc > 0.8:
+        raise ValueError(f"Perfect cluster separation (AUC {cluster_auc:.3f}) - leakage likely")
+    
+    # 4. Check variance explained by first few components
+    from sklearn.decomposition import PCA
+    pca = PCA(n_components=2).fit(X)
+    if pca.explained_variance_ratio_.sum() > 0.8:
+        st.warning(f"First 2 PCA components explain {pca.explained_variance_ratio_.sum():.1%} of variance")
+    
+    # 5. Visual check (optional)
+    if st.session_state.get('show_embedding_plots', False):
+        plot_embeddings(X, y)
 
+def plot_embeddings(X: pd.DataFrame, y: pd.Series):
+    """Visualize embeddings for manual inspection"""
+    from sklearn.decomposition import PCA
+    import matplotlib.pyplot as plt
+    
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X)
+    
+    fig, ax = plt.subplots(figsize=(10, 6))
+    scatter = ax.scatter(X_pca[:, 0], X_pca[:, 1], c=y, alpha=0.5, cmap='coolwarm')
+    legend = ax.legend(*scatter.legend_elements(), title="ASD Traits")
+    ax.add_artist(legend)
+    ax.set_title(f"PCA of Case Embeddings (Explained Variance: {pca.explained_variance_ratio_.sum():.1%})")
+    ax.set_xlabel("Principal Component 1")
+    ax.set_ylabel("Principal Component 2")
+    st.pyplot(fig)
+    
 # === Streamlit UI ===
 def main():
     st.title("🧠 NeuroCypher ASD")

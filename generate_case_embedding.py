@@ -249,6 +249,15 @@ class EmbeddingGenerator:
 
     def generate_embedding(self, G: nx.Graph, case_node_name: str) -> Optional[List[float]]:
         """Enhanced embedding generation with weighted walks"""
+        """Modified embedding generation with leakage checks"""
+        # 1. Verify no label information in graph
+        for node in G.nodes:
+            if 'label' in G.nodes[node] and G.nodes[node]['label'] in ['Yes', 'No']:
+                raise ValueError("Label information found in graph nodes")
+        
+        for u, v, data in G.edges(data=True):
+            if data.get('type') == 'SCREENED_FOR':
+                raise ValueError("Label relationship found in graph edges")
         temp_dir = None
         try:
             temp_dir = tempfile.mkdtemp()
