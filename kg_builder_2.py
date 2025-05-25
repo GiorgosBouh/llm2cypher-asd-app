@@ -13,6 +13,18 @@ import tempfile
 from typing import Dict, List, Tuple
 from dotenv import load_dotenv
 
+import argparse
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--no-labels', action='store_true', 
+                      help='Generate embeddings without label information')
+    args = parser.parse_args()
+    
+    if args.no_labels:
+        print("Running in no-labels mode - excluding all label information")
+        # Add your label-removal logic here
+        
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,

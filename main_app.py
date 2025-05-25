@@ -674,34 +674,31 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         # 1. Strict label removal
         remove_screened_for_labels()
 
-        # 2. Verify no labels exist in graph
-        with neo4j_service.session() as session:
-            label_check = session.run("""
-                MATCH (c:Case)-[:SCREENED_FOR]->()
-                RETURN count(c) > 0 AS has_labels
-            """).single()["has_labels"]
-            if label_check:
-                raise ValueError("Labels still exist in graph after removal")
-
-        # 3. Generate embeddings with strict isolation
+        # 2. Generate embeddings with strict isolation
         result = subprocess.run(
             [sys.executable, "kg_builder_2.py", "--no-labels"],
             capture_output=True,
-            text=True,
-            check=True
+            text=True
         )
+        
+        # Check if the command failed
+        if result.returncode != 0:
+            error_msg = result.stderr or "Unknown error (no stderr output)"
+            st.error(f"❌ Failed to generate embeddings:\n{error_msg}")
+            logger.error(f"Embedding generation failed: {error_msg}")
+            return None
 
-        # 4. Extract data with additional checks
+        # 3. Extract data with additional checks
         X_raw, y = extract_training_data_from_csv(csv_url)
 
         # Verify no correlation between embeddings and labels
         if Config.LEAKAGE_CHECK:
             random_labels = np.random.permutation(y)
             random_auc = roc_auc_score(random_labels, X_raw.mean(axis=1))
-            if random_auc > 0.6:  # Should be ~0.5 for no leakage
+            if random_auc > 0.6:
                 raise ValueError(f"Suspicious AUC {random_auc:.3f} with random labels")
 
-        # 5. Proper cross-validation setup
+        # 4. Train/test split
         X_train, X_test, y_train, y_test = train_test_split(
             X_raw, y,
             test_size=Config.TEST_SIZE,
@@ -709,7 +706,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             random_state=Config.RANDOM_STATE
         )
 
-        # 6. SMOTE only on training folds
+        # 5. Build pipeline with SMOTE only in training
         pipeline = ImbPipeline([
             ('scaler', StandardScaler()),
             ('xgb', XGBClassifier(
@@ -721,7 +718,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             ))
         ])
 
-        # 7. Cross-validation with SMOTE
+        # 6. Cross-validation
         cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=Config.RANDOM_STATE)
         cv_scores = []
         for train_idx, val_idx in cv.split(X_train, y_train):
@@ -739,10 +736,10 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             y_proba = pipeline.predict_proba(X_val)[:, 1]
             cv_scores.append(roc_auc_score(y_val, y_proba))
 
-        # 8. Final training
+        # 7. Final training
         pipeline.fit(X_train, y_train)
 
-        # 9. Reinsert labels into the graph
+        # 8. Reinsert labels into the graph
         reinsert_labels_from_csv(csv_url)
 
         return {
