@@ -874,10 +874,37 @@ def main():
 
     st.sidebar.markdown(f"🔗 Connected to: `{os.getenv('NEO4J_URI')}`")
     st.sidebar.markdown("""
----
 ### 📘 About This Project
+
 This project was developed by [Dr. Georgios Bouchouras](https://giorgosbouh.github.io/github-portfolio/), in collaboration with Dimitrios Doumanas MSc, and Dr. Konstantinos Kotis  
 at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegean](https://i-lab.aegean.gr/).
+
+It is part of the postdoctoral research project:
+
+**"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"**  
+by Dr. Bouchouras under the supervision of Dr. Kotis.
+
+---
+### 🧪 What This App Does
+
+This interactive application functions as a GraphRAG-powered intelligent agent designed for the early 
+detection of Autism Spectrum Disorder traits in toddlers. It integrates a Neo4j knowledge graph, 
+machine learning, and natural language interfaces powered by GPT-4. The app allows you to:
+
+- 🧠 Train a machine learning model to detect ASD traits using graph embeddings.
+- 📤 Upload your own toddler screening data from the Q-Chat-10 questionnaire and other demographics.
+- 🔗 Automatically connect the uploaded case to a knowledge graph.
+- 🌐 Generate a graph-based embedding for the new case.
+- 🔍 Predict whether the case shows signs of Autism Spectrum Disorder (ASD).
+- 🕵️ Run anomaly detection to check for anomalies.
+- 💬 Ask natural language questions and receive Cypher queries with results, using GPT4 based NLP-to-Cypher translation
+
+---
+### 📥 Download Example CSV
+
+To get started, [download this example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)  
+to format your own screening case correctly.  
+Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx) for further informations about the dataset.
 """)
 
     # Initialize session state variables
@@ -908,19 +935,18 @@ at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegea
                 csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                 with st.spinner("Refreshing labels from CSV..."):
                     refresh_screened_for_labels(csv_url)
-                    st.rerun()  # Refresh the UI to show updated status
-    else:
-        st.success("✅ All cases have SCREENED_FOR labels.")
+                    st.experimental_rerun()  # Refresh the UI to show updated status
+        else:
+            st.success("✅ All cases have SCREENED_FOR labels.")
             
-            # Add button to fix missing labels
+            # Add button to fix missing labels anyway
             if st.button("🔄 Fix Missing Labels from CSV"):
                 csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                 with st.spinner("Refreshing labels from CSV..."):
                     refresh_screened_for_labels(csv_url)
-                    st.rerun()  # Refresh the UI
-        else:
-            st.success("✅ All cases have SCREENED_FOR labels.")
+                    st.experimental_rerun()  # Refresh the UI
 
+        # Train model button
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):
                 results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
@@ -934,12 +960,14 @@ at the [Intelligent Systems Research Laboratory (i-Lab), University of the Aegea
                         results["y_test"]
                     )
 
+        # Show evaluation if model already trained
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
             evaluate_model(
                 st.session_state.model_results["model"],
                 st.session_state.model_results["X_test"],
                 st.session_state.model_results["y_test"]
             )
+            
 
     # === Tab 2: Graph Embeddings ===
     with tab2:
