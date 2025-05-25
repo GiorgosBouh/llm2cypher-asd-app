@@ -26,19 +26,16 @@ load_dotenv()
 class EmbeddingGenerator:
     def __init__(self):
         self.EMBEDDING_DIM = 128
-        self.MIN_CONNECTIONS = 3
-        self.MAX_RETRIES = 3 # Not explicitly used, but good to keep if intended
-        self.MIN_SIMILARITY = 5  # Minimum shared answers for similarity
+        self.MIN_CONNECTIONS = 5  # Increased minimum connections
+        self.MIN_SIMILARITY = 3   # Lowered similarity threshold
         
-        # Node2Vec parameters should ideally match kg_builder_2.py for consistent embeddings
+        # Updated Node2Vec parameters
         self.NODE2VEC_WALK_LENGTH = 30
-        self.NODE2VEC_NUM_WALKS = 100
-        self.NODE2VEC_P = 1.0
-        self.NODE2VEC_Q = 0.5
+        self.NODE2VEC_NUM_WALKS = 200  # Increased walks
+        self.NODE2VEC_P = 0.5  # More BFS-like
+        self.NODE2VEC_Q = 2.0  # More DFS-like
         self.NODE2VEC_WORKERS = 4
-        self.NODE2VEC_WINDOW = 10 # Adjusted to match kg_builder_2.py's default
-        # self.NODE2VEC_BATCH_WORDS = 1000 # This parameter is usually managed by Node2Vec.fit()
-
+        self.NODE2VEC_WINDOW = 10
     def get_driver(self):
         """Initializes Neo4j driver using environment variables."""
         return GraphDatabase.driver(
@@ -127,179 +124,186 @@ class EmbeddingGenerator:
                 logger.error(f"Failed to delete temporary case {upload_id}: {str(e)}", exc_info=True)
 
     def build_base_graph(self, driver, upload_id: str) -> Optional[Tuple[nx.Graph, str]]:
-        """
-        Construct the initial NetworkX graph containing the temporary case and its direct neighbors.
-        Ensures consistent node naming as "Type_ID" for Node2Vec compatibility.
-        """
+        """Enhanced graph construction with better handling of edge cases"""
         with driver.session() as session:
-            # Fetch the temporary case and its direct neighbors (questions, demographics, submitter)
-            # and potentially other Case nodes it is similar to (from SIMILAR_TO relationships).
+            # Get both direct connections AND reverse connections (who answered similarly)
             result = session.run(f"""
                 MATCH (c:Case {{upload_id: '{upload_id}'}})
                 OPTIONAL MATCH (c)-[r]->(n)
+                OPTIONAL MATCH (c)<-[r2]-(n2)
                 OPTIONAL MATCH (c)-[s:SIMILAR_TO]-(other_case:Case)
-                WHERE other_case.embedding IS NOT NULL AND other_case.id IS NOT NULL AND other_case <> c
+                WHERE other_case.embedding IS NOT NULL 
+                AND other_case.id IS NOT NULL 
+                AND other_case <> c
                 RETURN c.id AS case_id_num,
-                       collect(DISTINCT {{ node: n, rel_type: type(r), rel_value: r.value, rel_weight: r.weight }}) AS direct_neighbors,
-                       collect(DISTINCT {{ node: other_case, rel_type: type(s), rel_value: s.value, rel_weight: s.weight }}) AS similar_cases_neighbors
+                    collect(DISTINCT {{ node: n, rel_type: type(r), rel_value: r.value }}) 
+                        AS direct_neighbors,
+                    collect(DISTINCT {{ node: n2, rel_type: type(r2), rel_value: r2.value }}) 
+                        AS incoming_neighbors,
+                    collect(DISTINCT {{ node: other_case, rel_type: type(s), rel_value: s.value }}) 
+                        AS similar_cases_neighbors
             """).single()
 
             if not result or result["case_id_num"] is None:
-                logger.error(f"Temporary case with upload_id {upload_id} not found in graph during base graph build.")
+                logger.error(f"Case {upload_id} not found in graph")
                 return None
 
             case_id_num = result['case_id_num']
             case_node_name = f"Case_{case_id_num}"
             G = nx.Graph()
-            G.add_node(case_node_name, type="Case", id=case_id_num) # Add the new case node
+            G.add_node(case_node_name, type="Case", id=case_id_num)
 
-            # Add direct relationships from the temporary case
-            for neighbor_data in result['direct_neighbors']:
-                neighbor = neighbor_data['node']
-                rel_type = neighbor_data['rel_type']
-                rel_value = neighbor_data['rel_value']
-                rel_weight = neighbor_data['rel_weight'] if neighbor_data['rel_weight'] is not None else 1.0
-
-                if neighbor:
-                    # Consistent naming scheme for non-Case nodes
-                    if 'name' in neighbor: # BehaviorQuestion (has 'name' property)
+            # Helper function to add nodes and edges
+            def add_neighbor_data(neighbor_data, is_incoming=False):
+                for data in neighbor_data:
+                    neighbor = data['node']
+                    if not neighbor:
+                        continue
+                        
+                    # Create neighbor node
+                    if 'BehaviorQuestion' in neighbor.labels:
                         neighbor_node_name = f"Q_{neighbor['name']}"
                         G.add_node(neighbor_node_name, type="BehaviorQuestion", name=neighbor['name'])
-                    elif 'type' in neighbor and 'value' in neighbor: # DemographicAttribute (has 'type' and 'value')
-                        if 'DemographicAttribute' in neighbor.labels:
-                             neighbor_node_name = f"D_{neighbor['type']}_{str(neighbor['value']).replace(' ', '_')}"
-                             G.add_node(neighbor_node_name, type="DemographicAttribute", attribute_type=neighbor['type'], value=neighbor['value'])
-                        elif 'SubmitterType' in neighbor.labels: # SubmitterType (has 'type' property)
-                             neighbor_node_name = f"S_{str(neighbor['type']).replace(' ', '_')}"
-                             G.add_node(neighbor_node_name, type="SubmitterType", submitter_type=neighbor['type'])
-                        else: # Fallback for unexpected nodes (should ideally not happen with strict schema)
-                            neighbor_node_name = f"Node_{neighbor.id}"
-                            G.add_node(neighbor_node_name, type="Generic")
-                    else: # Fallback for nodes without expected properties or Case nodes from initial match
-                        # If it's a Case node it should be handled by 'similar_cases_neighbors' logic
-                        # If it's another type, ensure it has a unique identifier
-                        neighbor_node_name = f"Node_id_{neighbor.id}" # Use internal Neo4j ID as fallback
-                        G.add_node(neighbor_node_name, type="Generic")
+                    elif 'DemographicAttribute' in neighbor.labels:
+                        neighbor_node_name = f"D_{neighbor['type']}_{str(neighbor['value']).replace(' ', '_')}"
+                        G.add_node(neighbor_node_name, type="DemographicAttribute", 
+                                attribute_type=neighbor['type'], value=neighbor['value'])
+                    elif 'SubmitterType' in neighbor.labels:
+                        neighbor_node_name = f"S_{str(neighbor['type']).replace(' ', '_')}"
+                        G.add_node(neighbor_node_name, type="SubmitterType", 
+                                submitter_type=neighbor['type'])
+                    else:  # Case node
+                        neighbor_node_name = f"Case_{neighbor['id']}"
+                        G.add_node(neighbor_node_name, type="Case", id=neighbor['id'])
 
+                    # Add edge with weight based on answer value (for HAS_ANSWER)
+                    edge_attrs = {"type": data['rel_type']}
+                    if data['rel_value'] is not None:
+                        edge_attrs["value"] = data['rel_value']
+                        if data['rel_type'] == "HAS_ANSWER":
+                            edge_attrs["weight"] = float(data['rel_value'])  # Higher weight for stronger answers
 
-                    edge_attrs = {"type": rel_type, "weight": rel_weight}
-                    if rel_value is not None:
-                        edge_attrs["value"] = rel_value
-                    G.add_edge(case_node_name, neighbor_node_name, **edge_attrs)
-                
-            # Add SIMILAR_TO relationships (from the similar_cases_neighbors collection)
-            for similar_data in result['similar_cases_neighbors']:
-                similar_node = similar_data['node']
-                rel_type = similar_data['rel_type']
-                rel_weight = similar_data['rel_weight'] if similar_data['rel_weight'] is not None else 1.0
-                
-                if similar_node and 'id' in similar_node:
-                    similar_case_node_name = f"Case_{similar_node['id']}"
-                    # Add similar case node to graph if not already present
-                    if similar_case_node_name not in G:
-                        G.add_node(similar_case_node_name, type="Case", id=similar_node['id'])
-                    
-                    # Add edge, ensuring it's not a self-loop and doesn't already exist
-                    if case_node_name != similar_case_node_name and not G.has_edge(case_node_name, similar_case_node_name):
-                        G.add_edge(case_node_name, similar_case_node_name, type=rel_type, weight=rel_weight)
-                        logger.info(f"Added similarity edge: {case_node_name} -- {similar_case_node_name} (weight: {weight:.2f})")
-                
-            logger.info(f"Base graph for {case_node_name} built with {len(G.nodes)} nodes and {len(G.edges)} edges.")
-            if not G.nodes:
-                raise ValueError("Graph built for temporary case is empty. No nodes found.")
-            if len(G.edges) == 0:
-                logger.warning(f"Graph built for temporary case has no edges. Node2Vec might not generate meaningful embeddings.")
-            
+                    if is_incoming:
+                        G.add_edge(neighbor_node_name, case_node_name, **edge_attrs)
+                    else:
+                        G.add_edge(case_node_name, neighbor_node_name, **edge_attrs)
+
+            # Add all connection types
+            add_neighbor_data(result['direct_neighbors'])
+            add_neighbor_data(result['incoming_neighbors'], is_incoming=True)
+            add_neighbor_data(result['similar_cases_neighbors'])
+
+            # Special handling for cases with all zero answers
+            if len(G.edges(case_node_name)) == 0:
+                logger.warning("Case has no answers - connecting to default nodes")
+                for q in [f"Q_A{i}" for i in range(1, 11)]:
+                    if q not in G:
+                        G.add_node(q, type="BehaviorQuestion", name=q.split('_')[1])
+                    G.add_edge(case_node_name, q, type="HAS_ANSWER", value=0, weight=0.1)
+
             return G, case_node_name
 
     def augment_with_similarity(self, driver, G: nx.Graph, case_node_name: str) -> None:
-        """
-        Augment the graph for the temporary case with SIMILAR_TO relationships
-        to existing cases in the main graph based on shared answers.
-        """
+        """Enhanced similarity augmentation with inverse relationships"""
         original_case_id = int(case_node_name.split('_')[1])
         
         with driver.session() as session:
-            # Query for existing cases that have similar answers and already have embeddings
+            # Find cases with similar answer patterns (both same and inverse)
             similar_results = session.run("""
-                MATCH (c:Case {id: $case_id_num})-[:HAS_ANSWER]->(q)<-[:HAS_ANSWER]-(similar_case:Case)
+                MATCH (c:Case {id: $case_id_num})-[:HAS_ANSWER]->(q:BehaviorQuestion)
+                OPTIONAL MATCH (similar_case:Case)-[r:HAS_ANSWER]->(q)
                 WHERE c <> similar_case AND similar_case.embedding IS NOT NULL
-                WITH similar_case, c, count(q) AS shared_answers
-                WHERE shared_answers >= $min_similarity
-                RETURN similar_case.id AS similar_id_num, shared_answers
-                ORDER BY shared_answers DESC 
+                WITH 
+                    similar_case,
+                    sum(CASE WHEN r.value = 0 THEN 1 ELSE 0 END) AS zero_matches,
+                    sum(CASE WHEN r.value > 0 THEN 1 ELSE 0 END) AS non_zero_matches,
+                    count(q) AS total_shared
+                WHERE total_shared >= $min_similarity
+                RETURN 
+                    similar_case.id AS similar_id_num,
+                    zero_matches,
+                    non_zero_matches,
+                    total_shared,
+                    CASE 
+                        WHEN zero_matches >= non_zero_matches THEN 1.0 - (zero_matches/10.0)
+                        ELSE non_zero_matches/10.0
+                    END AS similarity_score
+                ORDER BY similarity_score DESC
                 LIMIT 20
             """, case_id_num=original_case_id, min_similarity=self.MIN_SIMILARITY)
 
             for record in similar_results:
                 similar_id_num = record['similar_id_num']
                 similar_node_name = f"Case_{similar_id_num}"
-                weight = record['shared_answers'] / 10.0 # Normalize similarity score
+                weight = record['similarity_score']
 
-                # Add similar case node to graph if not already present
                 if similar_node_name not in G:
                     G.add_node(similar_node_name, type="Case", id=similar_id_num)
                 
-                # Add edge, ensuring it's not a self-loop and doesn't already exist
                 if case_node_name != similar_node_name and not G.has_edge(case_node_name, similar_node_name):
-                    G.add_edge(case_node_name, similar_node_name, type="SIMILAR_TO", weight=weight)
-                    logger.info(f"Added similarity edge: {case_node_name} -- {similar_node_name} (weight: {weight:.2f})")
-                
-        logger.info(f"Augmented graph for {case_node_name} with {len(G.edges(case_node_name))} total connections.")
-
+                    G.add_edge(case_node_name, similar_node_name, 
+                            type="SIMILAR_TO", 
+                            weight=weight,
+                            zero_matches=record['zero_matches'],
+                            non_zero_matches=record['non_zero_matches'])
 
     def generate_embedding(self, G: nx.Graph, case_node_name: str) -> Optional[List[float]]:
-        """Generate Node2Vec embedding for the given case node in the graph."""
+        """Enhanced embedding generation with weighted walks"""
         temp_dir = None
         try:
             temp_dir = tempfile.mkdtemp()
             
-            # Ensure the graph has at least one edge for meaningful Node2Vec results
-            if len(G.edges(case_node_name)) == 0:
-                logger.warning(f"Case node {case_node_name} has no edges in the graph. Node2Vec will not generate meaningful embeddings.")
-                return None # Cannot generate useful embedding without connections
+            # Ensure minimum connectivity
+            if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
+                logger.warning(f"Insufficient connections ({len(G.edges(case_node_name))}) for meaningful embedding")
+                return [0.0] * self.EMBEDDING_DIM  # Return zero vector as fallback
 
-            node2vec = Node2Vec(
-                G,
-                dimensions=self.EMBEDDING_DIM,
-                walk_length=self.NODE2VEC_WALK_LENGTH,
-                num_walks=self.NODE2VEC_NUM_WALKS,
-                workers=self.NODE2VEC_WORKERS,
-                p=self.NODE2VEC_P,
-                q=self.NODE2VEC_Q,
-                quiet=True,
-                temp_folder=temp_dir,
-                # REMOVED: `weighted=True` and `weight_key='weight'` because Node2Vec 0.5.0 does not support them.
-                # This means the graph will be treated as unweighted for embedding generation.
-            )
+            # Use weighted Node2Vec if available
+            try:
+                node2vec = Node2Vec(
+                    G,
+                    dimensions=self.EMBEDDING_DIM,
+                    walk_length=self.NODE2VEC_WALK_LENGTH,
+                    num_walks=self.NODE2VEC_NUM_WALKS,
+                    workers=self.NODE2VEC_WORKERS,
+                    p=self.NODE2VEC_P,
+                    q=self.NODE2VEC_Q,
+                    weight_key='weight',  # Use edge weights if available
+                    temp_folder=temp_dir
+                )
+            except TypeError:  # Fallback for Node2Vec versions without weight_key
+                node2vec = Node2Vec(
+                    G,
+                    dimensions=self.EMBEDDING_DIM,
+                    walk_length=self.NODE2VEC_WALK_LENGTH,
+                    num_walks=self.NODE2VEC_NUM_WALKS,
+                    workers=self.NODE2VEC_WORKERS,
+                    p=self.NODE2VEC_P,
+                    q=self.NODE2VEC_Q,
+                    temp_folder=temp_dir
+                )
             
-            model = node2vec.fit(
-                window=self.NODE2VEC_WINDOW,
-                min_count=1,
-                # batch_words=self.NODE2VEC_BATCH_WORDS # Removed as Node2Vec 0.5.0 fit() doesn't have it
-            )
+            model = node2vec.fit(window=self.NODE2VEC_WINDOW, min_count=1)
             
             if case_node_name not in model.wv:
-                logger.error(f"Node2Vec did not generate an embedding for {case_node_name}.")
+                logger.error(f"No embedding generated for {case_node_name}")
                 return None
 
             embedding = model.wv[case_node_name].tolist()
             
-            if not self.validate_embedding(embedding):
-                logger.error(f"Generated invalid embedding for {case_node_name} after Node2Vec fit.")
-                return None
-                
+            # Post-processing normalization
+            embedding_norm = np.linalg.norm(embedding)
+            if embedding_norm > 0:
+                embedding = (embedding / embedding_norm).tolist()
+            
             return embedding
             
         except Exception as e:
-            logger.error(f"Embedding generation failed for {case_node_name}: {str(e)}", exc_info=True)
+            logger.error(f"Embedding generation failed: {str(e)}")
             return None
         finally:
             if temp_dir and os.path.exists(temp_dir):
-                try:
-                    shutil.rmtree(temp_dir)
-                except Exception as e:
-                    logger.warning(f"Could not remove temp directory {temp_dir}: {str(e)}")
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
     def generate_embedding_for_case(self, upload_id: str, case_data: dict) -> Optional[List[float]]:
         """Main embedding generation workflow for a temporary new case."""
