@@ -299,7 +299,6 @@ class EmbeddingGenerator:
                 return None
 
             embedding = model.wv[case_node_name].tolist()
-            
             # Post-processing normalization
             embedding_norm = np.linalg.norm(embedding)
             if embedding_norm > 0:
