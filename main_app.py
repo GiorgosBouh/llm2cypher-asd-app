@@ -982,7 +982,7 @@ def main():
         st.markdown("""
         ### 📘 About This Project
 
-        This project was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **Dr. Konstantinos Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
+        This project is a Graph-RAG system and acts as an intelligent agent for Autism Spectrum Disorder screening. It was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **Dr. Konstantinos Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
 
         **Research Project:**  
         *"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"*
@@ -1048,7 +1048,7 @@ def main():
             # Overview row
             col1, col2 = st.columns([1, 3])
             with col1:
-                st.image("https://cdn-icons-png.flaticon.com/512/3004/3004458.png", width=100)
+                st.image("https://cdn-icons-png.flaticon.com/512/4712/4712139.png", width=100)
             with col2:
                 st.markdown("""
                 **Welcome to the ASD Detection Training Center**
