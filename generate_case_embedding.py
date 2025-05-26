@@ -327,6 +327,45 @@ class EmbeddingGenerator:
         finally:
             if temp_dir and os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir, ignore_errors=True)
+    def generate_embedding_for_case(self, upload_id: str, case_data: dict) -> Optional[List[float]]:
+        """Main embedding generation workflow for a temporary new case."""
+        driver = None
+        try:
+            driver = self.get_driver()
+
+            # Step 1: Insert temporary case
+            inserted = self.insert_temporary_case(driver, upload_id, case_data)
+            if not inserted:
+                return None
+
+            # Step 2: Build base graph
+            graph_result = self.build_base_graph(driver, upload_id)
+            if not graph_result:
+                self.delete_temporary_case(driver, upload_id)
+                return None
+
+            G, case_node_name = graph_result
+
+            # Step 3: Augment with similarity if few connections
+            if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
+                self.augment_with_similarity(driver, G, case_node_name)
+
+            # Step 4: Generate embedding
+            embedding = self.generate_embedding(G, case_node_name)
+
+            # Step 5: Clean up
+            self.delete_temporary_case(driver, upload_id)
+
+            return embedding
+
+        except Exception as e:
+            logger.critical(f"Fatal error in generate_embedding_for_case workflow: {str(e)}", exc_info=True)
+            if driver:
+                self.delete_temporary_case(driver, upload_id)
+            return None
+        finally:
+            if driver:
+                driver.close()
 
 if __name__ == "__main__":
     try:
