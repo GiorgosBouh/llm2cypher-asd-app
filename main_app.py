@@ -1243,4 +1243,4 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                             st.error(f"❌ Query failed: {str(e)}")
 
 if __name__ == "__main__":
-    main()    main()
+    main()   
