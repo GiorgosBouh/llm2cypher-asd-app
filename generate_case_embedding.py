@@ -30,8 +30,8 @@ class EmbeddingGenerator:
         self.MIN_SIMILARITY = 3   # Lowered similarity threshold
         
         # Updated Node2Vec parameters
-        self.NODE2VEC_WALK_LENGTH = 30
-        self.NODE2VEC_NUM_WALKS = 200  # Increased walks
+        self.NODE2VEC_WALK_LENGTH = 10
+        self.NODE2VEC_NUM_WALKS = 50  # Increased walks
         self.NODE2VEC_P = 0.5  # More BFS-like
         self.NODE2VEC_Q = 2.0  # More DFS-like
         self.NODE2VEC_WORKERS = 4
@@ -41,7 +41,7 @@ class EmbeddingGenerator:
         return GraphDatabase.driver(
             os.getenv("NEO4J_URI"),
             auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASSWORD")),
-            connection_timeout=600,
+            connection_timeout=900,
             max_connection_lifetime=7200,
             max_connection_pool_size=50
         )
