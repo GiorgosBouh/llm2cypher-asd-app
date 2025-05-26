@@ -329,7 +329,9 @@ class EmbeddingGenerator:
             norm = np.linalg.norm(embedding)
             if norm == 0:
                 logger.warning(f"⚠️ Zero-norm embedding for '{case_node_name}' — returning raw vector.")
-                return embedding
+                if embedding and self.validate_embedding(embedding):
+                    return embedding
+                return None
 
             return (np.array(embedding) / norm).tolist()
 
@@ -378,7 +380,6 @@ class EmbeddingGenerator:
 
         except Exception as e:
             logger.critical(f"Fatal error in generate_embedding_for_case workflow: {str(e)}", exc_info=True)
-            if driver:
             return None
         finally:
             if driver:

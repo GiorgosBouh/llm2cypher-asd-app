@@ -940,30 +940,56 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                 with st.spinner("Refreshing labels from CSV..."):
                     refresh_screened_for_labels(csv_url)
-                    st.rerun() # Refresh the UI to show updated status
+                    st.rerun()  # Refresh the UI
         else:
             st.success("✅ All cases have SCREENED_FOR labels.")
             
-            # Add button to fix missing labels anyway
             if st.button("🔄 Fix Missing Labels from CSV"):
                 csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                 with st.spinner("Refreshing labels from CSV..."):
                     refresh_screened_for_labels(csv_url)
-                    st.rerun()  # Refresh the UI
+                    st.rerun()
 
         # Train model button
         if st.button("🔄 Train/Refresh Model"):
             with st.spinner("Training model with leakage protection..."):
-                results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
-                if results:
-                    st.session_state.model_results = results
-                    st.session_state.model_trained = True
-                    st.success("✅ Training completed successfully.")
-                    evaluate_model(
-                        results["model"],
-                        results["X_test"], 
-                        results["y_test"]
-                    )
+
+                # Check kg_builder_2.py exists
+                script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kg_builder_2.py")
+                if not os.path.exists(script_path):
+                    st.error(f"❌ kg_builder_2.py not found at {script_path}")
+                else:
+                    try:
+                        # Increase timeout to 20 minutes
+                        timeout = 1200  # 20 * 60
+                        result = subprocess.run(
+                            [sys.executable, script_path, "--no-labels"],
+                            capture_output=True,
+                            text=True,
+                            timeout=timeout
+                        )
+
+                        if result.returncode != 0:
+                            st.error(f"❌ Embedding generation failed:\n{result.stderr}")
+                            st.stop()
+                        else:
+                            st.success("✅ Embeddings generated successfully (no-labels)")
+
+                            results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
+                            if results:
+                                st.session_state.model_results = results
+                                st.session_state.model_trained = True
+                                st.success("✅ Training completed successfully.")
+                                evaluate_model(
+                                    results["model"],
+                                    results["X_test"], 
+                                    results["y_test"]
+                                )
+
+                    except subprocess.TimeoutExpired:
+                        st.error("❌ Embedding generation timed out after 20 minutes")
+                    except Exception as e:
+                        st.error(f"❌ Unexpected error during training: {str(e)}")
 
         # Show evaluation if model already trained
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
@@ -972,7 +998,6 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 st.session_state.model_results["X_test"],
                 st.session_state.model_results["y_test"]
             )
-            
 
     # === Tab 2: Graph Embeddings ===
     with tab2:
