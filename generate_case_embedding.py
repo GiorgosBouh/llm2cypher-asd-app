@@ -256,126 +256,77 @@ class EmbeddingGenerator:
                             zero_matches=record['zero_matches'],
                             non_zero_matches=record['non_zero_matches'])
 
+    
+
     def generate_embedding(self, G: nx.Graph, case_node_name: str) -> Optional[List[float]]:
-        """Enhanced embedding generation with weighted walks"""
-        """Modified embedding generation with leakage checks"""
-        # 1. Verify no label information in graph
-        for node in G.nodes:
-            if 'label' in G.nodes[node] and G.nodes[node]['label'] in ['Yes', 'No']:
-                raise ValueError("Label information found in graph nodes")
-        
+    """Generate an embedding vector for a given case using Node2Vec with leakage checks"""
+    # 1. Leakage check: no SCREENED_FOR relationships allowed
+    for u, v, data in G.edges(data=True):
+        if data.get('type') == 'SCREENED_FOR':
+            raise ValueError("Label relationship found in graph edges")
+
+    temp_dir = None
+    try:
+        temp_dir = tempfile.mkdtemp()
+
+        # 2. Remove edges with invalid weights (NaN or inf)
+        edges_to_remove = []
         for u, v, data in G.edges(data=True):
-            if data.get('type') == 'SCREENED_FOR':
-                raise ValueError("Label relationship found in graph edges")
-        temp_dir = None
+            weight = data.get("weight", 1.0)
+            if not np.isfinite(weight):
+                logger.warning(f"Removing edge ({u}, {v}) with invalid weight: {weight}")
+                edges_to_remove.append((u, v))
+        G.remove_edges_from(edges_to_remove)
+
+        # 3. Ensure enough connections for valid embedding
+        if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
+            logger.warning(f"Insufficient connections ({len(G.edges(case_node_name))}) for meaningful embedding")
+            return [0.0] * self.EMBEDDING_DIM
+
+        # 4. Run Node2Vec
         try:
-            temp_dir = tempfile.mkdtemp()
-            
-            # Ensure minimum connectivity
-            if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
-                logger.warning(f"Insufficient connections ({len(G.edges(case_node_name))}) for meaningful embedding")
-                return [0.0] * self.EMBEDDING_DIM  # Return zero vector as fallback
+            node2vec = Node2Vec(
+                G,
+                dimensions=self.EMBEDDING_DIM,
+                walk_length=self.NODE2VEC_WALK_LENGTH,
+                num_walks=self.NODE2VEC_NUM_WALKS,
+                workers=self.NODE2VEC_WORKERS,
+                p=self.NODE2VEC_P,
+                q=self.NODE2VEC_Q,
+                weight_key='weight',
+                temp_folder=temp_dir
+            )
+        except TypeError:
+            node2vec = Node2Vec(
+                G,
+                dimensions=self.EMBEDDING_DIM,
+                walk_length=self.NODE2VEC_WALK_LENGTH,
+                num_walks=self.NODE2VEC_NUM_WALKS,
+                workers=self.NODE2VEC_WORKERS,
+                p=self.NODE2VEC_P,
+                q=self.NODE2VEC_Q,
+                temp_folder=temp_dir
+            )
 
-            # Use weighted Node2Vec if available
-            try:
-                node2vec = Node2Vec(
-                    G,
-                    dimensions=self.EMBEDDING_DIM,
-                    walk_length=self.NODE2VEC_WALK_LENGTH,
-                    num_walks=self.NODE2VEC_NUM_WALKS,
-                    workers=self.NODE2VEC_WORKERS,
-                    p=self.NODE2VEC_P,
-                    q=self.NODE2VEC_Q,
-                    weight_key='weight',  # Use edge weights if available
-                    temp_folder=temp_dir
-                )
-            except TypeError:  # Fallback for Node2Vec versions without weight_key
-                node2vec = Node2Vec(
-                    G,
-                    dimensions=self.EMBEDDING_DIM,
-                    walk_length=self.NODE2VEC_WALK_LENGTH,
-                    num_walks=self.NODE2VEC_NUM_WALKS,
-                    workers=self.NODE2VEC_WORKERS,
-                    p=self.NODE2VEC_P,
-                    q=self.NODE2VEC_Q,
-                    temp_folder=temp_dir
-                )
-            
-            model = node2vec.fit(window=self.NODE2VEC_WINDOW, min_count=1)
-            
-            if case_node_name not in model.wv:
-                logger.error(f"No embedding generated for {case_node_name}")
-                return None
+        model = node2vec.fit(window=self.NODE2VEC_WINDOW, min_count=1)
 
-            embedding = model.wv[case_node_name].tolist()
-            # Post-processing normalization
-            embedding_norm = np.linalg.norm(embedding)
-            if embedding_norm > 0:
-                embedding = (embedding / embedding_norm).tolist()
-            
-            return embedding
-            
-        except Exception as e:
-            logger.error(f"Embedding generation failed: {str(e)}")
-            return None
-        finally:
-            if temp_dir and os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def generate_embedding_for_case(self, upload_id: str, case_data: dict) -> Optional[List[float]]:
-        """Main embedding generation workflow for a temporary new case."""
-        driver = None
-        try:
-            driver = self.get_driver()
-
-            # Step 0: Insert temporary case node with relationships
-            inserted = self.insert_temporary_case(driver, upload_id, case_data)
-            if not inserted:
-                logger.error("Failed to insert temporary case. Aborting embedding generation.")
-                return None
-            
-            # Step 1: Build base graph (including the new temporary case and its direct neighbors)
-            graph_result = self.build_base_graph(driver, upload_id)
-            if not graph_result:
-                logger.error("Failed to build base graph for temporary case.")
-                self.delete_temporary_case(driver, upload_id)
-                return None
-                
-            G, case_node_name = graph_result
-            
-            # Step 2: Augment with similarity if initial connections are low
-            # The count of edges from the current case node to others
-            if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
-                logger.info(f"Initial connections for {case_node_name} low ({len(G.edges(case_node_name))}), augmenting with similar cases...")
-                self.augment_with_similarity(driver, G, case_node_name)
-                
-                if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
-                    logger.warning(f"Insufficient connections ({len(G.edges(case_node_name))}) for {case_node_name} even after augmentation. Embedding might be poor.")
-            
-            # Step 3: Generate embedding
-            logger.info(f"Generating embedding for {case_node_name} (NetworkX graph: {len(G.nodes)} nodes, {len(G.edges)} edges)")
-            embedding = self.generate_embedding(G, case_node_name)
-            if not embedding:
-                logger.error(f"Embedding generation returned None for {case_node_name}. Could be due to no edges, or other issues.")
-                self.delete_temporary_case(driver, upload_id)
-                return None
-
-            # Step 4: Delete temporary node
-            self.delete_temporary_case(driver, upload_id)
-
-            logger.info(f"Successfully generated embedding for case {case_node_name}")
-            return embedding
-
-        except Exception as e:
-            logger.critical(f"Fatal error in generate_embedding_for_case workflow: {str(e)}", exc_info=True)
-            # Ensure temporary node is deleted even on critical errors
-            if driver:
-                self.delete_temporary_case(driver, upload_id)
+        if case_node_name not in model.wv:
+            logger.error(f"No embedding generated for {case_node_name}")
             return None
 
-        finally:
-            if driver:
-                driver.close()
+        embedding = model.wv[case_node_name].tolist()
+        embedding_norm = np.linalg.norm(embedding)
+        if embedding_norm > 0:
+            embedding = (np.array(embedding) / embedding_norm).tolist()
+
+        return embedding
+
+    except Exception as e:
+        logger.error(f"Embedding generation failed: {str(e)}")
+        return None
+    finally:
+        if temp_dir and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 if __name__ == "__main__":
     try:
