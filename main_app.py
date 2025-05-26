@@ -470,7 +470,7 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
             graph_label = record["graph_label"].strip().lower() if record and record["graph_label"] else None
 
             if graph_label is None:
-                st.warning(f"⚠️ Case_No {case_id} has label '{csv_label}' in CSV but not in graph. Creating relationship...")
+                logger.info(f"Creating SCREENED_FOR label for Case_No {case_id} from CSV")
                 session.run("""
                     MATCH (c:Case {id: $case_id})
                     MERGE (t:ASD_Trait {label: $label})
@@ -1023,8 +1023,22 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
 
                 # Generate embedding
                 with st.spinner("Generating embedding..."):
-                    if not generate_embedding_for_case(temp_upload_id):
-                        st.error("Failed to generate embedding")
+                    case_dict = row.to_dict()
+                    case_json = json.dumps(case_dict)
+
+                    # Εκτέλεση subprocess με upload_id + json string
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
+                    builder_path = os.path.join(script_dir, "generate_case_embedding.py")
+
+                    result = subprocess.run(
+                        [sys.executable, builder_path, temp_upload_id, case_json],
+                        capture_output=True,
+                        text=True,
+                        timeout=Config.EMBEDDING_GENERATION_TIMEOUT
+                    )
+
+                    if result.returncode != 0:
+                        st.error(f"❌ Embedding generation failed with error:\n{result.stderr}")
                         st.stop()
 
                 embedding = extract_user_embedding(temp_upload_id)
