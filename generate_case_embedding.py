@@ -266,7 +266,7 @@ class EmbeddingGenerator:
         
         for u, v, data in G.edges(data=True):
             if data.get('type') == 'SCREENED_FOR':
-                raise ValueError("Label relationship found in graph edges")
+            raise ValueError("Label relationship found in graph edges")
         temp_dir = None
         try:
             temp_dir = tempfile.mkdtemp()
