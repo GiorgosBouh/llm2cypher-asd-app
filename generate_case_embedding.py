@@ -269,14 +269,13 @@ class EmbeddingGenerator:
         try:
             temp_dir = tempfile.mkdtemp()
 
-            # 2. Remove edges with invalid weights (NaN or inf)
+            # 2. Clean or remove invalid weights
             edges_to_remove = []
             for u, v, data in G.edges(data=True):
                 weight = data.get("weight", 1.0)
-                if not np.isfinite(weight):
-                    logger.warning(f"Removing edge ({u}, {v}) with invalid weight: {weight}")
-                    edges_to_remove.append((u, v))
-            G.remove_edges_from(edges_to_remove)
+                if not isinstance(weight, (float, int)) or not np.isfinite(weight):
+                    logger.warning(f"Setting default weight for edge ({u}, {v}) due to invalid value: {weight}")
+                    data["weight"] = 1.0  # Replace with default weight  
 
             # 3. Ensure enough connections for valid embedding
             if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
