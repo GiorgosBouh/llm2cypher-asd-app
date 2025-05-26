@@ -259,74 +259,74 @@ class EmbeddingGenerator:
     
 
     def generate_embedding(self, G: nx.Graph, case_node_name: str) -> Optional[List[float]]:
-    """Generate an embedding vector for a given case using Node2Vec with leakage checks"""
-    # 1. Leakage check: no SCREENED_FOR relationships allowed
-    for u, v, data in G.edges(data=True):
-        if data.get('type') == 'SCREENED_FOR':
-            raise ValueError("Label relationship found in graph edges")
-
-    temp_dir = None
-    try:
-        temp_dir = tempfile.mkdtemp()
-
-        # 2. Remove edges with invalid weights (NaN or inf)
-        edges_to_remove = []
+        """Generate an embedding vector for a given case using Node2Vec with leakage checks"""
+        # 1. Leakage check: no SCREENED_FOR relationships allowed
         for u, v, data in G.edges(data=True):
-            weight = data.get("weight", 1.0)
-            if not np.isfinite(weight):
-                logger.warning(f"Removing edge ({u}, {v}) with invalid weight: {weight}")
-                edges_to_remove.append((u, v))
-        G.remove_edges_from(edges_to_remove)
+            if data.get('type') == 'SCREENED_FOR':
+                raise ValueError("Label relationship found in graph edges")
 
-        # 3. Ensure enough connections for valid embedding
-        if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
-            logger.warning(f"Insufficient connections ({len(G.edges(case_node_name))}) for meaningful embedding")
-            return [0.0] * self.EMBEDDING_DIM
-
-        # 4. Run Node2Vec
+        temp_dir = None
         try:
-            node2vec = Node2Vec(
-                G,
-                dimensions=self.EMBEDDING_DIM,
-                walk_length=self.NODE2VEC_WALK_LENGTH,
-                num_walks=self.NODE2VEC_NUM_WALKS,
-                workers=self.NODE2VEC_WORKERS,
-                p=self.NODE2VEC_P,
-                q=self.NODE2VEC_Q,
-                weight_key='weight',
-                temp_folder=temp_dir
-            )
-        except TypeError:
-            node2vec = Node2Vec(
-                G,
-                dimensions=self.EMBEDDING_DIM,
-                walk_length=self.NODE2VEC_WALK_LENGTH,
-                num_walks=self.NODE2VEC_NUM_WALKS,
-                workers=self.NODE2VEC_WORKERS,
-                p=self.NODE2VEC_P,
-                q=self.NODE2VEC_Q,
-                temp_folder=temp_dir
-            )
+            temp_dir = tempfile.mkdtemp()
 
-        model = node2vec.fit(window=self.NODE2VEC_WINDOW, min_count=1)
+            # 2. Remove edges with invalid weights (NaN or inf)
+            edges_to_remove = []
+            for u, v, data in G.edges(data=True):
+                weight = data.get("weight", 1.0)
+                if not np.isfinite(weight):
+                    logger.warning(f"Removing edge ({u}, {v}) with invalid weight: {weight}")
+                    edges_to_remove.append((u, v))
+            G.remove_edges_from(edges_to_remove)
 
-        if case_node_name not in model.wv:
-            logger.error(f"No embedding generated for {case_node_name}")
+            # 3. Ensure enough connections for valid embedding
+            if len(G.edges(case_node_name)) < self.MIN_CONNECTIONS:
+                logger.warning(f"Insufficient connections ({len(G.edges(case_node_name))}) for meaningful embedding")
+                return [0.0] * self.EMBEDDING_DIM
+
+            # 4. Run Node2Vec
+            try:
+                node2vec = Node2Vec(
+                    G,
+                    dimensions=self.EMBEDDING_DIM,
+                    walk_length=self.NODE2VEC_WALK_LENGTH,
+                    num_walks=self.NODE2VEC_NUM_WALKS,
+                    workers=self.NODE2VEC_WORKERS,
+                    p=self.NODE2VEC_P,
+                    q=self.NODE2VEC_Q,
+                    weight_key='weight',
+                    temp_folder=temp_dir
+                )
+            except TypeError:
+                node2vec = Node2Vec(
+                    G,
+                    dimensions=self.EMBEDDING_DIM,
+                    walk_length=self.NODE2VEC_WALK_LENGTH,
+                    num_walks=self.NODE2VEC_NUM_WALKS,
+                    workers=self.NODE2VEC_WORKERS,
+                    p=self.NODE2VEC_P,
+                    q=self.NODE2VEC_Q,
+                    temp_folder=temp_dir
+                )
+
+            model = node2vec.fit(window=self.NODE2VEC_WINDOW, min_count=1)
+
+            if case_node_name not in model.wv:
+                logger.error(f"No embedding generated for {case_node_name}")
+                return None
+
+            embedding = model.wv[case_node_name].tolist()
+            embedding_norm = np.linalg.norm(embedding)
+            if embedding_norm > 0:
+                embedding = (np.array(embedding) / embedding_norm).tolist()
+
+            return embedding
+
+        except Exception as e:
+            logger.error(f"Embedding generation failed: {str(e)}")
             return None
-
-        embedding = model.wv[case_node_name].tolist()
-        embedding_norm = np.linalg.norm(embedding)
-        if embedding_norm > 0:
-            embedding = (np.array(embedding) / embedding_norm).tolist()
-
-        return embedding
-
-    except Exception as e:
-        logger.error(f"Embedding generation failed: {str(e)}")
-        return None
-    finally:
-        if temp_dir and os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        finally:
+            if temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
 if __name__ == "__main__":
     try:
