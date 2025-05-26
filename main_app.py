@@ -944,7 +944,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                 with st.spinner("Refreshing labels from CSV..."):
                     refresh_screened_for_labels(csv_url)
-                    st.experimental_rerun()  # Refresh the UI
+                    st.rerun()  # Refresh the UI
 
         # Train model button
         if st.button("🔄 Train/Refresh Model"):
