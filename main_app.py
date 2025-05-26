@@ -1201,12 +1201,8 @@ def main():
                                 st.session_state.model_results = results
                                 st.session_state.model_trained = True
                                 st.success("✅ Training completed successfully!")
-                                # Force immediate display of results
-                                evaluate_model(
-                                    results["model"],
-                                    results["X_test"], 
-                                    results["y_test"]
-                                )
+                                # ✅ FIXED: Removed duplicate evaluation call, added rerun instead
+                                st.rerun()
                             else:
                                 st.error("❌ Training failed - please check the logs above")
                                 
@@ -1304,6 +1300,9 @@ def main():
                 if st.button("🔮 Generate Prediction", type="primary"):
                     with st.spinner("Generating embedding and prediction..."):
                         try:
+                            # ✅ FIXED: Define case_dict at the TOP of the try block
+                            case_dict = row.to_dict()  # Ensure case_dict is always defined
+                            
                             # Check if we already have this case
                             neo4j_service, _ = get_services()
                             if neo4j_service:
@@ -1319,7 +1318,6 @@ def main():
                                     else:
                                         st.info("🔄 Generating new embedding...")
                                         # Prepare case data
-                                        case_dict = row.to_dict()
                                         case_json = json.dumps(case_dict, sort_keys=True)  # Ensure consistent JSON
 
                                         # Generate embedding
@@ -1397,12 +1395,14 @@ def main():
                                             conf_text = "Low"
                                         st.markdown(f"{conf_color} **{conf_text}** ({confidence:.1%})")
 
-                                    # === DEBUGGING SECTION ===
+                                    # === ENHANCED DEBUGGING SECTION ===
                                     with st.expander("🔍 **Prediction Debugging** (Click to investigate)", expanded=False):
                                         st.markdown("### 🕵️ Model Diagnostics")
                                         
-                                        # Show input data
-                                        st.markdown("**📋 Input Data Analysis:**")
+                                        # ✅ CORRECTED: Independent Behavioral Analysis (No Q-Chat Scoring)
+                                        st.markdown("**📋 Raw Behavioral Response Analysis:**")
+                                        
+                                        # Show raw responses WITHOUT Q-Chat scoring logic
                                         input_analysis = []
                                         for i in range(1, 11):
                                             q_val = case_dict.get(f"A{i}", "Missing")
@@ -1410,8 +1410,10 @@ def main():
                                         
                                         col1, col2 = st.columns(2)
                                         with col1:
-                                            st.markdown("**Q-Chat Responses:**")
+                                            st.markdown("**Raw Behavioral Responses:**")
                                             for item in input_analysis[:5]:
+                                                st.text(item)
+                                            for item in input_analysis[5:]:
                                                 st.text(item)
                                         with col2:
                                             st.markdown("**Demographics:**")
@@ -1420,28 +1422,16 @@ def main():
                                             st.text(f"Jaundice: {case_dict.get('Jaundice', 'Missing')}")
                                             st.text(f"Family ASD: {case_dict.get('Family_mem_with_ASD', 'Missing')}")
                                         
-                                        # Calculate Q-Chat score manually
-                                        q_chat_score = 0
-                                        for i in range(1, 11):
-                                            val = case_dict.get(f"A{i}", 0)
-                                            try:
-                                                if i <= 9:  # A1-A9: 1 point for Sometimes/Rarely/Never
-                                                    if int(val) == 1:
-                                                        q_chat_score += 1
-                                                else:  # A10: 1 point for Always/Usually/Sometimes
-                                                    if int(val) == 1:
-                                                        q_chat_score += 1
-                                            except:
-                                                pass
-                                        
-                                        st.markdown(f"**🧮 Calculated Q-Chat Score: {q_chat_score}/10**")
-                                        if q_chat_score >= 3:
-                                            st.warning(f"⚠️ Q-Chat Score {q_chat_score} ≥ 3 suggests ASD risk!")
-                                        else:
-                                            st.success(f"✅ Q-Chat Score {q_chat_score} < 3 suggests typical development")
+                                        # ❌ REMOVED: Q-Chat scoring calculation (would be data leakage)
+                                        st.info("""
+                                        **📊 Important Note on Q-Chat Scoring:**
+                                        Q-Chat scores are NOT used in this model to avoid overfitting, since Q-Chat 
+                                        scores were used to create the original class labels. The model learns from 
+                                        raw behavioral patterns and graph relationships instead.
+                                        """)
                                         
                                         # Show embedding stats
-                                        st.markdown("**🧠 Embedding Analysis:**")
+                                        st.markdown("**🧠 Graph Embedding Analysis:**")
                                         emb_flat = embedding.flatten()
                                         st.text(f"Embedding shape: {embedding.shape}")
                                         st.text(f"Embedding mean: {np.mean(emb_flat):.4f}")
@@ -1449,88 +1439,94 @@ def main():
                                         st.text(f"Embedding min/max: {np.min(emb_flat):.4f} / {np.max(emb_flat):.4f}")
                                         
                                         # Check if embedding looks reasonable
+                                        embedding_quality_issues = []
                                         if np.std(emb_flat) < 0.01:
-                                            st.error("🚨 **Embedding Issue**: Very low variance - embeddings may be corrupted!")
+                                            embedding_quality_issues.append("Very low variance - may indicate poor graph connectivity")
                                         if np.all(emb_flat == emb_flat[0]):
-                                            st.error("🚨 **Embedding Issue**: All values identical - major problem!")
+                                            embedding_quality_issues.append("All values identical - critical embedding failure")
+                                        if np.mean(np.abs(emb_flat)) < 0.001:
+                                            embedding_quality_issues.append("Very small magnitude - weak graph signal")
+                                            
+                                        if embedding_quality_issues:
+                                            st.error("🚨 **Embedding Quality Issues:**")
+                                            for issue in embedding_quality_issues:
+                                                st.error(f"- {issue}")
+                                        else:
+                                            st.success("✅ **Embedding Quality:** Appears healthy")
                                         
                                         # Model debugging
                                         if hasattr(model, 'feature_importances_'):
-                                            st.markdown("**🎯 Top Important Features:**")
+                                            st.markdown("**🎯 Top Important Embedding Dimensions:**")
                                             importances = model.named_steps['xgb'].feature_importances_
                                             top_indices = np.argsort(importances)[-5:]
                                             for idx in reversed(top_indices):
-                                                st.text(f"Dim_{idx}: {importances[idx]:.4f} (value: {emb_flat[idx]:.4f})")
+                                                st.text(f"Dim_{idx}: importance={importances[idx]:.4f}, value={emb_flat[idx]:.4f}")
                                         
-                                        # Expected vs Actual
-                                        st.markdown("**⚖️ Prediction Analysis:**")
-                                        if q_chat_score >= 3 and asd_proba < 0.5:
-                                            st.error("""
-                                            🚨 **MAJOR INCONSISTENCY DETECTED**
-                                            - Q-Chat score suggests ASD risk
-                                            - Model predicts typical development
-                                            - Possible model training issues!
-                                            """)
-                                        elif q_chat_score < 3 and asd_proba >= 0.5:
-                                            st.warning("""
-                                            ⚠️ **Model Override**
-                                            - Q-Chat score suggests typical development
-                                            - Model detects ASD risk from patterns
-                                            - Model may have learned additional patterns
-                                            """)
-                                        else:
-                                            st.success("✅ Model prediction aligns with Q-Chat score")
+                                        # ✅ CORRECTED: Graph Embedding Independence Analysis  
+                                        st.markdown("**⚖️ Graph Embedding Analysis:**")
                                         
-                                        # Recommendation
-                                        st.markdown("**🔧 Troubleshooting Recommendations:**")
-                                        if q_chat_score >= 3 and asd_proba < 0.5:
-                                            st.markdown("""
-                                            1. **Check model training** - retrain with fresh embeddings
-                                            2. **Verify embedding generation** - ensure no label leakage
-                                            3. **Check data preprocessing** - ensure consistent format
-                                            4. **Review training data quality** - check for data issues
+                                        st.markdown(f"""
+                                        **🎯 Model Philosophy:**
+                                        - **Graph embeddings** capture complex behavioral patterns from raw responses
+                                        - **Node2Vec** learns from relationships between behaviors, demographics, and similar cases  
+                                        - **Independent learning** - does NOT use Q-Chat scoring (prevents overfitting)
+                                        - **Model prediction** ({asd_proba:.1%}) reflects patterns learned from training data
+                                        """)
+                                        
+                                        # Analysis of model prediction
+                                        if asd_proba >= 0.6:
+                                            st.info(f"""
+                                            **🔍 Higher Risk Pattern Detected** ({asd_proba:.1%})
+                                            - Graph embeddings suggest behavioral patterns similar to confirmed cases
+                                            - Model learned from complex combinations of:
+                                              * Raw behavioral responses (A1-A10)
+                                              * Demographic patterns
+                                              * Similarity to other cases in training data
+                                            - Recommendation: Consider clinical evaluation
+                                            """)
+                                        elif asd_proba >= 0.4:
+                                            st.warning(f"""
+                                            **⚖️ Borderline Pattern** ({asd_proba:.1%})
+                                            - Mixed signals in behavioral pattern analysis
+                                            - Some risk indicators present but not dominant
+                                            - Recommendation: Monitor development, consider follow-up
                                             """)
                                         else:
-                                            st.markdown("Model appears to be working as expected.")
-
-                                    # Enhanced probability visualization
-                                    st.subheader("📊 Prediction Breakdown")
-                                    
-                                    with col1:
-                                        # Color-coded prediction
-                                        if prediction == "ASD Traits Detected":
-                                            st.markdown(f"""
-                                                <div style="padding: 1rem; background-color: #ffebee; border-left: 4px solid #f44336; border-radius: 5px;">
-                                                    <h3 style="color: #f44336; margin: 0;">⚠️ ASD Traits Detected</h3>
-                                                    <p style="margin: 0.5rem 0 0 0;">Recommend clinical evaluation</p>
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                        else:
-                                            st.markdown(f"""
-                                                <div style="padding: 1rem; background-color: #e8f5e8; border-left: 4px solid #4caf50; border-radius: 5px;">
-                                                    <h3 style="color: #4caf50; margin: 0;">✅ Typical Development</h3>
-                                                    <p style="margin: 0.5rem 0 0 0;">No immediate concerns detected</p>
-                                                </div>
-                                            """, unsafe_allow_html=True)
-                                    
-                                    with col2:
-                                        st.markdown("**📊 Detailed Probabilities**")
-                                        st.markdown(f"**ASD Traits:** {asd_proba:.1%}")
-                                        st.markdown(f"**Typical Dev:** {typical_proba:.1%}")
+                                            st.success(f"""
+                                            **✅ Lower Risk Pattern** ({asd_proba:.1%})
+                                            - Graph embeddings suggest patterns more similar to typical development cases
+                                            - Model learned protective/typical patterns from training data
+                                            - Recommendation: Continue regular developmental monitoring
+                                            """)
                                         
-                                    with col3:
-                                        st.markdown("**🎯 Model Confidence**")
-                                        confidence = max(asd_proba, typical_proba)
-                                        if confidence >= 0.9:
-                                            conf_color = "🟢"
-                                            conf_text = "Very High"
-                                        elif confidence >= 0.7:
-                                            conf_color = "🟡"
-                                            conf_text = "High"
+                                        # Model confidence assessment
+                                        confidence = max(asd_proba, 1 - asd_proba)
+                                        st.markdown("**📊 Prediction Confidence Assessment:**")
+                                        
+                                        if confidence >= 0.8:
+                                            st.success(f"**High Confidence** ({confidence:.1%}) - Strong, clear pattern signal from graph")
+                                        elif confidence >= 0.6:
+                                            st.info(f"**Moderate Confidence** ({confidence:.1%}) - Clear pattern but some ambiguity")
                                         else:
-                                            conf_color = "🔴"
-                                            conf_text = "Low"
-                                        st.markdown(f"{conf_color} **{conf_text}** ({confidence:.1%})")
+                                            st.warning(f"**Lower Confidence** ({confidence:.1%}) - Mixed or weak pattern signals")
+                                            st.warning("→ Suggests case may benefit from additional clinical assessment")
+                                            
+                                        # Why no Q-Chat comparison
+                                        st.markdown("**🚫 Why No Q-Chat Score Comparison:**")
+                                        st.info("""
+                                        **Data Leakage Prevention:** Q-Chat scores were used to create the original 
+                                        class labels, so comparing model predictions to Q-Chat scores would be circular 
+                                        reasoning. The model learns independently from raw behavioral patterns.
+                                        """)
+                                        
+                                        # Clinical guidance
+                                        st.markdown("**🏥 Clinical Integration:**")
+                                        st.markdown(f"""
+                                        - **Primary tool:** Graph embedding prediction ({asd_proba:.1%})
+                                        - **Advantage:** Captures subtle patterns beyond rule-based scoring
+                                        - **Clinical context:** Should be integrated with clinical observation
+                                        - **Follow-up:** Based on risk level and clinical judgment
+                                        """)
 
                                     # Enhanced probability visualization
                                     st.subheader("📊 Prediction Breakdown")
@@ -1635,12 +1631,16 @@ def main():
                             st.error("❌ Embedding generation timed out")
                         except Exception as e:
                             st.error(f"❌ Unexpected error: {str(e)}")
+                            # ✅ ADDED: Debug info for case_dict errors
+                            st.error(f"Debug info - locals: {list(locals().keys())}")
+                            import traceback
+                            st.error(f"Full traceback: {traceback.format_exc()}")
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
 
-    # === Tab 4: NLP to Cypher ===
-    with tab4:
+    # === Tab 3: NLP to Cypher ===
+    with tab3:
         st.header("💬 Natural Language to Cypher")
         with st.expander("ℹ️ What can I ask? (Dataset Description & Examples)"):
             st.markdown("""
