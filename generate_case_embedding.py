@@ -13,6 +13,11 @@ import json
 from dotenv import load_dotenv
 import pandas as pd
 
+# Set random seeds for deterministic results
+np.random.seed(42)
+import random
+random.seed(42)
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -29,13 +34,14 @@ class EmbeddingGenerator:
         self.MIN_CONNECTIONS = 3  # Reduced for better coverage
         self.MIN_SIMILARITY = 2   # Reduced similarity threshold
         
-        # Updated Node2Vec parameters
+        # Updated Node2Vec parameters for deterministic results
         self.NODE2VEC_WALK_LENGTH = 10
         self.NODE2VEC_NUM_WALKS = 50
         self.NODE2VEC_P = 0.5
         self.NODE2VEC_Q = 2.0
-        self.NODE2VEC_WORKERS = 4
+        self.NODE2VEC_WORKERS = 1  # Set to 1 for deterministic results
         self.NODE2VEC_WINDOW = 10
+        self.RANDOM_SEED = 42
 
     def get_driver(self):
         """Initialize Neo4j driver using environment variables"""
@@ -76,6 +82,16 @@ class EmbeddingGenerator:
         
         with driver.session() as session:
             try:
+                # Check if case already exists
+                existing = session.run(
+                    "MATCH (c:Case {upload_id: $upload_id}) RETURN c.id AS id",
+                    upload_id=upload_id
+                ).single()
+                
+                if existing:
+                    logger.info(f"Case {upload_id} already exists, skipping insertion")
+                    return True
+
                 # Create the Case node
                 case_no = int(case_data.get("Case_No", -1))
                 session.run("""
@@ -153,9 +169,9 @@ class EmbeddingGenerator:
                 result = session.run("""
                     MATCH (c:Case {upload_id: $upload_id})
                     OPTIONAL MATCH (c)-[r]->(n)
-                    WHERE n IS NOT NULL
+                    WHERE n IS NOT NULL AND type(r) <> 'SCREENED_FOR'
                     OPTIONAL MATCH (c)<-[r2]-(n2)
-                    WHERE n2 IS NOT NULL
+                    WHERE n2 IS NOT NULL AND type(r2) <> 'SCREENED_FOR'
                     OPTIONAL MATCH (c)-[s:SIMILAR_TO]-(other_case:Case)
                     WHERE other_case.embedding IS NOT NULL 
                       AND other_case.id IS NOT NULL 
@@ -313,7 +329,7 @@ class EmbeddingGenerator:
             logger.error(f"Error in similarity augmentation: {str(e)}")
 
     def generate_embedding(self, G: nx.Graph, case_node_name: str) -> Optional[List[float]]:
-        """Generate embedding vector for the case using Node2Vec"""
+        """Generate embedding vector for the case using Node2Vec with deterministic settings"""
         temp_dir = None
         try:
             # Leakage check: ensure no SCREENED_FOR relationships
@@ -341,14 +357,18 @@ class EmbeddingGenerator:
                 if degree == 0:
                     return [0.1] * self.EMBEDDING_DIM
                 
-            # Run Node2Vec with error handling
+            # Set random seed for deterministic results
+            np.random.seed(self.RANDOM_SEED)
+            random.seed(self.RANDOM_SEED)
+
+            # Run Node2Vec with deterministic settings
             try:
                 node2vec = Node2Vec(
                     G,
                     dimensions=self.EMBEDDING_DIM,
                     walk_length=self.NODE2VEC_WALK_LENGTH,
                     num_walks=self.NODE2VEC_NUM_WALKS,
-                    workers=self.NODE2VEC_WORKERS,
+                    workers=self.NODE2VEC_WORKERS,  # Set to 1 for deterministic results
                     p=self.NODE2VEC_P,
                     q=self.NODE2VEC_Q,
                     temp_folder=temp_dir,
@@ -366,11 +386,13 @@ class EmbeddingGenerator:
                     quiet=True
                 )
 
+            # Set seed for model training as well
             model = node2vec.fit(
                 window=self.NODE2VEC_WINDOW, 
                 min_count=1,
                 sg=1,  # Skip-gram
-                epochs=10
+                epochs=10,
+                seed=self.RANDOM_SEED  # Deterministic model training
             )
 
             if case_node_name not in model.wv:
