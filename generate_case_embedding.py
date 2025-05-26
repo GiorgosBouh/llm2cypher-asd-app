@@ -76,8 +76,17 @@ class EmbeddingGenerator:
                 for i in range(1, 11):
                     question_label = f"A{i}"
                     # Ensure answer_value is an integer, default to 0 if missing or invalid
-                    answer_value = pd.to_numeric(case_data.get(question_label, np.nan), errors='coerce')
-                    answer_value = int(answer_value) if not pd.isna(answer_value) else 0 
+                    raw_val = case_data.get(question_label, "")
+                    try:
+                        val = float(str(raw_val).strip().replace(",", "."))
+                        if np.isfinite(val):
+                            answer_value = int(val)
+                        else:
+                            logger.warning(f"Invalid (non-finite) answer value for {question_label}: {raw_val}")
+                            answer_value = 0
+                    except Exception as e:
+                        logger.warning(f"Failed to convert answer for {question_label}: {raw_val} → {e}")
+                        answer_value = 0
 
                     session.run("""
                         MATCH (c:Case {upload_id: $upload_id}), (q:BehaviorQuestion {name: $question})
