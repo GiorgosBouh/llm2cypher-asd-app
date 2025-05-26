@@ -84,7 +84,7 @@ def call_embedding_generator(upload_id: str) -> bool:
 # === Configuration ===
 class Config:
     EMBEDDING_DIM = 128
-    RANDOM_STATE = np.random.randint(0, 1000)
+    RANDOM_STATE = 42  # Fixed random state for reproducibility instead of random
     TEST_SIZE = 0.3
     N_ESTIMATORS = 100
     SMOTE_RATIO = 'auto'
@@ -125,7 +125,15 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # === Neo4j Service Class ===
 class Neo4jService:
     def __init__(self, uri: str, user: str, password: str):
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        try:
+            self.driver = GraphDatabase.driver(uri, auth=(user, password))
+            # Test connection
+            with self.driver.session() as session:
+                session.run("RETURN 1").single()
+            logger.info("✅ Neo4j connection successful")
+        except Exception as e:
+            logger.error(f"❌ Neo4j connection failed: {str(e)}")
+            raise
 
     @contextmanager
     def session(self):
@@ -133,21 +141,24 @@ class Neo4jService:
             yield session
 
     def close(self):
-        self.driver.close()
+        if hasattr(self, 'driver'):
+            self.driver.close()
 
 # === Initialize Services ===
 @st.cache_resource
 def get_neo4j_service():
-    if 'neo4j_driver' in st.session_state:
-        st.session_state.neo4j_driver.close()
     return Neo4jService(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
 
 @st.cache_resource
 def get_openai_client():
     return OpenAI(api_key=OPENAI_API_KEY)
 
-neo4j_service = get_neo4j_service()
-client = get_openai_client()
+try:
+    neo4j_service = get_neo4j_service()
+    client = get_openai_client()
+except Exception as e:
+    st.error(f"❌ Service initialization failed: {str(e)}")
+    st.stop()
 
 # === Helper Functions ===
 def safe_neo4j_operation(func):
@@ -167,8 +178,13 @@ def check_embedding_dimensions():
         result = session.run("""
             MATCH (c:Case) WHERE c.embedding IS NOT NULL
             RETURN c.id AS case_id, size(c.embedding) AS embedding_length
+            LIMIT 10
         """)
-        wrong_dims = [(r["case_id"], r["embedding_length"]) for r in result if r["embedding_length"] != 128]
+        records = list(result)
+        if not records:
+            st.warning("⚠️ No embeddings found in the database")
+            return
+        wrong_dims = [(r["case_id"], r["embedding_length"]) for r in records if r["embedding_length"] != 128]
         if wrong_dims:
             st.warning(f"⚠️ Cases with wrong embedding size: {wrong_dims}")
         else:
@@ -181,6 +197,7 @@ def find_cases_missing_labels() -> list:
             MATCH (c:Case)
             WHERE NOT (c)-[:SCREENED_FOR]->(:ASD_Trait)
             RETURN c.id AS case_id
+            LIMIT 100
         """)
         missing_cases = [record["case_id"] for record in result]
         if missing_cases:
@@ -210,7 +227,7 @@ def refresh_screened_for_labels(csv_url: str):
                 label = str(row["Class_ASD_Traits"]).strip().lower()
                 if label in ["yes", "no"]:
                     valid_cases.append((case_id, label.capitalize()))
-            except (ValueError, AttributeError):
+            except (ValueError, TypeError):
                 continue
 
         if not valid_cases:
@@ -269,6 +286,7 @@ def refresh_screened_for_labels(csv_url: str):
     except Exception as e:
         st.error(f"❌ Error refreshing labels: {str(e)}")
         logger.error(f"Error in refresh_screened_for_labels: {str(e)}", exc_info=True)
+
 # === Data Insertion ===
 @safe_neo4j_operation
 def insert_user_case(row: pd.Series, upload_id: str) -> str:
@@ -394,7 +412,7 @@ def nl_to_cypher(question: str) -> Optional[str]:
     Schema:
     - (:Case {{id: int}})
     - (:BehaviorQuestion {{name: string}})
-    - (:ASD_Trait {{value: 'Yes' | 'No'}})
+    - (:ASD_Trait {{label: 'Yes' | 'No'}})
     - (:DemographicAttribute {{type: 'Sex' | 'Ethnicity' | 'Jaundice' | 'Family_mem_with_ASD', value: string}})
     - (:SubmitterType {{type: string}})
 
@@ -439,7 +457,11 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
         record = result.single()
         
         if record and record["embedding"] is not None:
-            return np.array(record["embedding"]).reshape(1, -1)
+            embedding = np.array(record["embedding"])
+            if len(embedding) == Config.EMBEDDING_DIM:
+                return embedding.reshape(1, -1)
+            else:
+                st.error(f"❌ Invalid embedding dimension: {len(embedding)}")
         
         exists = session.run(
             "MATCH (c:Case {upload_id: $upload_id}) RETURN count(c) > 0 AS exists",
@@ -551,7 +573,12 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
             return
 
         features = [f"A{i}" for i in range(1, 11)] + ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
-        df = df[features]
+        available_features = [f for f in features if f in df.columns]
+        if not available_features:
+            st.error("No required features found in CSV")
+            return
+            
+        df = df[available_features]
         df = pd.get_dummies(df, drop_first=True)
 
         if df.shape[0] != X.shape[0]:
@@ -561,7 +588,11 @@ def analyze_embedding_correlations(X: pd.DataFrame, csv_url: str):
 
         for feat in df.columns:
             for dim in X.columns:
-                corr.at[feat, dim] = np.corrcoef(df[feat], X[dim])[0, 1]
+                try:
+                    if not df[feat].isna().all() and not X[dim].isna().all():
+                        corr.at[feat, dim] = np.corrcoef(df[feat], X[dim])[0, 1]
+                except:
+                    corr.at[feat, dim] = 0.0
 
         corr = corr.astype(float)
 
@@ -650,7 +681,6 @@ def evaluate_model(model, X_test, y_test):
 
     csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
     analyze_embedding_correlations(X_test, csv_url)
-
 
 # === Model Training ===
 @st.cache_resource(show_spinner="Training ASD detection model...")
@@ -825,6 +855,7 @@ def get_existing_embeddings() -> Optional[np.ndarray]:
             MATCH (c:Case)
             WHERE c.embedding IS NOT NULL
             RETURN c.embedding AS embedding
+            LIMIT 1000
         """)
         embeddings = [record["embedding"] for record in result]
         return np.array(embeddings) if embeddings else None
@@ -844,7 +875,8 @@ def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, St
     contamination = min(0.1, 5.0 / len(embeddings))  # ensures max 5 anomalies or 10% contamination
     iso_forest = IsolationForest(
         contamination=contamination,
-        random_state=Config.RANDOM_STATE
+        random_state=Config.RANDOM_STATE,
+        n_estimators=100
     )
     iso_forest.fit(embeddings_scaled)
 
@@ -872,6 +904,12 @@ def reinsert_labels_from_csv(csv_url: str):
 
 # === Streamlit UI ===
 def main():
+    st.set_page_config(
+        page_title="NeuroCypher ASD",
+        page_icon="🧠",
+        layout="wide"
+    )
+    
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
         <i>Autism Spectrum Disorder detection using graph embeddings</i>
@@ -1051,42 +1089,76 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 row = df.iloc[0]
                 temp_upload_id = "temp_" + str(uuid.uuid4())
 
-                # Generate embedding
-                with st.spinner("Generating embedding..."):
-                    case_dict = row.to_dict()
-                    case_json = json.dumps(case_dict)
+                if st.button("🔮 Generate Prediction", type="primary"):
+                    with st.spinner("Generating embedding and prediction..."):
+                        try:
+                            # Prepare case data
+                            case_dict = row.to_dict()
+                            case_json = json.dumps(case_dict)
 
-                    # Εκτέλεση subprocess με upload_id + json string
-                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                    builder_path = os.path.join(script_dir, "generate_case_embedding.py")
+                            # Generate embedding
+                            script_dir = os.path.dirname(os.path.abspath(__file__))
+                            builder_path = os.path.join(script_dir, "generate_case_embedding.py")
 
-                    result = subprocess.run(
-                        [sys.executable, builder_path, temp_upload_id, case_json],
-                        capture_output=True,
-                        text=True,
-                        timeout=Config.EMBEDDING_GENERATION_TIMEOUT
-                    )
+                            result = subprocess.run(
+                                [sys.executable, builder_path, temp_upload_id, case_json],
+                                capture_output=True,
+                                text=True,
+                                timeout=Config.EMBEDDING_GENERATION_TIMEOUT
+                            )
 
-                    if result.returncode != 0:
-                        st.error(f"❌ Embedding generation failed with error:\n{result.stderr}")
-                        st.stop()
+                            if result.returncode != 0:
+                                st.error(f"❌ Embedding generation failed with error:\n{result.stderr}")
+                                st.stop()
 
-                try:
-                    embedding = np.array(json.loads(result.stdout)).reshape(1, -1)
-                except Exception as e:
-                    st.error(f"❌ Failed to extract embedding from stdout: {str(e)}")
-                    st.stop()
+                            try:
+                                embedding = np.array(json.loads(result.stdout)).reshape(1, -1)
+                            except Exception as e:
+                                st.error(f"❌ Failed to extract embedding from stdout: {str(e)}")
+                                st.stop()
 
-                # Make prediction
-                if st.session_state.model_results:
-                    model = st.session_state.model_results["model"]
-                    proba = model.predict_proba(embedding)[0][1]
-                    prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
-                    
-                    st.subheader("🔍 Prediction Result")
-                    col1, col2 = st.columns(2)
-                    col1.metric("Prediction", prediction)
-                    col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
+                            # Make prediction
+                            if st.session_state.model_results:
+                                model = st.session_state.model_results["model"]
+                                proba = model.predict_proba(embedding)[0][1]
+                                prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
+                                
+                                st.subheader("🔍 Prediction Result")
+                                col1, col2 = st.columns(2)
+                                col1.metric("Prediction", prediction)
+                                col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
+
+                                # Show probability distribution
+                                st.subheader("📊 Prediction Details")
+                                prob_data = pd.DataFrame({
+                                    'Outcome': ['ASD Traits', 'Typical Development'],
+                                    'Probability': [proba, 1-proba]
+                                })
+                                fig = px.bar(prob_data, x='Outcome', y='Probability', 
+                                           title='Prediction Probabilities')
+                                st.plotly_chart(fig)
+
+                                # Anomaly detection
+                                anomaly_model = train_isolation_forest(cache_key="anomaly")
+                                if anomaly_model:
+                                    iso_forest, scaler = anomaly_model
+                                    embedding_scaled = scaler.transform(embedding)
+                                    anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                                    is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+                                    
+                                    st.subheader("🕵️ Anomaly Detection")
+                                    if is_anomaly:
+                                        st.warning(f"⚠️ **Anomaly detected** (score: {anomaly_score:.3f})")
+                                        st.info("This case is unusual compared to the training data. Review carefully.")
+                                    else:
+                                        st.success(f"✅ **Normal case** (score: {anomaly_score:.3f})")
+                            else:
+                                st.warning("⚠️ No trained model available. Please train the model first.")
+
+                        except subprocess.TimeoutExpired:
+                            st.error("❌ Embedding generation timed out")
+                        except Exception as e:
+                            st.error(f"❌ Unexpected error: {str(e)}")
 
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
@@ -1145,13 +1217,28 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                 if st.button("▶️ Execute Query"):
                     with neo4j_service.session() as session:
                         try:
+                            start_time = time.time()
                             results = session.run(cypher).data()
+                            execution_time = time.time() - start_time
+                            
                             if results:
-                                st.dataframe(pd.DataFrame(results))
+                                st.success(f"✅ Query executed in {execution_time:.2f} seconds")
+                                df_results = pd.DataFrame(results)
+                                st.dataframe(df_results)
+                                
+                                # Download option for large results
+                                if len(df_results) > 10:
+                                    csv = df_results.to_csv(index=False)
+                                    st.download_button(
+                                        label="📥 Download Results as CSV",
+                                        data=csv,
+                                        file_name=f"query_results_{int(time.time())}.csv",
+                                        mime="text/csv"
+                                    )
                             else:
-                                st.info("No results found")
+                                st.info("📭 Query executed successfully but returned no results")
                         except Exception as e:
-                            st.error(f"Query failed: {str(e)}")
+                            st.error(f"❌ Query failed: {str(e)}")
 
 if __name__ == "__main__":
     main()
