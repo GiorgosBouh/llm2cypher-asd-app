@@ -785,6 +785,11 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         # 9. Reinsert labels into the graph (after training is complete)
         st.info("🔄 Re-inserting SCREENED_FOR relationships into the graph...")
         reinsert_labels_from_csv(csv_url)
+        count = find_cases_missing_labels()
+        if count:
+            st.error(f"❌ Labels not reinserted properly: {len(count)} missing")
+        else:
+            st.success("✅ Labels reinserted successfully after training")
         st.success("✅ SCREENED_FOR relationships re-inserted.")
 
         return {
