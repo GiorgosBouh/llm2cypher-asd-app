@@ -1191,52 +1191,51 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                                             st.error(f"❌ Failed to extract embedding from stdout: {str(e)}")
                                             st.stop()
 
-                            # Make prediction
-                            if st.session_state.model_results:
-                                model = st.session_state.model_results["model"]
-                                
-                                # Ensure deterministic prediction
-                                np.random.seed(Config.RANDOM_STATE)
-                                proba = model.predict_proba(embedding)[0][1]
-                                prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
-                                
-                                st.subheader("🔍 Prediction Result")
-                                st.info(f"🔑 **Case ID**: `{temp_upload_id}` (deterministic)")
-                                
-                                col1, col2, col3 = st.columns(3)
-                                col1.metric("Prediction", prediction)
-                                col2.metric("Probability", f"{proba:.1%}")
-                                col3.metric("Confidence", f"{max(proba, 1-proba):.1%}")
-
-                                # Show probability distribution
-                                st.subheader("📊 Prediction Details")
-                                prob_data = pd.DataFrame({
-                                    'Outcome': ['ASD Traits', 'Typical Development'],
-                                    'Probability': [proba, 1-proba]
-                                })
-                                fig = px.bar(prob_data, x='Outcome', y='Probability', 
-                                           title='Prediction Probabilities')
-                                st.plotly_chart(fig)
-
-                                # Anomaly detection
-                                anomaly_model = train_isolation_forest(cache_key="anomaly")
-                                if anomaly_model:
-                                    iso_forest, scaler = anomaly_model
-                                    embedding_scaled = scaler.transform(embedding)
-                                    anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
-                                    is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+                                # Make prediction
+                                if st.session_state.model_results:
+                                    model = st.session_state.model_results["model"]
                                     
-                                    st.subheader("🕵️ Anomaly Detection")
-                                    if is_anomaly:
-                                        st.warning(f"⚠️ **Anomaly detected** (score: {anomaly_score:.3f})")
-                                        st.info("This case is unusual compared to the training data. Review carefully.")
-                                    else:
-                                        st.success(f"✅ **Normal case** (score: {anomaly_score:.3f})")
+                                    # Ensure deterministic prediction
+                                    np.random.seed(Config.RANDOM_STATE)
+                                    proba = model.predict_proba(embedding)[0][1]
+                                    prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
+                                    
+                                    st.subheader("🔍 Prediction Result")
+                                    st.info(f"🔑 **Case ID**: `{temp_upload_id}` (deterministic)")
+                                    
+                                    col1, col2, col3 = st.columns(3)
+                                    col1.metric("Prediction", prediction)
+                                    col2.metric("Probability", f"{proba:.1%}")
+                                    col3.metric("Confidence", f"{max(proba, 1-proba):.1%}")
+
+                                    # Show probability distribution
+                                    st.subheader("📊 Prediction Details")
+                                    prob_data = pd.DataFrame({
+                                        'Outcome': ['ASD Traits', 'Typical Development'],
+                                        'Probability': [proba, 1-proba]
+                                    })
+                                    fig = px.bar(prob_data, x='Outcome', y='Probability', 
+                                               title='Prediction Probabilities')
+                                    st.plotly_chart(fig)
+
+                                    # Anomaly detection
+                                    anomaly_model = train_isolation_forest(cache_key="anomaly")
+                                    if anomaly_model:
+                                        iso_forest, scaler = anomaly_model
+                                        embedding_scaled = scaler.transform(embedding)
+                                        anomaly_score = iso_forest.decision_function(embedding_scaled)[0]
+                                        is_anomaly = iso_forest.predict(embedding_scaled)[0] == -1
+                                        
+                                        st.subheader("🕵️ Anomaly Detection")
+                                        if is_anomaly:
+                                            st.warning(f"⚠️ **Anomaly detected** (score: {anomaly_score:.3f})")
+                                            st.info("This case is unusual compared to the training data. Review carefully.")
+                                        else:
+                                            st.success(f"✅ **Normal case** (score: {anomaly_score:.3f})")
+                                else:
+                                    st.warning("⚠️ No trained model available. Please train the model first.")
                             else:
-                                st.warning("⚠️ No trained model available. Please train the model first.")
-                            
-                        else:
-                            st.error("❌ Neo4j service not available")
+                                st.error("❌ Neo4j service not available")
 
                         except subprocess.TimeoutExpired:
                             st.error("❌ Embedding generation timed out")
