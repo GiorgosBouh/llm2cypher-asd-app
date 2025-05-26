@@ -488,7 +488,7 @@ def nl_to_cypher(question: str) -> Optional[str]:
 
 # === Embedding Extraction ===
 @safe_neo4j_operation
-def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
+def extract_user_embedding(neo4j_service, upload_id: str) -> Optional[np.ndarray]:
     """Safely extracts embedding for a specific case"""
     with neo4j_service.session() as session:
         result = session.run(
@@ -518,7 +518,7 @@ def extract_user_embedding(upload_id: str) -> Optional[np.ndarray]:
 
 # === Training Data Preparation ===
 @safe_neo4j_operation
-def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
+def check_label_consistency(neo4j_service, df: pd.DataFrame) -> None:
     inconsistent_cases = []
     with neo4j_service.session() as session:
         for _, row in df.iterrows():
@@ -549,13 +549,13 @@ def check_label_consistency(df: pd.DataFrame, neo4j_service) -> None:
         st.stop()
 
 @safe_neo4j_operation
-def extract_training_data_from_csv(file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
+def extract_training_data_from_csv(neo4j_service, file_path: str) -> Tuple[pd.DataFrame, pd.Series]:
     """Extracts training data with leakage protection and NaN handling"""
     try:
         df = pd.read_csv(file_path, delimiter=";", encoding='utf-8-sig')
         df.columns = [col.strip().replace('\r', '') for col in df.columns]
         df.columns = [col.strip() for col in df.columns]
-        check_label_consistency(df, neo4j_service)
+        check_label_consistency(df)
 
         required_cols = ["Case_No", "Class_ASD_Traits"]
         missing = [col for col in required_cols if col not in df.columns]
@@ -889,7 +889,7 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
 
 # === Anomaly Detection ===
 @safe_neo4j_operation
-def get_existing_embeddings() -> Optional[np.ndarray]:
+def get_existing_embeddings(neo4j_service) -> Optional[np.ndarray]:
     """Returns all case embeddings for anomaly detection"""
     with neo4j_service.session() as session:
         result = session.run("""
@@ -924,7 +924,7 @@ def train_isolation_forest(cache_key: str) -> Optional[Tuple[IsolationForest, St
     return iso_forest, scaler
 
 @safe_neo4j_operation
-def reinsert_labels_from_csv(csv_url: str):
+def reinsert_labels_from_csv(neo4j_service, csv_url: str):
     df = pd.read_csv(csv_url, delimiter=";", encoding='utf-8-sig')
     df.columns = [col.strip() for col in df.columns]
 
@@ -1018,9 +1018,7 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             if st.button("🔄 Fix Labels from CSV"):
                 csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                 with st.spinner("Refreshing labels from CSV..."):
-                    neo4j_service, _ = get_services()
-                    if neo4j_service:
-                        refresh_screened_for_labels(neo4j_service, csv_url)
+                    refresh_screened_for_labels(csv_url)
                     st.success("✅ Labels refreshed!")
                     st.rerun()
 
@@ -1264,4 +1262,4 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         st.error("❌ Neo4j service not available")
 
 if __name__ == "__main__":
-    main()
+    main()    main()
