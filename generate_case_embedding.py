@@ -354,7 +354,6 @@ class EmbeddingGenerator:
             # Step 2: Build base graph
             graph_result = self.build_base_graph(driver, upload_id)
             if not graph_result:
-                self.delete_temporary_case(driver, upload_id)
                 return None
 
             G, case_node_name = graph_result
@@ -366,15 +365,20 @@ class EmbeddingGenerator:
             # Step 4: Generate embedding
             embedding = self.generate_embedding(G, case_node_name)
 
-            # Step 5: Clean up
-            self.delete_temporary_case(driver, upload_id)
-
-            return embedding
+           
+            # Step 5: Store embedding directly in node before returning
+            if embedding:
+                with driver.session() as session:
+                    session.run("""
+                        MATCH (c:Case {upload_id: $upload_id})
+                        SET c.embedding = $embedding,
+                            c.embedding_version = 2.1,
+                            c.last_embedding_update = timestamp()
+                    """, upload_id=upload_id, embedding=embedding)
 
         except Exception as e:
             logger.critical(f"Fatal error in generate_embedding_for_case workflow: {str(e)}", exc_info=True)
             if driver:
-                self.delete_temporary_case(driver, upload_id)
             return None
         finally:
             if driver:
