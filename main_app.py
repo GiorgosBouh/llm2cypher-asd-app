@@ -1077,6 +1077,46 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab3:
         st.header("📄 Upload New Case (Prediction Only)")
         
+        # ========== INSTRUCTIONS SECTION ==========
+        with st.container(border=True):
+            st.subheader("📝 Before You Upload", anchor=False)
+            
+            cols = st.columns([1, 3])
+            with cols[0]:
+                st.image("https://cdn-icons-png.flaticon.com/512/2965/2965300.png", width=80)
+            with cols[1]:
+                st.markdown("""
+                **Please follow these steps carefully:**
+                1. Download the example CSV template
+                2. Review the data format instructions
+                3. Prepare your case data accordingly
+                """)
+            
+            st.markdown("---")
+            st.markdown("### 🛠️ Required Resources")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                with st.container(border=True):
+                    st.markdown("**📥 Example CSV Template**")
+                    st.markdown("Download and use this template to format your data:")
+                    st.markdown("[Download Example CSV](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)")
+            
+            with col2:
+                with st.container(border=True):
+                    st.markdown("**📋 Data Format Instructions**")
+                    st.markdown("Read the detailed documentation:")
+                    st.markdown("[View Instructions Document](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)")
+            
+            st.markdown("---")
+            st.markdown("""
+            **❗ Important Notes:**
+            - Ensure all required columns are present
+            - Only upload one case at a time
+            - Values must match the specified formats
+            """)
+        # ========== END INSTRUCTIONS SECTION ==========
+        
         uploaded_file = st.file_uploader(
             "Upload your prepared CSV file",
             type="csv",
@@ -1104,46 +1144,69 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                     st.stop()
 
                 row = df.iloc[0]
-                temp_upload_id = "temp_" + str(uuid.uuid4())
+                # Use deterministic ID based on case content
+                case_content = str(sorted(row.to_dict().items()))
+                import hashlib
+                temp_upload_id = "temp_" + hashlib.md5(case_content.encode()).hexdigest()[:8]
 
                 if st.button("🔮 Generate Prediction", type="primary"):
                     with st.spinner("Generating embedding and prediction..."):
                         try:
-                            # Prepare case data
-                            case_dict = row.to_dict()
-                            case_json = json.dumps(case_dict)
+                            # Check if we already have this case
+                            neo4j_service, _ = get_services()
+                            if neo4j_service:
+                                with neo4j_service.session() as session:
+                                    existing = session.run(
+                                        "MATCH (c:Case {upload_id: $upload_id}) RETURN c.embedding AS embedding",
+                                        upload_id=temp_upload_id
+                                    ).single()
+                                    
+                                    if existing and existing["embedding"]:
+                                        st.info("♻️ Using cached embedding for identical case")
+                                        embedding = np.array(existing["embedding"]).reshape(1, -1)
+                                    else:
+                                        st.info("🔄 Generating new embedding...")
+                                        # Prepare case data
+                                        case_dict = row.to_dict()
+                                        case_json = json.dumps(case_dict, sort_keys=True)  # Ensure consistent JSON
 
-                            # Generate embedding
-                            script_dir = os.path.dirname(os.path.abspath(__file__))
-                            builder_path = os.path.join(script_dir, "generate_case_embedding.py")
+                                        # Generate embedding
+                                        script_dir = os.path.dirname(os.path.abspath(__file__))
+                                        builder_path = os.path.join(script_dir, "generate_case_embedding.py")
 
-                            result = subprocess.run(
-                                [sys.executable, builder_path, temp_upload_id, case_json],
-                                capture_output=True,
-                                text=True,
-                                timeout=Config.EMBEDDING_GENERATION_TIMEOUT
-                            )
+                                        result = subprocess.run(
+                                            [sys.executable, builder_path, temp_upload_id, case_json],
+                                            capture_output=True,
+                                            text=True,
+                                            timeout=Config.EMBEDDING_GENERATION_TIMEOUT
+                                        )
 
-                            if result.returncode != 0:
-                                st.error(f"❌ Embedding generation failed with error:\n{result.stderr}")
-                                st.stop()
+                                        if result.returncode != 0:
+                                            st.error(f"❌ Embedding generation failed with error:\n{result.stderr}")
+                                            st.stop()
 
-                            try:
-                                embedding = np.array(json.loads(result.stdout)).reshape(1, -1)
-                            except Exception as e:
-                                st.error(f"❌ Failed to extract embedding from stdout: {str(e)}")
-                                st.stop()
+                                        try:
+                                            embedding = np.array(json.loads(result.stdout)).reshape(1, -1)
+                                        except Exception as e:
+                                            st.error(f"❌ Failed to extract embedding from stdout: {str(e)}")
+                                            st.stop()
 
                             # Make prediction
                             if st.session_state.model_results:
                                 model = st.session_state.model_results["model"]
+                                
+                                # Ensure deterministic prediction
+                                np.random.seed(Config.RANDOM_STATE)
                                 proba = model.predict_proba(embedding)[0][1]
                                 prediction = "ASD Traits Detected" if proba >= 0.5 else "Typical Development"
                                 
                                 st.subheader("🔍 Prediction Result")
-                                col1, col2 = st.columns(2)
+                                st.info(f"🔑 **Case ID**: `{temp_upload_id}` (deterministic)")
+                                
+                                col1, col2, col3 = st.columns(3)
                                 col1.metric("Prediction", prediction)
-                                col2.metric("Confidence", f"{max(proba, 1-proba):.1%}")
+                                col2.metric("Probability", f"{proba:.1%}")
+                                col3.metric("Confidence", f"{max(proba, 1-proba):.1%}")
 
                                 # Show probability distribution
                                 st.subheader("📊 Prediction Details")
@@ -1171,6 +1234,9 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                                         st.success(f"✅ **Normal case** (score: {anomaly_score:.3f})")
                             else:
                                 st.warning("⚠️ No trained model available. Please train the model first.")
+                            
+                        else:
+                            st.error("❌ Neo4j service not available")
 
                         except subprocess.TimeoutExpired:
                             st.error("❌ Embedding generation timed out")
