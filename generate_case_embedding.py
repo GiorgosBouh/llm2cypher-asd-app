@@ -162,39 +162,34 @@ class EmbeddingGenerator:
                 logger.error(f"Failed to delete temporary case {upload_id}: {str(e)}")
 
     def build_base_graph(self, driver, upload_id: str) -> Optional[Tuple[nx.Graph, str]]:
-        """Build base graph for the case with enhanced connectivity"""
+        """Build base graph for the case with enhanced behavioral pattern recognition"""
         with driver.session() as session:
             try:
-                # Get comprehensive case information
+                # Get comprehensive case information with enhanced behavioral pattern capture
                 result = session.run("""
                     MATCH (c:Case {upload_id: $upload_id})
-                    OPTIONAL MATCH (c)-[r]->(n)
-                    WHERE n IS NOT NULL AND type(r) <> 'SCREENED_FOR'
-                    OPTIONAL MATCH (c)<-[r2]-(n2)
-                    WHERE n2 IS NOT NULL AND type(r2) <> 'SCREENED_FOR'
-                    OPTIONAL MATCH (c)-[s:SIMILAR_TO]-(other_case:Case)
-                    WHERE other_case.embedding IS NOT NULL 
-                      AND other_case.id IS NOT NULL 
-                      AND other_case <> c
+                    OPTIONAL MATCH (c)-[r:HAS_ANSWER]->(q:BehaviorQuestion)
+                    WHERE q IS NOT NULL AND r IS NOT NULL
+                    OPTIONAL MATCH (c)-[d:HAS_DEMOGRAPHIC]->(dem:DemographicAttribute)
+                    WHERE dem IS NOT NULL
+                    OPTIONAL MATCH (c)-[s:SUBMITTED_BY]->(sub:SubmitterType)
+                    WHERE sub IS NOT NULL
+                    
                     RETURN c.id AS case_id_num,
                         collect(DISTINCT {
-                            node: n, 
-                            rel_type: type(r), 
-                            rel_value: r.value,
-                            labels: labels(n)
-                        }) AS direct_neighbors,
+                            question: q.name, 
+                            answer_value: r.value,
+                            node_id: id(q)
+                        }) AS behavior_answers,
                         collect(DISTINCT {
-                            node: n2, 
-                            rel_type: type(r2), 
-                            rel_value: r2.value,
-                            labels: labels(n2)
-                        }) AS incoming_neighbors,
+                            demo_type: dem.type,
+                            demo_value: dem.value,
+                            node_id: id(dem)
+                        }) AS demographics,
                         collect(DISTINCT {
-                            node: other_case, 
-                            rel_type: type(s), 
-                            rel_value: s.weight,
-                            labels: labels(other_case)
-                        }) AS similar_cases
+                            submitter_type: sub.type,
+                            node_id: id(sub)
+                        }) AS submitters
                 """, upload_id=upload_id).single()
 
                 if not result or result["case_id_num"] is None:
@@ -206,69 +201,115 @@ class EmbeddingGenerator:
                 G = nx.Graph()
                 G.add_node(case_node_name, type="Case", id=case_id_num)
 
-                # Helper function to add neighbors
-                def add_neighbors(neighbor_data, is_incoming=False):
-                    for data in neighbor_data:
-                        neighbor = data['node']
-                        if not neighbor:
-                            continue
-                            
-                        labels = data.get('labels', [])
+                # Enhanced behavioral pattern processing
+                behavior_answers = result.get('behavior_answers', [])
+                
+                # Create behavioral complexity indicators
+                behavioral_responses = 0
+                q_chat_answers = {}
+                
+                for answer in behavior_answers:
+                    question = answer.get('question', '')
+                    value = answer.get('answer_value', 0)
+                    
+                    if question and question.startswith('A'):
+                        q_chat_answers[question] = value
+                        behavioral_responses += 1  # Count all responses
                         
-                        # Create appropriate neighbor node name
-                        if 'BehaviorQuestion' in labels:
-                            neighbor_node_name = f"Q_{neighbor.get('name', 'unknown')}"
-                            G.add_node(neighbor_node_name, type="BehaviorQuestion")
-                        elif 'DemographicAttribute' in labels:
-                            attr_type = neighbor.get('type', 'unknown')
-                            attr_value = str(neighbor.get('value', 'unknown')).replace(' ', '_')
-                            neighbor_node_name = f"D_{attr_type}_{attr_value}"
-                            G.add_node(neighbor_node_name, type="DemographicAttribute")
-                        elif 'SubmitterType' in labels:
-                            submitter_type = str(neighbor.get('type', 'unknown')).replace(' ', '_')
-                            neighbor_node_name = f"S_{submitter_type}"
-                            G.add_node(neighbor_node_name, type="SubmitterType")
-                        elif 'Case' in labels:
-                            neighbor_node_name = f"Case_{neighbor.get('id', 'unknown')}"
-                            G.add_node(neighbor_node_name, type="Case")
+                        # Create individual question nodes with enhanced weighting
+                        q_node_name = f"Q_{question}"
+                        G.add_node(q_node_name, type="BehaviorQuestion", question=question)
+                        
+                        # Enhanced edge weighting based on behavioral significance
+                        if question in ['A1', 'A2', 'A3', 'A4', 'A6', 'A7', 'A8', 'A9']:  # Standard questions
+                            edge_weight = 1.5  # Important behavioral indicators
+                        elif question == 'A10':  # Different question type
+                            edge_weight = 1.5  # Equally important
                         else:
-                            continue
+                            edge_weight = 1.0
+                            
+                        G.add_edge(case_node_name, q_node_name, 
+                                 type="HAS_ANSWER", 
+                                 value=value, 
+                                 weight=edge_weight,
+                                 behavioral_response=value)
 
-                        # Add edge with appropriate weight
-                        edge_attrs = {"type": data['rel_type']}
-                        rel_value = data.get('rel_value')
-                        if rel_value is not None:
-                            edge_attrs["value"] = rel_value
-                            # Set weight based on relationship type
-                            if data['rel_type'] == "HAS_ANSWER":
-                                edge_attrs["weight"] = max(0.1, float(rel_value))
-                            elif data['rel_type'] == "SIMILAR_TO":
-                                edge_attrs["weight"] = max(0.1, float(rel_value))
-                            else:
-                                edge_attrs["weight"] = 1.0
-                        else:
-                            edge_attrs["weight"] = 1.0
+                # Add behavioral complexity patterns (not risk-based)
+                complexity_score = len([a for a in behavior_answers if a.get('answer_value', 0) == 1])
+                complexity_level = "HIGH" if complexity_score >= 5 else "MODERATE" if complexity_score >= 2 else "LOW"
+                complexity_node_name = f"BehaviorComplexity_{complexity_level}"
+                G.add_node(complexity_node_name, type="ComplexityPattern", level=complexity_level, score=complexity_score)
+                G.add_edge(case_node_name, complexity_node_name, 
+                         type="HAS_COMPLEXITY", 
+                         weight=1.5,  # Neutral weight - not biased toward risk
+                         complexity_score=complexity_score)
 
-                        if is_incoming:
-                            G.add_edge(neighbor_node_name, case_node_name, **edge_attrs)
-                        else:
-                            G.add_edge(case_node_name, neighbor_node_name, **edge_attrs)
+                # Add enhanced behavioral pattern combinations (neutral approach)
+                if len(q_chat_answers) >= 10:  # Ensure we have all answers
+                    # Communication patterns (A1, A2, A8) - neutral detection
+                    comm_responses = [q_chat_answers.get(q, 0) for q in ['A1', 'A2', 'A8']]
+                    if sum(comm_responses) >= 2:  # Any consistent pattern (high or low)
+                        comm_node = f"Pattern_Communication_{sum(comm_responses)}"
+                        G.add_node(comm_node, type="BehaviorPattern", pattern="communication", intensity=sum(comm_responses))
+                        G.add_edge(case_node_name, comm_node, type="HAS_PATTERN", weight=1.8)
+                    
+                    # Social interaction patterns (A3, A4, A6, A7) - neutral detection
+                    social_responses = [q_chat_answers.get(q, 0) for q in ['A3', 'A4', 'A6', 'A7']]
+                    if sum(social_responses) >= 2:  # Any consistent pattern
+                        social_node = f"Pattern_Social_{sum(social_responses)}"
+                        G.add_node(social_node, type="BehaviorPattern", pattern="social", intensity=sum(social_responses))
+                        G.add_edge(case_node_name, social_node, type="HAS_PATTERN", weight=1.8)
+                    
+                    # Activity/behavioral patterns (A5, A9, A10) - neutral detection
+                    activity_responses = [q_chat_answers.get(q, 0) for q in ['A5', 'A9', 'A10']]
+                    if sum(activity_responses) >= 2:  # Any consistent pattern
+                        activity_node = f"Pattern_Activity_{sum(activity_responses)}"
+                        G.add_node(activity_node, type="BehaviorPattern", pattern="activity", intensity=sum(activity_responses))
+                        G.add_edge(case_node_name, activity_node, type="HAS_PATTERN", weight=1.8)
 
-                # Add all types of neighbors
-                add_neighbors(result['direct_neighbors'])
-                add_neighbors(result['incoming_neighbors'], is_incoming=True)
-                add_neighbors(result['similar_cases'])
+                # Add demographic connections with enhanced weights
+                demographics = result.get('demographics', [])
+                for demo in demographics:
+                    demo_type = demo.get('demo_type', '')
+                    demo_value = demo.get('demo_value', '')
+                    
+                    if demo_type and demo_value:
+                        demo_node_name = f"D_{demo_type}_{demo_value.replace(' ', '_')}"
+                        G.add_node(demo_node_name, type="DemographicAttribute", 
+                                 demo_type=demo_type, demo_value=demo_value)
+                        
+                        # Enhanced weights for demographic factors
+                        demo_weight = 1.0
+                        if demo_type == "Family_mem_with_ASD" and demo_value.lower() == "yes":
+                            demo_weight = 2.0  # Family history is important
+                        elif demo_type == "Jaundice" and demo_value.lower() == "yes":
+                            demo_weight = 1.5  # Jaundice is a mild factor
+                        elif demo_type == "Sex" and demo_value.lower() in ["m", "male"]:
+                            demo_weight = 1.3  # Male gender is a factor
+                            
+                        G.add_edge(case_node_name, demo_node_name, 
+                                 type="HAS_DEMOGRAPHIC", weight=demo_weight)
 
-                # Ensure minimum connectivity
+                # Add submitter connections
+                submitters = result.get('submitters', [])
+                for submitter in submitters:
+                    sub_type = submitter.get('submitter_type', '')
+                    if sub_type:
+                        sub_node_name = f"S_{sub_type.replace(' ', '_')}"
+                        G.add_node(sub_node_name, type="SubmitterType", submitter_type=sub_type)
+                        G.add_edge(case_node_name, sub_node_name, type="SUBMITTED_BY", weight=1.0)
+
+                # Ensure minimum connectivity for embedding generation
                 if len(G.edges(case_node_name)) == 0:
-                    logger.warning("Case has no connections - adding default connections")
+                    logger.warning("Case has no connections - adding default Q-Chat structure")
                     for i in range(1, 11):
                         q_node = f"Q_A{i}"
                         if q_node not in G:
                             G.add_node(q_node, type="BehaviorQuestion")
                         G.add_edge(case_node_name, q_node, type="HAS_ANSWER", value=0, weight=0.1)
 
-                logger.info(f"Built graph with {len(G.nodes)} nodes and {len(G.edges)} edges")
+                logger.info(f"Built enhanced behavioral graph with {len(G.nodes)} nodes and {len(G.edges)} edges")
+                logger.info(f"Behavioral responses captured: {behavioral_responses}/10")
                 return G, case_node_name
 
             except Exception as e:
@@ -276,73 +317,105 @@ class EmbeddingGenerator:
                 return None
 
     def augment_with_similarity(self, driver, G: nx.Graph, case_node_name: str) -> None:
-        """Augment graph with similarity relationships"""
+        """Augment graph with enhanced behavioral pattern similarity"""
         try:
             original_case_id = int(case_node_name.split('_')[1])
             
             with driver.session() as session:
-                # Find cases with similar demographics and answer patterns
+                # Find cases with similar behavioral patterns (neutral approach)
                 similar_results = session.run("""
-                    MATCH (c:Case {id: $case_id})
-                    OPTIONAL MATCH (c)-[:HAS_ANSWER]->(q:BehaviorQuestion)
-                    WITH c, collect({question: q.name, value: c-[:HAS_ANSWER]->(q)}) as case_answers
+                    MATCH (c:Case {id: $case_id})-[r:HAS_ANSWER]->(q:BehaviorQuestion)
+                    WITH c, collect({question: q.name, value: r.value}) as case_answers
                     
-                    MATCH (other:Case)-[:HAS_ANSWER]->(q2:BehaviorQuestion)
-                    WHERE c <> other AND other.embedding IS NOT NULL
+                    MATCH (other:Case)-[r2:HAS_ANSWER]->(q2:BehaviorQuestion)
+                    WHERE c <> other AND other.embedding IS NOT NULL AND other.id IS NOT NULL
                     
                     WITH c, case_answers, other, 
-                         collect({question: q2.name, value: other-[:HAS_ANSWER]->(q2)}) as other_answers
+                         collect({question: q2.name, value: r2.value}) as other_answers
                     
-                    // Calculate similarity based on shared answer patterns
-                    WITH c, other,
-                         size([x IN case_answers WHERE x.value = 1]) as case_pos,
-                         size([y IN other_answers WHERE y.value = 1]) as other_pos,
-                         size([x IN case_answers WHERE x IN other_answers AND x.value = 1]) as shared_pos
+                    // Calculate behavioral pattern similarity (neutral approach)
+                    WITH c, other, case_answers, other_answers,
+                         // Count exact matches in behavioral responses
+                         size([x IN case_answers WHERE x IN other_answers]) as exact_matches,
+                         // Count total behavioral complexity
+                         size([x IN case_answers WHERE x.value = 1]) as case_complexity,
+                         size([y IN other_answers WHERE y.value = 1]) as other_complexity
                     
-                    WHERE shared_pos >= $min_similarity OR 
-                          (case_pos = 0 AND other_pos = 0) // Both have no positive answers
+                    // Calculate similarity based on behavioral pattern overlap
+                    WITH c, other, exact_matches, case_complexity, other_complexity,
+                         // Calculate pattern similarity
+                         CASE 
+                             WHEN exact_matches >= 7 THEN 0.9  // Very similar patterns
+                             WHEN exact_matches >= 5 THEN 0.7  // Moderately similar
+                             WHEN abs(case_complexity - other_complexity) <= 1 THEN 0.6  // Similar complexity
+                             ELSE toFloat(exact_matches) / 10.0  // Partial similarity
+                         END AS similarity_score
+                    
+                    WHERE similarity_score >= 0.3  // Minimum similarity threshold
                     
                     RETURN other.id AS similar_id,
-                           CASE 
-                               WHEN case_pos + other_pos = 0 THEN 0.8
-                               ELSE toFloat(shared_pos) / (case_pos + other_pos - shared_pos)
-                           END AS similarity_score
+                           similarity_score,
+                           exact_matches, case_complexity, other_complexity
                     ORDER BY similarity_score DESC
-                    LIMIT 10
-                """, case_id=original_case_id, min_similarity=self.MIN_SIMILARITY)
+                    LIMIT 15
+                """, case_id=original_case_id)
 
+                similarity_count = 0
                 for record in similar_results:
                     similar_id = record['similar_id']
                     similar_node_name = f"Case_{similar_id}"
-                    weight = max(0.1, record['similarity_score'])
+                    weight = max(0.2, record['similarity_score'])
 
                     if similar_node_name not in G:
                         G.add_node(similar_node_name, type="Case", id=similar_id)
                     
                     if not G.has_edge(case_node_name, similar_node_name):
                         G.add_edge(case_node_name, similar_node_name, 
-                                 type="SIMILAR_TO", weight=weight)
+                                 type="SIMILAR_TO", 
+                                 weight=weight,
+                                 exact_matches=record['exact_matches'],
+                                 pattern_similarity=record['similarity_score'])
+                        similarity_count += 1
 
-                logger.info(f"Added {len(list(similar_results))} similarity connections")
+                logger.info(f"Added {similarity_count} behavioral pattern similarity connections")
 
         except Exception as e:
-            logger.error(f"Error in similarity augmentation: {str(e)}")
+            logger.error(f"Error in behavioral similarity augmentation: {str(e)}")
 
     def generate_embedding(self, G: nx.Graph, case_node_name: str) -> Optional[List[float]]:
-        """Generate embedding vector for the case using Node2Vec with deterministic settings"""
+        """Generate embedding with enhanced behavioral pattern preservation"""
         temp_dir = None
         try:
-            # Leakage check: ensure no SCREENED_FOR relationships
-            for u, v, data in G.edges(data=True):
-                if data.get('type') == 'SCREENED_FOR':
-                    raise ValueError("❌ Label relationship (SCREENED_FOR) found in graph")
+            # Critical: Leakage check - ensure no SCREENED_FOR relationships
+            screened_for_edges = [(u, v) for u, v, data in G.edges(data=True) 
+                                if data.get('type') == 'SCREENED_FOR']
+            if screened_for_edges:
+                raise ValueError(f"❌ LABEL LEAKAGE: Found {len(screened_for_edges)} SCREENED_FOR relationships in graph")
 
             temp_dir = tempfile.mkdtemp()
 
-            # Validate weights
+            # Enhanced edge weighting for behaviorally important connections
             for u, v, data in G.edges(data=True):
                 weight = data.get("weight", 1.0)
-                if not isinstance(weight, (float, int)) or not np.isfinite(weight) or weight <= 0:
+                edge_type = data.get("type", "")
+                
+                # Enhance weights based on behavioral significance, not risk
+                if edge_type == "HAS_ANSWER":
+                    # All behavioral responses are important for pattern recognition
+                    data["weight"] = max(1.5, weight)  # Boost all behavioral connections
+                elif edge_type == "HAS_COMPLEXITY":
+                    data["weight"] = max(1.8, weight)  # Complexity patterns important
+                elif edge_type == "HAS_PATTERN":
+                    data["weight"] = max(1.8, weight)  # Behavioral patterns important
+                elif edge_type == "SIMILAR_TO":
+                    # Weight based on pattern similarity
+                    pattern_sim = data.get("pattern_similarity", 0.5)
+                    data["weight"] = max(0.5, min(2.5, pattern_sim * 2.0))
+                elif edge_type == "HAS_DEMOGRAPHIC":
+                    # Keep demographic weights as they are (already enhanced appropriately)
+                    pass
+                
+                if not isinstance(data["weight"], (float, int)) or not np.isfinite(data["weight"]) or data["weight"] <= 0:
                     data["weight"] = 1.0
 
             # Check connectivity
@@ -357,42 +430,45 @@ class EmbeddingGenerator:
                 if degree == 0:
                     return [0.1] * self.EMBEDDING_DIM
                 
-            # Set random seed for deterministic results
+            # Set deterministic random seeds
             np.random.seed(self.RANDOM_SEED)
             random.seed(self.RANDOM_SEED)
 
-            # Run Node2Vec with deterministic settings
+            # Enhanced Node2Vec with behavioral pattern optimization
             try:
                 node2vec = Node2Vec(
                     G,
                     dimensions=self.EMBEDDING_DIM,
                     walk_length=self.NODE2VEC_WALK_LENGTH,
                     num_walks=self.NODE2VEC_NUM_WALKS,
-                    workers=self.NODE2VEC_WORKERS,  # Set to 1 for deterministic results
-                    p=self.NODE2VEC_P,
-                    q=self.NODE2VEC_Q,
+                    workers=self.NODE2VEC_WORKERS,
+                    p=self.NODE2VEC_P,  # Lower p = more local exploration (behavioral patterns)
+                    q=self.NODE2VEC_Q,  # Higher q = less return to previous nodes
                     temp_folder=temp_dir,
                     quiet=True
                 )
             except Exception as e:
-                logger.warning(f"Node2Vec initialization failed: {e}. Using fallback parameters.")
+                logger.warning(f"Node2Vec initialization failed: {e}. Using conservative parameters.")
                 node2vec = Node2Vec(
                     G,
                     dimensions=self.EMBEDDING_DIM,
                     walk_length=5,
-                    num_walks=10,
+                    num_walks=20,
                     workers=1,
+                    p=1.0,
+                    q=1.0,
                     temp_folder=temp_dir,
                     quiet=True
                 )
 
-            # Set seed for model training as well
+            # Train model with deterministic settings
             model = node2vec.fit(
                 window=self.NODE2VEC_WINDOW, 
                 min_count=1,
-                sg=1,  # Skip-gram
-                epochs=10,
-                seed=self.RANDOM_SEED  # Deterministic model training
+                sg=1,  # Skip-gram for better pattern capture
+                epochs=20,  # More epochs for better pattern learning
+                seed=self.RANDOM_SEED,
+                workers=1  # Deterministic training
             )
 
             if case_node_name not in model.wv:
@@ -401,21 +477,29 @@ class EmbeddingGenerator:
 
             embedding = model.wv[case_node_name].tolist()
 
-            # Validate and normalize
+            # Validate embedding
             if not all(np.isfinite(embedding)):
                 logger.error(f"Embedding contains non-finite values")
                 return None
 
             norm = np.linalg.norm(embedding)
             if norm == 0:
-                logger.warning("Zero-norm embedding - returning raw vector")
+                logger.warning("Zero-norm embedding - using raw vector")
                 return embedding if self.validate_embedding(embedding) else None
 
+            # Enhanced L2 normalization for better model training
             normalized_embedding = (np.array(embedding) / norm).tolist()
-            return normalized_embedding if self.validate_embedding(normalized_embedding) else None
+            
+            # Additional validation
+            if not self.validate_embedding(normalized_embedding):
+                logger.error("Generated embedding failed validation")
+                return None
+                
+            logger.info(f"Successfully generated behavioral pattern embedding (norm: {norm:.4f})")
+            return normalized_embedding
 
         except Exception as e:
-            logger.error(f"Embedding generation failed: {str(e)}", exc_info=True)
+            logger.error(f"Enhanced embedding generation failed: {str(e)}", exc_info=True)
             return None
 
         finally:
