@@ -1,4 +1,12 @@
 import streamlit as st
+
+# Set page config FIRST - before any other Streamlit commands
+st.set_page_config(
+    page_title="NeuroCypher ASD",
+    page_icon="🧠",
+    layout="wide"
+)
+
 from neo4j import GraphDatabase
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -904,12 +912,6 @@ def reinsert_labels_from_csv(csv_url: str):
 
 # === Streamlit UI ===
 def main():
-    st.set_page_config(
-        page_title="NeuroCypher ASD",
-        page_icon="🧠",
-        layout="wide"
-    )
-    
     st.title("🧠 NeuroCypher ASD")
     st.markdown("""
         <i>Autism Spectrum Disorder detection using graph embeddings</i>
@@ -1241,4 +1243,4 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                             st.error(f"❌ Query failed: {str(e)}")
 
 if __name__ == "__main__":
-    main()
+    main()    main()
