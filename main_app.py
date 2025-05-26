@@ -1046,9 +1046,10 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
                         st.error(f"❌ Embedding generation failed with error:\n{result.stderr}")
                         st.stop()
 
-                embedding = extract_user_embedding(temp_upload_id)
-                if embedding is None:
-                    st.error("Failed to extract embedding")
+                try:
+                    embedding = np.array(json.loads(result.stdout)).reshape(1, -1)
+                except Exception as e:
+                    st.error(f"❌ Failed to extract embedding from stdout: {str(e)}")
                     st.stop()
 
                 # Make prediction
