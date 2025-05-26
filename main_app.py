@@ -118,62 +118,90 @@ logger = logging.getLogger(__name__)
 # === Environment Setup ===
 load_dotenv()
 
-# Validate Environment Variables
-required_env_vars = ["NEO4J_URI", "NEO4J_USER", "NEO4J_PASSWORD", "OPENAI_API_KEY"]
-missing_vars = [var for var in required_env_vars if not os.getenv(var)]
-if missing_vars:
-    st.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-    st.stop()
+# === Initialize Services ===
+@st.cache_resource
+def get_neo4j_service():
+    """Initialize Neo4j service with lazy loading"""
+    try:
+        uri = os.getenv("NEO4J_URI")
+        user = os.getenv("NEO4J_USER") 
+        password = os.getenv("NEO4J_PASSWORD")
+        
+        if not all([uri, user, password]):
+            st.error("❌ Missing Neo4j environment variables")
+            return None
+            
+        return Neo4jService(uri, user, password)
+    except Exception as e:
+        st.error(f"❌ Neo4j connection failed: {str(e)}")
+        return None
 
-NEO4J_URI = os.getenv("NEO4J_URI")
-NEO4J_USER = os.getenv("NEO4J_USER")
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+@st.cache_resource
+def get_openai_client():
+    """Initialize OpenAI client with lazy loading"""
+    try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            st.error("❌ Missing OpenAI API key")
+            return None
+        return OpenAI(api_key=api_key)
+    except Exception as e:
+        st.error(f"❌ OpenAI client initialization failed: {str(e)}")
+        return None
 
 # === Neo4j Service Class ===
 class Neo4jService:
     def __init__(self, uri: str, user: str, password: str):
-        try:
-            self.driver = GraphDatabase.driver(uri, auth=(user, password))
-            # Test connection
-            with self.driver.session() as session:
-                session.run("RETURN 1").single()
-            logger.info("✅ Neo4j connection successful")
-        except Exception as e:
-            logger.error(f"❌ Neo4j connection failed: {str(e)}")
-            raise
+        self.uri = uri
+        self.user = user
+        self.password = password
+        self.driver = None
+
+    def get_driver(self):
+        """Lazy initialization of Neo4j driver"""
+        if self.driver is None:
+            try:
+                self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
+                # Test connection
+                with self.driver.session() as session:
+                    session.run("RETURN 1").single()
+                logger.info("✅ Neo4j connection successful")
+            except Exception as e:
+                logger.error(f"❌ Neo4j connection failed: {str(e)}")
+                raise
+        return self.driver
 
     @contextmanager
     def session(self):
-        with self.driver.session() as session:
+        driver = self.get_driver()
+        with driver.session() as session:
             yield session
 
     def close(self):
-        if hasattr(self, 'driver'):
+        if self.driver:
             self.driver.close()
-
-# === Initialize Services ===
-@st.cache_resource
-def get_neo4j_service():
-    return Neo4jService(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD)
-
-@st.cache_resource
-def get_openai_client():
-    return OpenAI(api_key=OPENAI_API_KEY)
-
-try:
-    neo4j_service = get_neo4j_service()
-    client = get_openai_client()
-except Exception as e:
-    st.error(f"❌ Service initialization failed: {str(e)}")
-    st.stop()
+            self.driver = None
 
 # === Helper Functions ===
+def get_services():
+    """Get services with validation"""
+    neo4j_service = get_neo4j_service()
+    client = get_openai_client()
+    
+    if neo4j_service is None or client is None:
+        return None, None
+    
+    return neo4j_service, client
+
 def safe_neo4j_operation(func):
     """Decorator for Neo4j operations with error handling"""
     def wrapper(*args, **kwargs):
         try:
-            return func(*args, **kwargs)
+            neo4j_service, _ = get_services()
+            if neo4j_service is None:
+                st.error("❌ Neo4j service not available")
+                return None
+            return func(neo4j_service, *args, **kwargs)
         except Exception as e:
             st.error(f"Neo4j operation failed: {str(e)}")
             logger.error(f"Neo4j operation failed: {str(e)}")
@@ -181,7 +209,7 @@ def safe_neo4j_operation(func):
     return wrapper
 
 @safe_neo4j_operation
-def check_embedding_dimensions():
+def check_embedding_dimensions(neo4j_service):
     with neo4j_service.session() as session:
         result = session.run("""
             MATCH (c:Case) WHERE c.embedding IS NOT NULL
@@ -199,7 +227,7 @@ def check_embedding_dimensions():
             st.success("✅ All embeddings have correct size (128).")
 
 @safe_neo4j_operation
-def find_cases_missing_labels() -> list:
+def find_cases_missing_labels(neo4j_service) -> list:
     with neo4j_service.session() as session:
         result = session.run("""
             MATCH (c:Case)
@@ -215,7 +243,7 @@ def find_cases_missing_labels() -> list:
         return missing_cases
 
 @safe_neo4j_operation
-def refresh_screened_for_labels(csv_url: str):
+def refresh_screened_for_labels(neo4j_service, csv_url: str):
     """Refresh all SCREENED_FOR relationships from CSV with batch processing"""
     try:
         # Load CSV data
@@ -297,7 +325,7 @@ def refresh_screened_for_labels(csv_url: str):
 
 # === Data Insertion ===
 @safe_neo4j_operation
-def insert_user_case(row: pd.Series, upload_id: str) -> str:
+def insert_user_case(neo4j_service, row: pd.Series, upload_id: str) -> str:
     queries = []
 
     queries.append((
@@ -363,7 +391,7 @@ def insert_user_case(row: pd.Series, upload_id: str) -> str:
     return upload_id
 
 @safe_neo4j_operation
-def remove_screened_for_labels():
+def remove_screened_for_labels(neo4j_service):
     with neo4j_service.session() as session:
         # Remove all label-related relationships and properties
         session.run("""
@@ -414,6 +442,11 @@ def generate_embedding_for_case(upload_id: str) -> bool:
 # === Natural Language to Cypher ===
 def nl_to_cypher(question: str) -> Optional[str]:
     """Translates natural language to Cypher using OpenAI"""
+    _, client = get_services()
+    if client is None:
+        st.error("❌ OpenAI client not available")
+        return None
+        
     prompt = f"""
     You are a Cypher expert working with a Neo4j Knowledge Graph about toddlers and autism.
 
@@ -972,67 +1005,51 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
     with tab1:
         st.header("🤖 ASD Detection Model")
 
-        # First check for missing labels
-        missing_labels = find_cases_missing_labels()
-        if missing_labels:
-            st.warning(f"⚠️ There are {len(missing_labels)} cases without SCREENED_FOR label.")
-            if st.button("🔄 Refresh All Labels from CSV"):
+        # Quick status check
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔍 Check System Status"):
+                with st.spinner("Checking system status..."):
+                    check_embedding_dimensions()
+                    missing_labels = find_cases_missing_labels()
+                    
+        with col2:
+            if st.button("🔄 Fix Labels from CSV"):
                 csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
                 with st.spinner("Refreshing labels from CSV..."):
-                    refresh_screened_for_labels(csv_url)
-                    st.rerun()  # Refresh the UI
-        else:
-            st.success("✅ All cases have SCREENED_FOR labels.")
-            
-            if st.button("🔄 Fix Missing Labels from CSV"):
-                csv_url = "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-                with st.spinner("Refreshing labels from CSV..."):
-                    refresh_screened_for_labels(csv_url)
+                    neo4j_service, _ = get_services()
+                    if neo4j_service:
+                        refresh_screened_for_labels(neo4j_service, csv_url)
+                    st.success("✅ Labels refreshed!")
                     st.rerun()
 
-        # Train model button
-        if st.button("🔄 Train/Refresh Model"):
+        # Model training section
+        st.subheader("🏋️‍♀️ Train Model")
+        
+        if st.button("🚀 Train/Refresh Model", type="primary"):
             with st.spinner("Training model with leakage protection..."):
-
-                # Check kg_builder_2.py exists
-                script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kg_builder_2.py")
-                if not os.path.exists(script_path):
-                    st.error(f"❌ kg_builder_2.py not found at {script_path}")
-                else:
-                    try:
-                        # Increase timeout to 20 minutes
-                        timeout = 1200  # 20 * 60
-                        result = subprocess.run(
-                            [sys.executable, script_path, "--no-labels"],
-                            capture_output=True,
-                            text=True,
-                            timeout=timeout
+                try:
+                    results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
+                    if results:
+                        st.session_state.model_results = results
+                        st.session_state.model_trained = True
+                        st.success("✅ Training completed successfully!")
+                        # Force immediate display of results
+                        evaluate_model(
+                            results["model"],
+                            results["X_test"], 
+                            results["y_test"]
                         )
-
-                        if result.returncode != 0:
-                            st.error(f"❌ Embedding generation failed:\n{result.stderr}")
-                            st.stop()
-                        else:
-                            st.success("✅ Embeddings generated successfully (no-labels)")
-
-                            results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
-                            if results:
-                                st.session_state.model_results = results
-                                st.session_state.model_trained = True
-                                st.success("✅ Training completed successfully.")
-                                evaluate_model(
-                                    results["model"],
-                                    results["X_test"], 
-                                    results["y_test"]
-                                )
-
-                    except subprocess.TimeoutExpired:
-                        st.error("❌ Embedding generation timed out after 20 minutes")
-                    except Exception as e:
-                        st.error(f"❌ Unexpected error during training: {str(e)}")
+                    else:
+                        st.error("❌ Training failed - please check the logs above")
+                        
+                except Exception as e:
+                    st.error(f"❌ Training error: {str(e)}")
 
         # Show evaluation if model already trained
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
+            st.success("🎯 **Model Available** - Displaying evaluation metrics:")
             evaluate_model(
                 st.session_state.model_results["model"],
                 st.session_state.model_results["X_test"],
@@ -1217,30 +1234,34 @@ Also, [read this description](https://raw.githubusercontent.com/GiorgosBouh/llm2
             if cypher:
                 st.code(cypher, language="cypher")
                 if st.button("▶️ Execute Query"):
-                    with neo4j_service.session() as session:
-                        try:
-                            start_time = time.time()
-                            results = session.run(cypher).data()
-                            execution_time = time.time() - start_time
-                            
-                            if results:
-                                st.success(f"✅ Query executed in {execution_time:.2f} seconds")
-                                df_results = pd.DataFrame(results)
-                                st.dataframe(df_results)
+                    neo4j_service, _ = get_services()
+                    if neo4j_service:
+                        with neo4j_service.session() as session:
+                            try:
+                                start_time = time.time()
+                                results = session.run(cypher).data()
+                                execution_time = time.time() - start_time
                                 
-                                # Download option for large results
-                                if len(df_results) > 10:
-                                    csv = df_results.to_csv(index=False)
-                                    st.download_button(
-                                        label="📥 Download Results as CSV",
-                                        data=csv,
-                                        file_name=f"query_results_{int(time.time())}.csv",
-                                        mime="text/csv"
-                                    )
-                            else:
-                                st.info("📭 Query executed successfully but returned no results")
-                        except Exception as e:
-                            st.error(f"❌ Query failed: {str(e)}")
+                                if results:
+                                    st.success(f"✅ Query executed in {execution_time:.2f} seconds")
+                                    df_results = pd.DataFrame(results)
+                                    st.dataframe(df_results)
+                                    
+                                    # Download option for large results
+                                    if len(df_results) > 10:
+                                        csv = df_results.to_csv(index=False)
+                                        st.download_button(
+                                            label="📥 Download Results as CSV",
+                                            data=csv,
+                                            file_name=f"query_results_{int(time.time())}.csv",
+                                            mime="text/csv"
+                                        )
+                                else:
+                                    st.info("📭 Query executed successfully but returned no results")
+                            except Exception as e:
+                                st.error(f"❌ Query failed: {str(e)}")
+                    else:
+                        st.error("❌ Neo4j service not available")
 
 if __name__ == "__main__":
-    main()   
+    main()
