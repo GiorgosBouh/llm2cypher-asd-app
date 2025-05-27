@@ -982,12 +982,14 @@ def main():
         st.markdown("""
         ### 📘 About This Project
 
-        This project is designed as a Graph-RAG (Retrieval-Augmented Generation) system and acts as an intelligent agent for Autism Spectrum Disorder screening support. It was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **Dr. Konstantinos Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
+        This project is designed as a Graph-RAG (Retrieval-Augmented Generation) system and acts as an intelligent agent for Autism Spectrum Disorder screening support. It was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **assoc. prof. K. Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
 
         **Research Project:**  
         *"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"*
         ---
-        *© 2024 Georgios Bouchouras PhD. All rights reserved. This software and associated documentation are proprietary and confidential. Unauthorized reproduction or modification is strictly prohibited without prior written consent from the copyright holders.*
+        © 2024 Georgios Bouchouras, PhD.
+        This software and its documentation are licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0).
+        You are free to share and adapt the material for any purpose, provided appropriate credit is given. No warranties are provided.        
         ---
         ### 🧪 Core Capabilities
 
