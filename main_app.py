@@ -1660,7 +1660,9 @@ def main():
                 - **A9**: Does your child use simple gestures such as waving to say goodbye?
                 - **A10**: Does your child stare at nothing with no apparent purpose?
             
-            - Responses to the 10 questions are mapped to binary values (1 or 0) based on ASD-relevant patterns: For A1–A9, responses of Sometimes, Rarely, or Never are scored as 1. 
+            - Responses to the 10 questions are mapped to binary values (1 or 0) based on ASD-relevant patterns.
+            - For A1–A9, responses of Sometimes, Rarely, or Never are scored as 1. 
+            - For A1–A9, responses of Always or Usually are scored as 0.
             - For A10, Always, Usually, or Sometimes are scored as 1. 
             - For the Q-10 Chat, a total score above 3 suggests potential ASD traits.
             - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
