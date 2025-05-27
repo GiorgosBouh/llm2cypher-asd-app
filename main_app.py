@@ -1015,7 +1015,7 @@ def main():
         [Download CSV Template](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)
 
         **📖 Documentation**  
-        [View Data Description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)
+        [View Data Description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.pdf)
 
         ---
         ### 🎯 Workflow
