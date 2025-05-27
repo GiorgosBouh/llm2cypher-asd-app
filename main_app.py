@@ -1660,7 +1660,7 @@ def main():
                 - **A8**: Would you describe your child's first words as normal in their development?
                 - **A9**: Does your child use simple gestures such as waving to say goodbye?
                 - **A10**: Does your child stare at nothing with no apparent purpose?
-
+            - **A1-A10: Items within Q-Chat-10  in which questions possible answers : “Always, Usually, Sometimes, Rarly & Never” items’ values are mapped to “1” or “0” in the dataset. For questions 1-9 (A1-A9) in Q-chat-10,  if the respose was  Sometimes / Rarly / Never “1” is assigned to the question (A1-A9). However, for question 10 (A10), if the respose was Always / Usually / Sometimes then “1” is assigned to that question. If the user obtained More than 3 Add points together for all ten questions. If your child scores more than 3 (Q-chat-10- score) then there is a potential ASD traits otherwise no ASD traits are observed.
             - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
             - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
             - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
