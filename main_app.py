@@ -986,7 +986,8 @@ def main():
 
         **Research Project:**  
         *"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"*
-        *"© 2024 Georgios Bouchouras PhD. All rights reserved. This software and associated documentation are proprietary and confidential. Unauthorized reproduction or modification is strictly prohibited without prior written consent from the copyright holders."*
+        ---
+        *© 2024 Georgios Bouchouras PhD. All rights reserved. This software and associated documentation are proprietary and confidential. Unauthorized reproduction or modification is strictly prohibited without prior written consent from the copyright holders.*
         ---
         ### 🧪 Core Capabilities
 
@@ -1659,7 +1660,9 @@ def main():
                 - **A9**: Does your child use simple gestures such as waving to say goodbye?
                 - **A10**: Does your child stare at nothing with no apparent purpose?
             
-            - **A1–A10 represent the 10 items of the Q-Chat-10. Responses are mapped to binary values (1 or 0) based on ASD-relevant patterns: For A1–A9, responses of Sometimes, Rarely, or Never are scored as 1. For A10, Always, Usually, or Sometimes are scored as 1. A total score above 3 suggests potential ASD traits; a score of 3 or less indicates no observed traits.
+            - Responses to the 10 questions are mapped to binary values (1 or 0) based on ASD-relevant patterns: For A1–A9, responses of Sometimes, Rarely, or Never are scored as 1. 
+            - For A10, Always, Usually, or Sometimes are scored as 1. 
+            - For the Q-10 Chat, a total score above 3 suggests potential ASD traits.
             - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
             - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
             - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
