@@ -987,9 +987,12 @@ def main():
         **Research Project:**  
         *"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"*
         ---
-        © 2024 Georgios Bouchouras, PhD.
-        This software and its documentation are licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0).
-        You are free to share and adapt the material for any purpose, provided appropriate credit is given. No warranties are provided.        
+        <span style="font-weight: normal;">
+        © 2024 Georgios Bouchouras, PhD.<br>
+        This software and its documentation are licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0).<br>
+        You are free to share and adapt the material for any purpose, provided appropriate credit is given. No warranties are provided.
+        </span>
+        """, unsafe_allow_html=True)       
         ---
         ### 🧪 Core Capabilities
 
