@@ -1205,18 +1205,27 @@ def main():
                 if st.button("🚀 Train/Refresh Model", type="primary", use_container_width=True):
                     with st.spinner("Training model with leakage protection..."):
                         try:
-                            results = train_asd_detection_model(cache_key=str(uuid.uuid4()))
+                            # Use consistent cache key instead of random UUID
+                            cache_key = "asd_model_v1"
+                            results = train_asd_detection_model(cache_key=cache_key)
                             if results:
+                                # Set session state
                                 st.session_state.model_results = results
                                 st.session_state.model_trained = True
                                 st.success("✅ Training completed successfully!")
-                                # ✅ FIXED: Removed duplicate evaluation call, added rerun instead
-                                st.rerun()
+                                
+                                # Show success message and let user see results without rerun
+                                st.info("📊 Model results will appear below...")
+                                
+                                # Don't call st.rerun() - let the natural flow show results
+                                
                             else:
                                 st.error("❌ Training failed - please check the logs above")
                                 
                         except Exception as e:
                             st.error(f"❌ Training error: {str(e)}")
+                            import traceback
+                            st.error(f"Full error: {traceback.format_exc()}")
 
         # Show evaluation if model already trained
         if st.session_state.get("model_trained") and st.session_state.get("model_results"):
