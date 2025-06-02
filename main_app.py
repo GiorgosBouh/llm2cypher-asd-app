@@ -739,8 +739,16 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
             raise FileNotFoundError(f"kg_builder_2.py not found at {script_path}")
 
         st.info("🔄 Generating graph embeddings without label information...")
+        env = os.environ.copy()
+        env.update({
+            "NEO4J_URI": os.getenv("NEO4J_URI"),
+            "NEO4J_USER": os.getenv("NEO4J_USER"),
+            "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD")
+        })
+
         result = subprocess.run(
             [sys.executable, script_path, "--no-labels"],
+            env=env,  # ← This passes the environment variables
             capture_output=True,
             text=True,
             timeout=Config.EMBEDDING_GENERATION_TIMEOUT
