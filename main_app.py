@@ -982,7 +982,7 @@ def main():
         st.markdown("""
         ### 📘 About This Project
 
-        This project was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **Dr. Konstantinos Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
+        This project is designed as a Graph-RAG (Retrieval-Augmented Generation) system and acts as an intelligent agent for Autism Spectrum Disorder screening support. It was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **Dr. Konstantinos Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
 
         **Research Project:**  
         *"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"*
@@ -1048,14 +1048,12 @@ def main():
             # Overview row
             col1, col2 = st.columns([1, 3])
             with col1:
-                st.image("https://cdn-icons-png.flaticon.com/512/3004/3004458.png", width=100)
+                st.image("https://cdn-icons-png.flaticon.com/512/4712/4712139.png", width=100)
             with col2:
                 st.markdown("""
                 **Welcome to the ASD Detection Training Center**
                 
-                This advanced machine learning system uses graph embeddings and XGBoost to detect 
-                Autism Spectrum Disorder traits in toddlers based on the Q-Chat-10 screening questionnaire 
-                and demographic information.
+                This advanced system uses graph embeddings and XGBoost to detect Autism Spectrum Disorder traits in toddlers, based on the Q-Chat-10 and demographic data. Graph embeddings capture the underlying relationships between cases and features, enabling more accurate, context-aware, and explainable predictions compared to traditional models.
                 """)
             
             st.markdown("---")
@@ -1136,10 +1134,10 @@ def main():
             
             with perf_col2:
                 st.success("""
-                **🎯 Expected Results**
-                - ROC AUC: 0.85-0.95
-                - Precision: 0.80-0.90
-                - Recall: 0.75-0.90
+                **🎯 Model Output**
+                - Comprehensive evaluation metrics
+                - Performance visualizations
+                - Cross-validation results
                 """)
             
             with perf_col3:
