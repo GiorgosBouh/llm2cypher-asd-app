@@ -982,11 +982,14 @@ def main():
         st.markdown("""
         ### 📘 About This Project
 
-        This project is designed as a Graph-RAG (Retrieval-Augmented Generation) system and acts as an intelligent agent for Autism Spectrum Disorder screening support. It was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **Dr. Konstantinos Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
+        This project is designed as a Graph-RAG (Retrieval-Augmented Generation) system and acts as an intelligent agent for Autism Spectrum Disorder screening support. It was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **assoc. prof. K. Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
 
         **Research Project:**  
         *"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"*
-
+        ---
+        © 2024 Georgios Bouchouras, PhD.
+        This software and its documentation are licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0).
+        You are free to share and adapt the material for any purpose, provided appropriate credit is given. No warranties are provided.        
         ---
         ### 🧪 Core Capabilities
 
@@ -1012,7 +1015,7 @@ def main():
         [Download CSV Template](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)
 
         **📖 Documentation**  
-        [View Data Description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)
+        [View Data Description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.pdf)
 
         ---
         ### 🎯 Workflow
@@ -1658,7 +1661,12 @@ def main():
                 - **A8**: Would you describe your child's first words as normal in their development?
                 - **A9**: Does your child use simple gestures such as waving to say goodbye?
                 - **A10**: Does your child stare at nothing with no apparent purpose?
-
+            
+            - Responses to the 10 questions are mapped to binary values (1 or 0) based on ASD-relevant patterns.
+            - For A1–A9, responses of Sometimes, Rarely, or Never are scored as 1. 
+            - For A1–A9, responses of Always or Usually are scored as 0.
+            - For A10, Always, Usually, or Sometimes are scored as 1. 
+            - For the Q-10 Chat, a total score above 3 suggests potential ASD traits.
             - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
             - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
             - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
