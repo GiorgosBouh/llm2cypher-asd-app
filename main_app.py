@@ -982,14 +982,11 @@ def main():
         st.markdown("""
         ### 📘 About This Project
 
-        This project is designed as a Graph-RAG (Retrieval-Augmented Generation) system and acts as an intelligent agent for Autism Spectrum Disorder screening support. It was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **assoc. prof. K. Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
+        This project was developed by [**Dr. Georgios Bouchouras**](https://giorgosbouh.github.io/github-portfolio/), in collaboration with **Dimitrios Doumanas MSc**, and **Dr. Konstantinos Kotis** at the [**Intelligent Systems Research Laboratory (i-Lab), University of the Aegean**](https://i-lab.aegean.gr/).
 
         **Research Project:**  
         *"Development of Intelligent Systems for the Early Detection and Management of Developmental Disorders: Combining Biomechanics and Artificial Intelligence"*
-        ---
-        © 2024 Georgios Bouchouras, PhD.
-        This software and its documentation are licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0).
-        You are free to share and adapt the material for any purpose, provided appropriate credit is given. No warranties are provided.        
+
         ---
         ### 🧪 Core Capabilities
 
@@ -1015,7 +1012,7 @@ def main():
         [Download CSV Template](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_3_test_39.csv)
 
         **📖 Documentation**  
-        [View Data Description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.pdf)
+        [View Data Description](https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_data_description.docx)
 
         ---
         ### 🎯 Workflow
@@ -1051,12 +1048,14 @@ def main():
             # Overview row
             col1, col2 = st.columns([1, 3])
             with col1:
-                st.image("https://cdn-icons-png.flaticon.com/512/4712/4712139.png", width=100)
+                st.image("https://cdn-icons-png.flaticon.com/512/3004/3004458.png", width=100)
             with col2:
                 st.markdown("""
                 **Welcome to the ASD Detection Training Center**
                 
-                This advanced system uses graph embeddings and XGBoost to detect Autism Spectrum Disorder traits in toddlers, based on the Q-Chat-10 and demographic data. Graph embeddings capture the underlying relationships between cases and features, enabling more accurate, context-aware, and explainable predictions compared to traditional models.
+                This advanced machine learning system uses graph embeddings and XGBoost to detect 
+                Autism Spectrum Disorder traits in toddlers based on the Q-Chat-10 screening questionnaire 
+                and demographic information.
                 """)
             
             st.markdown("---")
@@ -1137,10 +1136,10 @@ def main():
             
             with perf_col2:
                 st.success("""
-                **🎯 Model Output**
-                - Comprehensive evaluation metrics
-                - Performance visualizations
-                - Cross-validation results
+                **🎯 Expected Results**
+                - ROC AUC: 0.85-0.95
+                - Precision: 0.80-0.90
+                - Recall: 0.75-0.90
                 """)
             
             with perf_col3:
@@ -1661,12 +1660,7 @@ def main():
                 - **A8**: Would you describe your child's first words as normal in their development?
                 - **A9**: Does your child use simple gestures such as waving to say goodbye?
                 - **A10**: Does your child stare at nothing with no apparent purpose?
-            
-            - Responses to the 10 questions are mapped to binary values (1 or 0) based on ASD-relevant patterns.
-            - For A1–A9, responses of Sometimes, Rarely, or Never are scored as 1. 
-            - For A1–A9, responses of Always or Usually are scored as 0.
-            - For A10, Always, Usually, or Sometimes are scored as 1. 
-            - For the Q-10 Chat, a total score above 3 suggests potential ASD traits.
+
             - **DemographicAttribute**: Characteristics like `Sex`, `Ethnicity`, `Jaundice`, `Family_mem_with_ASD`.
             - **SubmitterType**: Who completed the questionnaire (e.g., Parent, Health worker).
             - **ASD_Trait**: Whether the case was labeled as showing ASD traits (`Yes` or `No`).
