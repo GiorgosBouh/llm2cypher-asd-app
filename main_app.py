@@ -999,6 +999,10 @@ def main():
         This software and its documentation are licensed under the Creative Commons Attribution 4.0 International License (CC BY 4.0).
         You are free to share and adapt the material for any purpose, provided appropriate credit is given. No warranties are provided.        
         ---
+        🚨 **EU AI ACT COMPLIANCE NOTICE** 🚨
+
+        **This system is currently NOT compliant with EU AI Act requirements and should NOT be used for medical decision-making in the EU.**
+        ---
         ### 🧪 Core Capabilities
 
         **🧠 Graph-Based AI**
