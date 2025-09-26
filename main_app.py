@@ -44,6 +44,21 @@ from xgboost import XGBClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
 import json
 
+# === Environment (.env) – place this right after imports, before any use of os.getenv ===
+from dotenv import load_dotenv, find_dotenv
+import os
+
+# Load the .env from the current working dir and override any existing env
+load_dotenv(find_dotenv(usecwd=True), override=True)
+
+# Read once and reuse everywhere (no scattered os.getenv calls)
+NEO4J_URI = os.getenv("NEO4J_URI") or "neo4j+s://1f5f8a14.databases.neo4j.io"
+NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
+NEO4J_DB = os.getenv("NEO4J_DB", "neo4j")
+
+
+
 def call_embedding_generator(upload_id: str) -> bool:
     """Generate embedding for a single case using subprocess with enhanced error handling"""
     try:
@@ -115,21 +130,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# === Environment Setup ===
-load_dotenv()
 
 # === Initialize Services ===
 @st.cache_resource
-def get_neo4j_service():
-    """Initialize Neo4j service with lazy loading"""
+def get_neo4j_service(uri=NEO4J_URI, user=NEO4J_USER, password=NEO4J_PASSWORD, database=NEO4J_DB):
     try:
-        uri = os.getenv("NEO4J_URI")
-        user = os.getenv("NEO4J_USER") 
-        password = os.getenv("NEO4J_PASSWORD")
-        
-        if not all([uri, user, password]):
-            st.error("❌ Missing Neo4j environment variables")
-            return None
+        return Neo4jService(uri, user, password, database)
+    except Exception as e:
+        st.error(f"❌ Neo4j connection failed: {str(e)}")
+        return None
             
         return Neo4jService(uri, user, password)
     except Exception as e:
