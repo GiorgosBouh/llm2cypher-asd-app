@@ -10,9 +10,16 @@ import logging
 from typing import List, Optional, Tuple, Dict, Any
 import shutil
 import json
-from dotenv import load_dotenv
 import pandas as pd
+import pathlib
+APP_DIR = pathlib.Path(__file__).resolve().parent
+from dotenv import load_dotenv
 
+# Load .env that sits next to main_app.py
+load_dotenv(APP_DIR.joinpath(".env"))
+
+# Aura default database name
+NEO4J_DB = os.getenv("NEO4J_DB", "neo4j")
 # Set random seeds for deterministic results
 np.random.seed(42)
 import random

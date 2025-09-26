@@ -43,7 +43,6 @@ from sklearn.impute import SimpleImputer
 from xgboost import XGBClassifier
 from imblearn.pipeline import Pipeline as ImbPipeline
 import json
-
 def call_embedding_generator(upload_id: str) -> bool:
     """Generate embedding for a single case using subprocess with enhanced error handling"""
     try:
@@ -54,13 +53,13 @@ def call_embedding_generator(upload_id: str) -> bool:
             st.error(f"❌ Embedding generator script not found at: {builder_path}")
             return False
 
-        # Prepare environment variables
+        # Prepare environment variables (include DB)
         env = os.environ.copy()
-        env.update({
+        eenv.update({
             "NEO4J_URI": os.getenv("NEO4J_URI"),
             "NEO4J_USER": os.getenv("NEO4J_USER"),
             "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD"),
-            "PYTHONPATH": os.path.dirname(script_dir)
+            "NEO4J_DB": os.getenv("NEO4J_DB", "neo4j"),
         })
 
         # Run the process with timeout
@@ -121,17 +120,27 @@ load_dotenv()
 # === Initialize Services ===
 @st.cache_resource
 def get_neo4j_service():
-    """Initialize Neo4j service with lazy loading"""
+    """Initialize Neo4j service with lazy loading (Aura-ready)."""
     try:
         uri = os.getenv("NEO4J_URI")
-        user = os.getenv("NEO4J_USER") 
+        user = os.getenv("NEO4J_USER")
         password = os.getenv("NEO4J_PASSWORD")
-        
+        db = os.getenv("NEO4J_DB", "neo4j")
+
         if not all([uri, user, password]):
-            st.error("❌ Missing Neo4j environment variables")
+            st.error("❌ Missing Neo4j environment variables (NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD).")
             return None
-            
-        return Neo4jService(uri, user, password)
+
+        svc = Neo4jService(uri=uri, user=user, password=password, database=db)
+        # verify once so we fail fast with a clear error in the UI
+        try:
+            with svc.session() as s:
+                s.run("RETURN 1").single()
+        except Exception as e:
+            st.exception(e)
+            return None
+
+        return svc
     except Exception as e:
         st.error(f"❌ Neo4j connection failed: {str(e)}")
         return None
@@ -151,21 +160,22 @@ def get_openai_client():
 
 # === Neo4j Service Class ===
 class Neo4jService:
-    def __init__(self, uri: str, user: str, password: str):
+    def __init__(self, uri: str, user: str, password: str, database: str | None = None):
         self.uri = uri
         self.user = user
         self.password = password
+        self.database = database or os.getenv("NEO4J_DB", "neo4j")
         self.driver = None
 
     def get_driver(self):
-        """Lazy initialization of Neo4j driver"""
+        """Lazy init of Neo4j driver with Aura TLS (handled by neo4j+s)."""
         if self.driver is None:
             try:
                 self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
-                # Test connection
-                with self.driver.session() as session:
+                # Verify connectivity on the *target database*
+                with self.driver.session(database=self.database) as session:
                     session.run("RETURN 1").single()
-                logger.info("✅ Neo4j connection successful")
+                logger.info(f"✅ Neo4j connection successful (db={self.database})")
             except Exception as e:
                 logger.error(f"❌ Neo4j connection failed: {str(e)}")
                 raise
@@ -173,8 +183,9 @@ class Neo4jService:
 
     @contextmanager
     def session(self):
+        """Always open a session bound to the configured database."""
         driver = self.get_driver()
-        with driver.session() as session:
+        with driver.session(database=self.database) as session:
             yield session
 
     def close(self):
@@ -743,7 +754,8 @@ def train_asd_detection_model(cache_key: str) -> Optional[dict]:
         env.update({
             "NEO4J_URI": os.getenv("NEO4J_URI"),
             "NEO4J_USER": os.getenv("NEO4J_USER"),
-            "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD")
+            "NEO4J_PASSWORD": os.getenv("NEO4J_PASSWORD"),
+            "NEO4J_DB": os.getenv("NEO4J_DB", "neo4j"),
         })
 
         result = subprocess.run(
@@ -983,7 +995,10 @@ def main():
                         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
                         border-radius: 10px; color: white;">
                 <h3 style="margin: 0;">🔗 System Status</h3>
-                <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">Connected to: {os.getenv('NEO4J_URI')}</p>
+                <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">
+                    Connected to: {os.getenv('NEO4J_URI')}<br/>
+                    DB: {os.getenv('NEO4J_DB', 'neo4j')}
+                </p>
             </div>
         """, unsafe_allow_html=True)
         
