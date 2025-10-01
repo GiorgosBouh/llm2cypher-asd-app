@@ -48,14 +48,15 @@ import json
 from dotenv import load_dotenv, find_dotenv
 import os
 
-# Load the .env from the current working dir and override any existing env
 load_dotenv(find_dotenv(usecwd=True), override=True)
 
-# Read once and reuse everywhere (no scattered os.getenv calls)
+# Reuse these everywhere (don’t call os.getenv all over the code)
 NEO4J_URI = os.getenv("NEO4J_URI") or "neo4j+s://1f5f8a14.databases.neo4j.io"
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
 NEO4J_DB = os.getenv("NEO4J_DB", "neo4j")
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 
 
@@ -159,37 +160,22 @@ def get_openai_client():
         return None
 
 # === Neo4j Service Class ===
+# services/neo4j_service.py
+
 class Neo4jService:
-    def __init__(self, uri: str, user: str, password: str):
-        self.uri = uri
-        self.user = user
-        self.password = password
-        self.driver = None
-
-    def get_driver(self):
-        """Lazy initialization of Neo4j driver"""
-        if self.driver is None:
-            try:
-                self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
-                # Test connection
-                with self.driver.session() as session:
-                    session.run("RETURN 1").single()
-                logger.info("✅ Neo4j connection successful")
-            except Exception as e:
-                logger.error(f"❌ Neo4j connection failed: {str(e)}")
-                raise
-        return self.driver
-
-    @contextmanager
-    def session(self):
-        driver = self.get_driver()
-        with driver.session() as session:
-            yield session
+    def __init__(self, uri: str, user: str, password: str, database: str | None = None):
+        self._driver = GraphDatabase.driver(uri, auth=(user, password))
+        self._database = database  # μπορεί να είναι None
 
     def close(self):
-        if self.driver:
-            self.driver.close()
-            self.driver = None
+        if self._driver:
+            self._driver.close()
+
+    def session(self):
+        # Neo4j Python driver v5
+        if self._database:
+            return self._driver.session(database=self._database)
+        return self._driver.session()
 
 # === Helper Functions ===
 def get_services():
