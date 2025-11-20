@@ -1,4 +1,4 @@
-The application has now moved to: http://195.251.142.67:8501.
+The application has now moved to: http://195.251.143.63:8501/.
 
 
 NeuroCypher ASD — Knowledge Graph + ML + LLM for ASD Screening
