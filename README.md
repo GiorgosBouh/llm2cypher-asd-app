@@ -447,3 +447,7 @@ The repository is intended as a code and artifact companion to the NeuroCypher A
 ## Citation
 
 If this repository is used in academic work, cite the corresponding NeuroCypher ASD paper.
+
+## Ownership and Licensing
+
+The NeuroCypher Framework, including its architecture, analytical pipelines, and all associated codebase, is the exclusive intellectual property of Dr. Georgios Bouchouras (bouhouras@yahoo.com). To support research transparency, peer review, and reproducibility, the code is available for public viewing. However, this does not constitute an open-source license. Any reproduction, modification, distribution, integration into other projects, or commercial exploitation of the software requires explicit prior written permission from the author. The framework and its applications are provided ``as is,'' without warranties of any kind, and the author assumes no liability for any claims, damages, or clinical decisions arising from their use. For licensing inquiries and usage permissions, interested parties must contact the author directly.
