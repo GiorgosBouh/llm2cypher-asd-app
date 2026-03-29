@@ -1,0 +1,16 @@
+case_id,embedding_dim,shap_value,embedding_value,approx_feature,approx_feature_group,approx_correlation,interpretation_note
+619,emb_49,0.43723925948143005,0.21467113494873047,A5,qchat_or_age,0.23650429150786653,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_49,0.43723925948143005,0.21467113494873047,A7,qchat_or_age,0.18287989010476013,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_49,0.43723925948143005,0.21467113494873047,A6,qchat_or_age,0.17994410517430456,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_43,0.43356701731681824,0.00414622388780117,Ethnicity_White European,demographic_or_submitter,-0.213947550705443,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_43,0.43356701731681824,0.00414622388780117,A6,qchat_or_age,-0.18982880469208058,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_43,0.43356701731681824,0.00414622388780117,Ethnicity_middle eastern,demographic_or_submitter,0.17682207368944045,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_15,-0.4029049575328827,-0.06917592138051987,A1,qchat_or_age,0.2732232304689853,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_15,-0.4029049575328827,-0.06917592138051987,A5,qchat_or_age,0.24091609447738294,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_15,-0.4029049575328827,-0.06917592138051987,A9,qchat_or_age,0.22029882981143178,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_95,0.3829132318496704,0.02714194729924202,A9,qchat_or_age,0.21215403114301298,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_95,0.3829132318496704,0.02714194729924202,A1,qchat_or_age,0.19112615047909648,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_95,0.3829132318496704,0.02714194729924202,A8,qchat_or_age,0.17417577089995082,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_12,0.34210270643234253,0.1205344870686531,Ethnicity_asian,demographic_or_submitter,-0.2433370386507146,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_12,0.34210270643234253,0.1205344870686531,A8,qchat_or_age,0.23516853248229552,Approximate bridge from local embedding attribution to original graph/input variables.
+619,emb_12,0.34210270643234253,0.1205344870686531,A1,qchat_or_age,0.1920319283317357,Approximate bridge from local embedding attribution to original graph/input variables.

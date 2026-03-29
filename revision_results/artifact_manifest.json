@@ -1,0 +1,142 @@
+{
+  "generated_at_utc": "2026-03-24T14:38:02.602345Z",
+  "results_dir": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/results",
+  "output_dir": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/revision_results",
+  "artifacts": [
+    {
+      "logical_name": "baseline_table_csv",
+      "output_file": "table_baselines.csv",
+      "category": "table",
+      "status": "present",
+      "source_run": "baseline_run_20260324_143442",
+      "producer_script": "experiments_baselines.py",
+      "description": "Baseline comparison table for raw tabular, graph-embedding, and combined models."
+    },
+    {
+      "logical_name": "baseline_table_md",
+      "output_file": "table_baselines.md",
+      "category": "table",
+      "status": "present",
+      "source_run": "baseline_run_20260324_143442",
+      "producer_script": "experiments_baselines.py",
+      "description": "Markdown version of the baseline comparison table."
+    },
+    {
+      "logical_name": "baseline_table_tex",
+      "output_file": "table_baselines.tex",
+      "category": "table",
+      "status": "present",
+      "source_run": "baseline_run_20260324_143442",
+      "producer_script": "experiments_baselines.py",
+      "description": "LaTeX-ready baseline comparison table."
+    },
+    {
+      "logical_name": "ablation_table_csv",
+      "output_file": "table_ablations.csv",
+      "category": "table",
+      "status": "present",
+      "source_run": "ablation_run_20260324_132809",
+      "producer_script": "experiments_ablation.py",
+      "description": "Ablation table comparing full, reduced, and baseline configurations."
+    },
+    {
+      "logical_name": "ablation_table_md",
+      "output_file": "table_ablations.md",
+      "category": "table",
+      "status": "present",
+      "source_run": "ablation_run_20260324_132809",
+      "producer_script": "experiments_ablation.py",
+      "description": "Markdown version of the ablation table."
+    },
+    {
+      "logical_name": "ablation_table_tex",
+      "output_file": "table_ablations.tex",
+      "category": "table",
+      "status": "present",
+      "source_run": "ablation_run_20260324_132809",
+      "producer_script": "experiments_ablation.py",
+      "description": "LaTeX-ready ablation table."
+    },
+    {
+      "logical_name": "weight_sensitivity_csv",
+      "output_file": "table_weight_sensitivity.csv",
+      "category": "table",
+      "status": "present",
+      "source_run": "weight_sensitivity_run_20260324_134356",
+      "producer_script": "experiments_weight_sensitivity.py",
+      "description": "Weight sensitivity table comparing heuristic, uniform, and perturbed weight configurations."
+    },
+    {
+      "logical_name": "weight_sensitivity_md",
+      "output_file": "table_weight_sensitivity.md",
+      "category": "table",
+      "status": "present",
+      "source_run": "weight_sensitivity_run_20260324_134356",
+      "producer_script": "experiments_weight_sensitivity.py",
+      "description": "Markdown version of the weight sensitivity table."
+    },
+    {
+      "logical_name": "weight_sensitivity_tex",
+      "output_file": "table_weight_sensitivity.tex",
+      "category": "table",
+      "status": "present",
+      "source_run": "weight_sensitivity_run_20260324_134356",
+      "producer_script": "experiments_weight_sensitivity.py",
+      "description": "LaTeX-ready weight sensitivity table."
+    },
+    {
+      "logical_name": "shap_global_importance_csv",
+      "output_file": "table_global_shap_importance.csv",
+      "category": "table",
+      "status": "present",
+      "source_run": "interpretability_run_20260324_140612",
+      "producer_script": "experiments_interpretability.py",
+      "description": "Global SHAP importance over embedding dimensions for the main graph classifier."
+    },
+    {
+      "logical_name": "shap_summary_bar_png",
+      "output_file": "figure_shap_global_bar.png",
+      "category": "figure",
+      "status": "present",
+      "source_run": "interpretability_run_20260324_140612",
+      "producer_script": "experiments_interpretability.py",
+      "description": "Publication-friendly global SHAP bar plot."
+    },
+    {
+      "logical_name": "shap_summary_beeswarm_png",
+      "output_file": "figure_shap_beeswarm.png",
+      "category": "figure",
+      "status": "present",
+      "source_run": "interpretability_run_20260324_140612",
+      "producer_script": "experiments_interpretability.py",
+      "description": "SHAP beeswarm plot for the graph classifier."
+    },
+    {
+      "logical_name": "feature_mapping_csv",
+      "output_file": "table_embedding_feature_mapping.csv",
+      "category": "table",
+      "status": "present",
+      "source_run": "interpretability_run_20260324_140612",
+      "producer_script": "experiments_interpretability.py",
+      "description": "Approximate mapping from important embedding dimensions back to Q-Chat and demographic variables."
+    },
+    {
+      "logical_name": "case_level_explanations_csv",
+      "output_file": "table_case_level_explanations.csv",
+      "category": "table",
+      "status": "present",
+      "source_run": "interpretability_run_20260324_140612",
+      "producer_script": "experiments_interpretability.py",
+      "description": "Case-level SHAP explanations for selected holdout examples."
+    },
+    {
+      "logical_name": "kg_explanation_example_csv",
+      "output_file": "table_kg_explanation_example.csv",
+      "category": "table",
+      "status": "present",
+      "source_run": "derived_from_packaged_outputs",
+      "producer_script": "prepare_revision_results.py",
+      "description": "Derived example linking one local SHAP explanation to approximate Q-Chat/demographic feature mappings."
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "generated_at_utc": "2026-03-24T13:41:00.467499Z",
+  "csv_path": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/Toddler_Autism_dataset_July_2018_2.csv",
+  "results_dir": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/results/ablation_run_20260324_132809",
+  "random_state": 42,
+  "test_size": 0.3,
+  "cv_folds": 5,
+  "neo4j_uri_present": true,
+  "raw_numeric_features": [
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7",
+    "A8",
+    "A9",
+    "A10",
+    "Age_Mons"
+  ],
+  "raw_categorical_features": [
+    "Sex",
+    "Ethnicity",
+    "Jaundice",
+    "Family_mem_with_ASD",
+    "Who_completed_the_test"
+  ],
+  "duplicate_rows_removed_before_split": 79,
+  "deterministic_target_from_answers": true,
+  "deterministic_target_note": "Target is exactly reconstructed by sum(A1..A10) >= 4.",
+  "skipped_conditions": [
+    "no_graph_baseline"
+  ],
+  "graph_protocol": "train-only graph build with per-test-case embedding inference",
+  "conditions_run": [
+    "current_graph_pipeline",
+    "full_graph_pipeline",
+    "no_similarity_edges",
+    "no_behavior_patterns",
+    "no_demographic_context",
+    "simplified_graph_pipeline",
+    "full_graph_with_anomaly_gate",
+    "no_graph_baseline"
+  ]
+}

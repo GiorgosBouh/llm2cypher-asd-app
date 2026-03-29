@@ -1,0 +1,74 @@
+[
+  {
+    "name": "current_graph_pipeline",
+    "description": "Production-like graph with questions, demographics, submitter context, and similarity edges.",
+    "include_similarity": true,
+    "include_demographics": true,
+    "include_behavior_patterns": false,
+    "use_anomaly_gate": false,
+    "is_graph_condition": true
+  },
+  {
+    "name": "full_graph_pipeline",
+    "description": "Extended graph with demographics, similarity edges, and behavior-pattern / complexity nodes.",
+    "include_similarity": true,
+    "include_demographics": true,
+    "include_behavior_patterns": true,
+    "use_anomaly_gate": false,
+    "is_graph_condition": true
+  },
+  {
+    "name": "no_similarity_edges",
+    "description": "Full graph without case-to-case similarity edges.",
+    "include_similarity": false,
+    "include_demographics": true,
+    "include_behavior_patterns": true,
+    "use_anomaly_gate": false,
+    "is_graph_condition": true
+  },
+  {
+    "name": "no_behavior_patterns",
+    "description": "Graph without behavior-pattern and complexity nodes.",
+    "include_similarity": true,
+    "include_demographics": true,
+    "include_behavior_patterns": false,
+    "use_anomaly_gate": false,
+    "is_graph_condition": true
+  },
+  {
+    "name": "no_demographic_context",
+    "description": "Graph without demographic or submitter context.",
+    "include_similarity": true,
+    "include_demographics": false,
+    "include_behavior_patterns": true,
+    "use_anomaly_gate": false,
+    "is_graph_condition": true
+  },
+  {
+    "name": "simplified_graph_pipeline",
+    "description": "Questions-only graph with no demographics, no similarity edges, and no behavior-pattern nodes.",
+    "include_similarity": false,
+    "include_demographics": false,
+    "include_behavior_patterns": false,
+    "use_anomaly_gate": false,
+    "is_graph_condition": true
+  },
+  {
+    "name": "full_graph_with_anomaly_gate",
+    "description": "Full graph pipeline with Isolation Forest used as a reject option during evaluation.",
+    "include_similarity": true,
+    "include_demographics": true,
+    "include_behavior_patterns": true,
+    "use_anomaly_gate": true,
+    "is_graph_condition": true
+  },
+  {
+    "name": "no_graph_baseline",
+    "description": "Raw tabular XGBoost baseline with no graph features.",
+    "include_similarity": false,
+    "include_demographics": false,
+    "include_behavior_patterns": false,
+    "use_anomaly_gate": false,
+    "is_graph_condition": false
+  }
+]

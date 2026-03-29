@@ -1,0 +1,92 @@
+{
+  "table_baselines.csv": {
+    "category": "table",
+    "description": "Baseline comparison table for raw tabular, graph-embedding, and combined models.",
+    "producer_script": "experiments_baselines.py",
+    "status": "present"
+  },
+  "table_baselines.md": {
+    "category": "table",
+    "description": "Markdown version of the baseline comparison table.",
+    "producer_script": "experiments_baselines.py",
+    "status": "present"
+  },
+  "table_baselines.tex": {
+    "category": "table",
+    "description": "LaTeX-ready baseline comparison table.",
+    "producer_script": "experiments_baselines.py",
+    "status": "present"
+  },
+  "table_ablations.csv": {
+    "category": "table",
+    "description": "Ablation table comparing full, reduced, and baseline configurations.",
+    "producer_script": "experiments_ablation.py",
+    "status": "present"
+  },
+  "table_ablations.md": {
+    "category": "table",
+    "description": "Markdown version of the ablation table.",
+    "producer_script": "experiments_ablation.py",
+    "status": "present"
+  },
+  "table_ablations.tex": {
+    "category": "table",
+    "description": "LaTeX-ready ablation table.",
+    "producer_script": "experiments_ablation.py",
+    "status": "present"
+  },
+  "table_weight_sensitivity.csv": {
+    "category": "table",
+    "description": "Weight sensitivity table comparing heuristic, uniform, and perturbed weight configurations.",
+    "producer_script": "experiments_weight_sensitivity.py",
+    "status": "present"
+  },
+  "table_weight_sensitivity.md": {
+    "category": "table",
+    "description": "Markdown version of the weight sensitivity table.",
+    "producer_script": "experiments_weight_sensitivity.py",
+    "status": "present"
+  },
+  "table_weight_sensitivity.tex": {
+    "category": "table",
+    "description": "LaTeX-ready weight sensitivity table.",
+    "producer_script": "experiments_weight_sensitivity.py",
+    "status": "present"
+  },
+  "table_global_shap_importance.csv": {
+    "category": "table",
+    "description": "Global SHAP importance over embedding dimensions for the main graph classifier.",
+    "producer_script": "experiments_interpretability.py",
+    "status": "present"
+  },
+  "figure_shap_global_bar.png": {
+    "category": "figure",
+    "description": "Publication-friendly global SHAP bar plot.",
+    "producer_script": "experiments_interpretability.py",
+    "status": "present"
+  },
+  "figure_shap_beeswarm.png": {
+    "category": "figure",
+    "description": "SHAP beeswarm plot for the graph classifier.",
+    "producer_script": "experiments_interpretability.py",
+    "status": "present"
+  },
+  "table_embedding_feature_mapping.csv": {
+    "category": "table",
+    "description": "Approximate mapping from important embedding dimensions back to Q-Chat and demographic variables.",
+    "producer_script": "experiments_interpretability.py",
+    "status": "present"
+  },
+  "table_case_level_explanations.csv": {
+    "category": "table",
+    "description": "Case-level SHAP explanations for selected holdout examples.",
+    "producer_script": "experiments_interpretability.py",
+    "status": "present"
+  },
+  "table_kg_explanation_example.csv": {
+    "category": "table",
+    "description": "Derived example linking one local SHAP explanation to approximate Q-Chat/demographic feature mappings.",
+    "producer_script": "prepare_revision_results.py",
+    "status": "present"
+  }
+}

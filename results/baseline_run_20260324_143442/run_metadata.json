@@ -1,0 +1,41 @@
+{
+  "generated_at_utc": "2026-03-24T14:37:38.708442Z",
+  "csv_path": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/Toddler_Autism_dataset_July_2018_2.csv",
+  "results_dir": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/results/baseline_run_20260324_143442",
+  "random_state": 42,
+  "test_size": 0.3,
+  "cv_folds": 5,
+  "raw_numeric_features": [
+    "A1",
+    "A2",
+    "A3",
+    "A4",
+    "A5",
+    "A6",
+    "A7",
+    "A8",
+    "A9",
+    "A10",
+    "Age_Mons"
+  ],
+  "raw_categorical_features": [
+    "Sex",
+    "Ethnicity",
+    "Jaundice",
+    "Family_mem_with_ASD",
+    "Who_completed_the_test"
+  ],
+  "excluded_for_leakage": [
+    "Case_No",
+    "Class_ASD_Traits",
+    "Qchat-10-Score"
+  ],
+  "duplicate_rows_removed_before_split": 79,
+  "deterministic_target_from_answers": true,
+  "deterministic_target_note": "Target is exactly reconstructed by sum(A1..A10) >= 4.",
+  "raw_status": "Reference tabular baseline completed.",
+  "graph_status": "Graph and hybrid experiments completed with inductive embeddings. Train rows with embeddings: 682; test rows with embeddings: 293.",
+  "refresh_graph_embeddings": false,
+  "skip_graph_models": false,
+  "skipped_experiments": []
+}

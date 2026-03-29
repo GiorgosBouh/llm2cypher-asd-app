@@ -10,8 +10,8 @@ import logging
 from typing import List, Optional, Tuple, Dict, Any
 import shutil
 import json
-from dotenv import load_dotenv
 import pandas as pd
+from env_utils import load_project_env
 
 # Set random seeds for deterministic results
 np.random.seed(42)
@@ -26,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Load environment variables
-load_dotenv()
+load_project_env()
 
 class EmbeddingGenerator:
     def __init__(self):

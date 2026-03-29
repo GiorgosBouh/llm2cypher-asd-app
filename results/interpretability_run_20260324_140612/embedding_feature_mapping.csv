@@ -1,0 +1,76 @@
+embedding_dim,mapping_rank,approx_feature,approx_feature_group,correlation,absolute_correlation,mapping_note
+emb_15,1,A1,qchat_or_age,0.2732232304689853,0.2732232304689853,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_15,2,A5,qchat_or_age,0.24091609447738294,0.24091609447738294,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_15,3,A9,qchat_or_age,0.22029882981143178,0.22029882981143178,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_15,4,A6,qchat_or_age,0.19666038971886793,0.19666038971886793,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_15,5,Ethnicity_White European,demographic_or_submitter,0.17375882737363296,0.17375882737363296,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_43,1,Ethnicity_White European,demographic_or_submitter,-0.213947550705443,0.213947550705443,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_43,2,A6,qchat_or_age,-0.18982880469208058,0.18982880469208058,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_43,3,Ethnicity_middle eastern,demographic_or_submitter,0.17682207368944045,0.17682207368944045,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_43,4,A9,qchat_or_age,-0.15967210779604304,0.15967210779604304,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_43,5,A5,qchat_or_age,-0.15133508461800604,0.15133508461800604,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_21,1,A7,qchat_or_age,0.26769787336201334,0.26769787336201334,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_21,2,A5,qchat_or_age,0.26004799557102526,0.26004799557102526,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_21,3,A1,qchat_or_age,0.22847674395353026,0.22847674395353026,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_21,4,A4,qchat_or_age,0.2275801436686498,0.2275801436686498,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_21,5,A9,qchat_or_age,0.21718719769994485,0.21718719769994485,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_52,1,A6,qchat_or_age,0.21259675145692644,0.21259675145692644,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_52,2,A1,qchat_or_age,0.15777551477738438,0.15777551477738438,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_52,3,A9,qchat_or_age,0.15621555289965214,0.15621555289965214,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_52,4,Ethnicity_Others,demographic_or_submitter,0.1487250151122663,0.1487250151122663,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_52,5,A5,qchat_or_age,0.1477617538754386,0.1477617538754386,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_95,1,A9,qchat_or_age,0.21215403114301298,0.21215403114301298,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_95,2,A1,qchat_or_age,0.19112615047909648,0.19112615047909648,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_95,3,A8,qchat_or_age,0.17417577089995082,0.17417577089995082,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_95,4,Ethnicity_middle eastern,demographic_or_submitter,-0.15403672219697553,0.15403672219697553,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_95,5,A2,qchat_or_age,0.15334412791946056,0.15334412791946056,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_49,1,A5,qchat_or_age,0.23650429150786653,0.23650429150786653,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_49,2,A7,qchat_or_age,0.18287989010476013,0.18287989010476013,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_49,3,A6,qchat_or_age,0.17994410517430456,0.17994410517430456,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_49,4,Ethnicity_middle eastern,demographic_or_submitter,-0.17020102681292218,0.17020102681292218,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_49,5,A9,qchat_or_age,0.1564057470008645,0.1564057470008645,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_38,1,A5,qchat_or_age,-0.22954929433857366,0.22954929433857366,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_38,2,A6,qchat_or_age,-0.19448547262040056,0.19448547262040056,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_38,3,Jaundice_no,demographic_or_submitter,0.18684307557183794,0.18684307557183794,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_38,4,Jaundice_yes,demographic_or_submitter,-0.18684307557183794,0.18684307557183794,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_38,5,A9,qchat_or_age,-0.1661219804277028,0.1661219804277028,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_69,1,A2,qchat_or_age,0.18577726103128664,0.18577726103128664,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_69,2,Jaundice_no,demographic_or_submitter,-0.18577657918360457,0.18577657918360457,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_69,3,Jaundice_yes,demographic_or_submitter,0.18577657918360457,0.18577657918360457,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_69,4,A1,qchat_or_age,0.1628341242781241,0.1628341242781241,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_69,5,A8,qchat_or_age,0.16224256334429438,0.16224256334429438,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_19,1,A9,qchat_or_age,-0.1881113364179954,0.1881113364179954,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_19,2,A4,qchat_or_age,-0.17545053286433743,0.17545053286433743,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_19,3,A3,qchat_or_age,-0.17052365888291196,0.17052365888291196,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_19,4,Jaundice_no,demographic_or_submitter,-0.1418425443228823,0.1418425443228823,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_19,5,Jaundice_yes,demographic_or_submitter,0.1418425443228823,0.1418425443228823,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_106,1,A9,qchat_or_age,0.20035098906587015,0.20035098906587015,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_106,2,A6,qchat_or_age,0.1695391595052114,0.1695391595052114,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_106,3,A7,qchat_or_age,0.1602220196400308,0.1602220196400308,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_106,4,Ethnicity_asian,demographic_or_submitter,0.15920063220284694,0.15920063220284694,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_106,5,A10,qchat_or_age,0.15600724632590704,0.15600724632590704,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_17,1,Ethnicity_asian,demographic_or_submitter,0.1804411663906482,0.1804411663906482,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_17,2,Ethnicity_Latino,demographic_or_submitter,-0.13839756590145938,0.13839756590145938,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_17,3,A4,qchat_or_age,-0.1276230314192841,0.1276230314192841,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_17,4,A7,qchat_or_age,-0.11796981758192591,0.11796981758192591,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_17,5,Ethnicity_south asian,demographic_or_submitter,-0.10455386991941631,0.10455386991941631,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_109,1,A7,qchat_or_age,0.1552987727028817,0.1552987727028817,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_109,2,A9,qchat_or_age,0.11532819808470347,0.11532819808470347,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_109,3,A5,qchat_or_age,0.10831463098467468,0.10831463098467468,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_109,4,Sex_m,demographic_or_submitter,0.1040150150960866,0.1040150150960866,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_109,5,Sex_f,demographic_or_submitter,-0.10401501509608636,0.10401501509608636,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_85,1,Jaundice_yes,demographic_or_submitter,0.21985472350706092,0.21985472350706092,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_85,2,Jaundice_no,demographic_or_submitter,-0.2198547235070608,0.2198547235070608,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_85,3,Ethnicity_White European,demographic_or_submitter,0.18952565240237454,0.18952565240237454,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_85,4,A8,qchat_or_age,-0.17589132283730888,0.17589132283730888,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_85,5,Ethnicity_Latino,demographic_or_submitter,-0.17571055798154808,0.17571055798154808,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_24,1,A6,qchat_or_age,-0.16932105265788908,0.16932105265788908,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_24,2,A9,qchat_or_age,-0.16014724241173134,0.16014724241173134,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_24,3,A8,qchat_or_age,-0.15786650290102255,0.15786650290102255,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_24,4,A4,qchat_or_age,-0.14931710782028043,0.14931710782028043,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_24,5,A5,qchat_or_age,-0.13677531436312282,0.13677531436312282,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_12,1,Ethnicity_asian,demographic_or_submitter,-0.2433370386507146,0.2433370386507146,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_12,2,A8,qchat_or_age,0.23516853248229552,0.23516853248229552,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_12,3,A1,qchat_or_age,0.1920319283317357,0.1920319283317357,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_12,4,A2,qchat_or_age,0.18536788631531806,0.18536788631531806,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.
+emb_12,5,A3,qchat_or_age,0.14744165371834628,0.14744165371834628,Approximate association only; embedding dimensions do not map one-to-one to clinical variables.

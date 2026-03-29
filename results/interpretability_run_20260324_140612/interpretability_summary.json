@@ -1,0 +1,23 @@
+{
+  "generated_at_utc": "2026-03-24T14:08:45.483824Z",
+  "csv_path": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/Toddler_Autism_dataset_July_2018_2.csv",
+  "results_dir": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/results/interpretability_run_20260324_140612",
+  "rows_with_embeddings": 975,
+  "train_rows": 682,
+  "test_rows": 293,
+  "duplicate_rows_removed_before_split": 79,
+  "deterministic_target_from_answers": true,
+  "deterministic_target_note": "Target is exactly reconstructed by sum(A1..A10) >= 4.",
+  "graph_protocol": "train-only graph build with batch unlabeled test-case insertion and label-free embedding refresh",
+  "metrics": {
+    "roc_auc": 0.5124434389140271,
+    "f1": 0.7824175824175824,
+    "precision": 0.7206477732793523,
+    "recall": 0.8557692307692307,
+    "ap": 0.7327047715968769
+  },
+  "top_k_dims": 15,
+  "top_k_cases": 5,
+  "mapping_top_features": 5,
+  "limitation_note": "SHAP explanations are exact for embedding features in the trained XGBoost model. The mapping from embeddings back to Q-Chat or demographic variables is correlation-based and should be treated as approximate interpretability support rather than exact mechanistic attribution."
+}

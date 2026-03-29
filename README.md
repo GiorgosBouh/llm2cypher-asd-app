@@ -1,109 +1,371 @@
-The application has now moved to: http://195.251.143.63:8501/.
+# NeuroCypher ASD: Repository for Paper, App, and Reproducibility Artifacts
 
+This repository snapshot was prepared as a publication-facing version of the NeuroCypher ASD project. Its purpose is to make the code, packaged experiment outputs, manuscript-facing tables/figures, and the deployed application code available in one place so that readers can inspect what was implemented and how the reported results were produced.
 
-NeuroCypher ASD — Knowledge Graph + ML + LLM for ASD Screening
+The repository supports three complementary uses:
 
-NeuroCypher ASD is a neurosymbolic AI framework that fuses Knowledge Graphs (Neo4j), graph embeddings (Node2Vec), Machine Learning (XGBoost + Isolation Forest), and an LLM-powered natural-language interface to support explainable screening analysis for Autism Spectrum Disorder (ASD) in toddlers. It models Q-Chat-10 responses, demographics, and outcomes as a graph, enabling transparent queries, predictive modeling, and anomaly detection through a Streamlit web UI.
+1. Reproducing the main experiment scripts used for the revised paper.
+2. Inspecting the Streamlit application and its graph-assisted screening workflow.
+3. Tracing manuscript tables and figures back to the scripts and result artifacts that generated them.
 
-Paper/technical report: NeuroCypher ASD: A Knowledge Graph and Machine Learning Framework for ASD Screening in Toddlers. Please cite if you use this repo.
+This is a graph-enhanced decision-support repository for ASD screening in toddlers. It should be interpreted conservatively: the tabular model provides the primary prediction, while the knowledge graph, anomaly support, and natural-language interface provide contextualization, exploration, and interpretability support.
 
-⸻
+## What Is Included
 
-Key Features
-	•	Graph-native data model (Neo4j) for Q-Chat-10, demographics, and ASD traits; weighted relations for clinical salience.
-	•	Node2Vec embeddings as ML features to capture latent relational structure.
-	•	Supervised classification (XGBoost) and unsupervised anomaly detection (Isolation Forest) with leakage-safe training protocol.
-	•	Natural-language to Cypher interface (GPT-4 or compatible) to query the graph without writing Cypher.
-	•	Streamlit UI for training, case uploads/predictions, and NL graph querying.
+This curated `repo_revised` snapshot contains:
 
-⸻
+- The current Streamlit application code under `app/` plus the root `main_app.py` entrypoint.
+- The graph construction, embedding, experiment, safety, and packaging scripts used for the paper.
+- Packaged revision artifacts under `revision_results/` for manuscript-ready tables and figures.
+- The specific experiment run folders referenced by the packaged revision outputs under `results/`.
+- Manuscript assets under `manuscript/springer_revision_assets/`, including Springer files, tables, figures, and bibliography files present in the working project folder.
+- The toddler ASD dataset files used in this project workspace.
+- Model bundle artifacts used by the application for tabular prediction and anomaly support.
 
-Results (reference)
+This snapshot intentionally excludes local caches, `__pycache__`, and `.env` credentials.
 
-On the public Autistic Spectrum Disorder Screening Data for Toddlers dataset (1,054 samples; 18 attributes), the framework achieved:
+## Repository Structure
 
-ROC AUC ≈ 0.678
-F1 ≈ 0.765
+```text
+repo_revised/
+├── app/
+│   ├── data/
+│   ├── models/
+│   ├── services/
+│   ├── ui/
+│   └── utils/
+├── artifacts/
+├── manuscript/
+│   └── springer_revision_assets/
+├── results/
+│   ├── baseline_run_20260324_143442/
+│   ├── ablation_run_20260324_132809/
+│   ├── weight_sensitivity_run_20260324_134356/
+│   └── interpretability_run_20260324_140612/
+├── revision_results/
+├── main_app.py
+├── kg_builder_2.py
+├── generate_case_embedding.py
+├── experiments_baselines.py
+├── experiments_ablation.py
+├── experiments_interpretability.py
+├── experiments_weight_sensitivity.py
+├── prepare_revision_results.py
+├── evaluation_safety.py
+├── env_utils.py
+├── requirements.txt
+└── README.md
+```
 
-under a stratified 70/30 split with SMOTE applied inside CV folds.
+## Paper-to-Code Map
 
-⸻
+This section maps the main methodological components of the paper to the code and artifacts in this repository.
 
-Architecture
-	1.	Ingest & Validate → clean and normalize CSV, parse numerics, impute missing values.
-	2.	KG Construction → create nodes for cases, Q-Chat items, demographics, ASD traits; connect with weighted edges.
-	3.	Embeddings → Node2Vec over the KG (label edges removed during embedding to prevent leakage).
-	4.	ML → XGBoost classifier (supervised) and Isolation Forest (anomaly detection).
-	5.	Explainability & NL Querying → LLM translates natural language into Cypher; Streamlit UI for interaction.
+### 1. Dataset Description and Preprocessing
 
-⸻
+Primary files:
 
-Getting Started
+- `Toddler_Autism_dataset_July_2018_2.csv`
+- `Toddler_Autism_dataset_July_2018_2_no_qchat_score.csv`
+- `Toddler_data_description.pdf`
+- `experiments_baselines.py`
+- `app/data/schema_validation.py`
+- `app/data/preprocessing.py`
 
-Prerequisites:
-	•	Python 3.9+
-	•	Neo4j (Aura or local)
-	•	LLM API key (e.g., OPENAI_API_KEY)
-	•	(Optional) Streamlit for the UI
+What these files do:
 
-Installation:
-Clone the repo, create a virtual environment, and install dependencies with pip install -r requirements.txt.
+- `experiments_baselines.py` loads, normalizes, splits, and evaluates the dataset under the revised leakage-safer protocol.
+- `app/data/schema_validation.py` and `app/data/preprocessing.py` implement the schema validation and app-side preprocessing used for single-case inference.
+- The dataset description files document the raw screening variables and their meanings.
 
-Environment:
-Create a .env file in the project root with NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, and OPENAI_API_KEY.
+Important methodological note:
 
-Data:
-Download the Autism Screening for Toddlers dataset from Kaggle and place it under data/. Ensure the CSV headers match the Q-Chat-10 mapping (A1–A10) and demographics.
+- `Qchat-10-Score` is excluded from predictive modeling because it is deterministically derived from the questionnaire responses and would introduce leakage.
 
-⸻
+### 2. Knowledge Graph Construction and Embeddings
 
-Usage
-	1.	Build the Knowledge Graph with the build_kg.py script.
-	2.	Generate Node2Vec embeddings with the generate_embeddings.py script.
-	3.	Train and evaluate models with the train.py script.
-	4.	Run the Streamlit app with streamlit run app.py.
+Primary files:
 
-Upload CSV cases for inference, see anomaly scores, and run natural language queries.
+- `kg_builder_2.py`
+- `generate_case_embedding.py`
+- `evaluation_safety.py`
+- `app/services/graph_context_service.py`
+- `app/services/neo4j_service.py`
 
-⸻
+What these files do:
 
-Natural Language to Cypher (Example)
+- `kg_builder_2.py` builds the Neo4j graph and generates Node2Vec-based case embeddings.
+- `generate_case_embedding.py` supports single-case embedding generation for uploaded cases.
+- `evaluation_safety.py` contains helpers for stratified split-first evaluation, safety auditing, and inductive graph embedding refresh.
+- `graph_context_service.py` implements the application-facing graph contextualization layer used after prediction.
 
-NL query: How many male toddlers in the dataset were screened positive for ASD traits?
+### 3. Reference Tabular, Graph-Only, and Hybrid Baselines
 
-Generated Cypher (conceptual): Match male cases and count how many are linked to ASD traits.
+Primary files:
 
-⸻
+- `experiments_baselines.py`
+- `results/baseline_run_20260324_143442/`
+- `revision_results/table_baselines.csv`
+- `revision_results/table_baselines.md`
+- `revision_results/table_baselines.tex`
 
-Reproducibility and Anti-Leakage Checklist
-	•	Excluded total Q-Chat score (deterministic label mapping).
-	•	Removed :SCREENED_FOR edges before embeddings and restored after.
-	•	Applied SMOTE only inside CV training folds.
-	•	Fixed random seeds for reproducibility.
+What these files do:
 
-⸻
+- `experiments_baselines.py` evaluates raw tabular, graph-only, and hybrid models under a common split and CV protocol.
+- The included baseline results folder contains the referenced experiment outputs.
+- The packaged `revision_results/table_baselines.*` files are manuscript-facing exports derived from those runs.
 
-Roadmap
-	•	Add GNN embeddings (GCN, GAT, GraphSAGE).
-	•	Expand multimodal features and learner comparisons.
-	•	Extend NL-to-Cypher templates and safety checks.
+### 4. Graph Ablation Analysis
 
-⸻
+Primary files:
 
-Citation
+- `experiments_ablation.py`
+- `results/ablation_run_20260324_132809/`
+- `revision_results/table_ablations.csv`
+- `revision_results/table_ablations.md`
+- `revision_results/table_ablations.tex`
 
-If you use this code or ideas, please cite:
+What these files do:
 
-Bouchouras, Georgios; Doumanas, Dimitrios; Kotis, Konstantinos (2025). NeuroCypher ASD: A Knowledge Graph and Machine Learning Framework for ASD Screening in Toddlers. Preprint/Technical Report.
+- `experiments_ablation.py` evaluates graph variants such as full graph, simplified graph, no similarity edges, no demographic context, and anomaly-gated variants.
+- The packaged ablation tables in `revision_results/` are the stable manuscript-facing outputs.
 
-⸻
+### 5. Weight Sensitivity Analysis
 
-License
+Primary files:
 
-Specify your license here (e.g., MIT). If the dataset license differs, follow its terms.
+- `experiments_weight_sensitivity.py`
+- `results/weight_sensitivity_run_20260324_134356/`
+- `revision_results/table_weight_sensitivity.csv`
+- `revision_results/table_weight_sensitivity.md`
+- `revision_results/table_weight_sensitivity.tex`
 
-⸻
+What these files do:
 
-Disclaimer
+- `experiments_weight_sensitivity.py` evaluates whether heuristic vs uniform vs perturbed graph weights materially change graph-only performance.
+- The results folder contains the referenced run outputs.
+- The packaged revision tables are the manuscript-ready versions.
 
-This software is for research and educational purposes only and is not a medical device. Predictions are screening aids and must not be used as standalone diagnoses.
+### 6. Interpretability and SHAP Analysis
+
+Primary files:
+
+- `experiments_interpretability.py`
+- `app/services/shap_service.py`
+- `results/interpretability_run_20260324_140612/`
+- `revision_results/table_global_shap_importance.csv`
+- `revision_results/table_embedding_feature_mapping.csv`
+- `revision_results/table_case_level_explanations.csv`
+- `revision_results/table_kg_explanation_example.csv`
+- `revision_results/figure_shap_global_bar.png`
+- `revision_results/figure_shap_beeswarm.png`
+
+What these files do:
+
+- `experiments_interpretability.py` runs the graph-model interpretability analyses and exports SHAP-related artifacts.
+- `app/services/shap_service.py` is the app-side explanation layer for local and global explainability.
+- The packaged revision outputs provide manuscript-facing SHAP tables and figures.
+
+### 7. Anomaly Detection
+
+Primary files:
+
+- `app/services/anomaly_service.py`
+- `app/ui/anomaly_view.py`
+- `artifacts/anomaly_model_bundle.pkl`
+
+What these files do:
+
+- `anomaly_service.py` trains and applies the Isolation Forest-based anomaly support layer.
+- `anomaly_view.py` renders the anomaly analysis in the Streamlit application.
+
+### 8. Natural-Language Query Interface
+
+Primary files:
+
+- `app/services/nl_to_cypher_service.py`
+- `app/ui/nl_query_view.py`
+- `app/services/neo4j_service.py`
+
+What these files do:
+
+- `nl_to_cypher_service.py` translates user questions into read-only Cypher, using rule-based intent handling plus LLM-backed generation.
+- `nl_query_view.py` renders the generated query and result rows.
+- `neo4j_service.py` is the thin Neo4j access layer used by the app and graph services.
+
+### 9. The Streamlit Application
+
+Primary files:
+
+- `main_app.py`
+- `app/main_app.py`
+- `app/ui/`
+- `app/services/`
+- `artifacts/tabular_model_bundle.pkl`
+- `artifacts/anomaly_model_bundle.pkl`
+
+What the app does:
+
+- Accepts single-case CSV upload or manual questionnaire entry.
+- Runs tabular-first prediction.
+- Builds graph context around the case.
+- Provides explainability, anomaly support, natural-language querying, and PDF report export.
+
+## Packaged Revision Artifacts
+
+The `revision_results/` folder is the most important manuscript-facing directory for reviewers or readers who want to inspect the exact packaged outputs used for tables and figures.
+
+Key files:
+
+- `revision_results/INDEX.md`: artifact index and provenance summary.
+- `revision_results/artifact_manifest.json`: machine-readable artifact manifest.
+- `revision_results/manuscript_methods_results_revision.tex`: packaged methods/results text asset present in the working project.
+- `revision_results/table_baselines.tex`
+- `revision_results/table_ablations.tex`
+- `revision_results/table_weight_sensitivity.tex`
+- `revision_results/table_local_explanation_example.tex`
+- `revision_results/table_shap_top_dimensions.tex`
+- `revision_results/figure_shap_global_bar.png`
+- `revision_results/figure_shap_beeswarm.png`
+
+If you regenerate experiments, rerun:
+
+```bash
+python3 prepare_revision_results.py
+```
+
+to refresh the packaged manuscript-facing outputs.
+
+## Manuscript Assets
+
+The repository includes manuscript-related files under:
+
+```text
+manuscript/springer_revision_assets/
+```
+
+This folder preserves the manuscript assets that existed in the working project at the time this snapshot was created, including:
+
+- `sn-article.tex`
+- `sn-bibliography.bib`
+- `sn-jnl.cls`
+- `sn-basic.bst`
+- packaged table `.tex` files
+- manuscript figures and screenshots
+- `user-manual.pdf`
+
+Important note:
+
+- The current working repository contained more than one manuscript-related TeX file. This curated snapshot preserves the manuscript assets found in the folder, but you should verify that the exact submission draft you intend to upload to the journal is the one you want to keep as authoritative.
+- If your newest paper text exists outside the project folder or was edited separately, replace or add that exact submission `.tex` file under `manuscript/` before pushing to GitHub.
+
+## Reproducibility Workflow
+
+### Environment setup
+
+Create and activate a Python environment, then install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+You will also need:
+
+- Neo4j credentials in environment variables.
+- An OpenAI API key if you want to use the natural-language query interface.
+
+Expected environment variables:
+
+- `NEO4J_URI`
+- `NEO4J_USER`
+- `NEO4J_PASSWORD`
+- `NEO4J_DB`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL` (optional)
+
+### Run the app
+
+```bash
+python3 -m streamlit run main_app.py
+```
+
+### Rebuild the full graph
+
+```bash
+python3 kg_builder_2.py --build-full-graph
+```
+
+### Refresh label-free embeddings
+
+```bash
+python3 kg_builder_2.py --no-labels
+```
+
+### Run the revised baseline experiments
+
+```bash
+python3 experiments_baselines.py
+```
+
+### Run the graph ablation study
+
+```bash
+python3 experiments_ablation.py
+```
+
+### Run weight sensitivity analysis
+
+```bash
+python3 experiments_weight_sensitivity.py
+```
+
+### Run interpretability analysis
+
+```bash
+python3 experiments_interpretability.py
+```
+
+### Package manuscript-facing outputs
+
+```bash
+python3 prepare_revision_results.py
+```
+
+## Data Integrity and Leakage Safeguards
+
+The revised project is organized around leakage-aware evaluation decisions. These are important enough to restate clearly here:
+
+- `Qchat-10-Score` is not used as a predictive feature.
+- Label-related graph leakage is reduced by split-first evaluation and label-free embedding refresh for held-out cases.
+- Train/test and CV procedures are deterministic and stratified.
+- The tabular model should be interpreted as a strong reference baseline, not as evidence of independent diagnostic reasoning.
+- The graph layer is better understood as a contextual and exploratory support layer than as a superior standalone classifier on this dataset.
+
+## What Readers Can Verify from This Repository
+
+By inspecting this snapshot, a reviewer or reader can verify:
+
+- Which scripts were used for the baseline, ablation, interpretability, and weight-sensitivity experiments.
+- Which packaged tables and figures were produced for the revised manuscript.
+- How the app is structured and how prediction, graph context, anomaly support, and natural-language querying are implemented.
+- How the project encodes its leakage-prevention decisions.
+- Which result folders correspond to the packaged revision artifacts.
+
+## Suggested GitHub Positioning
+
+If you want to cite this repository in the paper, a conservative description would be:
+
+> The repository includes the Streamlit application, graph construction scripts, experiment scripts for the revised evaluation, packaged manuscript-facing result artifacts, and manuscript asset files needed to inspect the reported methodology and results.
+
+That wording is code-aligned and does not overclaim full clinical reproducibility beyond the included data, environment, and external service dependencies.
+
+## Practical Notes Before You Push
+
+- Do not commit `.env` or live credentials.
+- Keep `revision_results/` because it is the easiest manuscript-facing entry point for reviewers.
+- Keep the specific `results/` run folders already included here, because they provide direct provenance for the packaged outputs.
+- Verify which manuscript `.tex` file is your final submission draft before pushing.
+
+## Citation
+
+If you use or refer to this repository, cite the corresponding NeuroCypher ASD paper and describe this repository as the code and artifact companion to the revised manuscript.

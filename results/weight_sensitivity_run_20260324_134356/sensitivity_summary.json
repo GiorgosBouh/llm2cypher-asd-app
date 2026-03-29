@@ -1,0 +1,57 @@
+{
+  "baseline_configuration": "heuristic_baseline",
+  "overall_sensitivity_label": "sensitive",
+  "max_delta_holdout_roc_auc": 0.0743778280542986,
+  "max_delta_holdout_f1": 0.06226432704872131,
+  "comparison_rows": [
+    {
+      "configuration_name": "all_weights_plus_10",
+      "delta_holdout_roc_auc_vs_baseline": 0.01883484162895932,
+      "delta_holdout_f1_vs_baseline": 0.003594462049504421,
+      "sensitivity_label": "moderately_sensitive"
+    },
+    {
+      "configuration_name": "all_weights_minus_20",
+      "delta_holdout_roc_auc_vs_baseline": 0.006900452488687758,
+      "delta_holdout_f1_vs_baseline": 0.06226432704872131,
+      "sensitivity_label": "sensitive"
+    },
+    {
+      "configuration_name": "heuristic_baseline",
+      "delta_holdout_roc_auc_vs_baseline": 0.0,
+      "delta_holdout_f1_vs_baseline": 0.0,
+      "sensitivity_label": "robust"
+    },
+    {
+      "configuration_name": "all_weights_minus_10",
+      "delta_holdout_roc_auc_vs_baseline": 0.010294117647058787,
+      "delta_holdout_f1_vs_baseline": 0.013107813459217965,
+      "sensitivity_label": "moderately_sensitive"
+    },
+    {
+      "configuration_name": "neutral_similarity_family",
+      "delta_holdout_roc_auc_vs_baseline": 0.01408371040723988,
+      "delta_holdout_f1_vs_baseline": 0.011437880767729558,
+      "sensitivity_label": "moderately_sensitive"
+    },
+    {
+      "configuration_name": "neutral_demographic_risk_weights",
+      "delta_holdout_roc_auc_vs_baseline": 0.014932126696832526,
+      "delta_holdout_f1_vs_baseline": 0.002661327007367542,
+      "sensitivity_label": "moderately_sensitive"
+    },
+    {
+      "configuration_name": "all_weights_plus_20",
+      "delta_holdout_roc_auc_vs_baseline": 0.03144796380090498,
+      "delta_holdout_f1_vs_baseline": 0.04161955332024714,
+      "sensitivity_label": "sensitive"
+    },
+    {
+      "configuration_name": "uniform_weights",
+      "delta_holdout_roc_auc_vs_baseline": 0.0743778280542986,
+      "delta_holdout_f1_vs_baseline": 0.018886100337161205,
+      "sensitivity_label": "sensitive"
+    }
+  ],
+  "interpretation_note": "Sensitivity labels are heuristic summaries for manuscript convenience: robust if max delta ROC AUC <= 0.01 and max delta F1 <= 0.02; moderately sensitive if max delta ROC AUC <= 0.03 and max delta F1 <= 0.05; otherwise sensitive."
+}

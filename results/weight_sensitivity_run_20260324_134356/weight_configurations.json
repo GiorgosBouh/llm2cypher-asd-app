@@ -1,0 +1,138 @@
+[
+  {
+    "name": "heuristic_baseline",
+    "description": "Heuristic baseline profile reflecting manually chosen edge-family weights.",
+    "profile": {
+      "answer_edge_weight": 1.5,
+      "demographic_edge_weight": 1.0,
+      "submitter_edge_weight": 1.0,
+      "pattern_edge_weight": 1.8,
+      "complexity_edge_weight": 1.5,
+      "similarity_answer_component": 0.7,
+      "similarity_demo_component": 0.3,
+      "similarity_global_scale": 1.0,
+      "demo_family_yes_multiplier": 2.0,
+      "demo_jaundice_yes_multiplier": 1.5,
+      "demo_male_multiplier": 1.3
+    }
+  },
+  {
+    "name": "uniform_weights",
+    "description": "All edge families set to uniform weight; similarity split neutralized to 0.5/0.5.",
+    "profile": {
+      "answer_edge_weight": 1.0,
+      "demographic_edge_weight": 1.0,
+      "submitter_edge_weight": 1.0,
+      "pattern_edge_weight": 1.0,
+      "complexity_edge_weight": 1.0,
+      "similarity_answer_component": 0.5,
+      "similarity_demo_component": 0.5,
+      "similarity_global_scale": 1.0,
+      "demo_family_yes_multiplier": 1.0,
+      "demo_jaundice_yes_multiplier": 1.0,
+      "demo_male_multiplier": 1.0
+    }
+  },
+  {
+    "name": "all_weights_minus_10",
+    "description": "Global -10% perturbation of manual weight magnitudes.",
+    "profile": {
+      "answer_edge_weight": 1.35,
+      "demographic_edge_weight": 0.9,
+      "submitter_edge_weight": 0.9,
+      "pattern_edge_weight": 1.62,
+      "complexity_edge_weight": 1.35,
+      "similarity_answer_component": 0.7,
+      "similarity_demo_component": 0.3,
+      "similarity_global_scale": 0.9,
+      "demo_family_yes_multiplier": 1.8,
+      "demo_jaundice_yes_multiplier": 1.35,
+      "demo_male_multiplier": 1.1700000000000002
+    }
+  },
+  {
+    "name": "all_weights_plus_10",
+    "description": "Global +10% perturbation of manual weight magnitudes.",
+    "profile": {
+      "answer_edge_weight": 1.6500000000000001,
+      "demographic_edge_weight": 1.1,
+      "submitter_edge_weight": 1.1,
+      "pattern_edge_weight": 1.9800000000000002,
+      "complexity_edge_weight": 1.6500000000000001,
+      "similarity_answer_component": 0.7,
+      "similarity_demo_component": 0.3,
+      "similarity_global_scale": 1.1,
+      "demo_family_yes_multiplier": 2.2,
+      "demo_jaundice_yes_multiplier": 1.6500000000000001,
+      "demo_male_multiplier": 1.4300000000000002
+    }
+  },
+  {
+    "name": "all_weights_minus_20",
+    "description": "Global -20% perturbation of manual weight magnitudes.",
+    "profile": {
+      "answer_edge_weight": 1.2000000000000002,
+      "demographic_edge_weight": 0.8,
+      "submitter_edge_weight": 0.8,
+      "pattern_edge_weight": 1.4400000000000002,
+      "complexity_edge_weight": 1.2000000000000002,
+      "similarity_answer_component": 0.7,
+      "similarity_demo_component": 0.3,
+      "similarity_global_scale": 0.8,
+      "demo_family_yes_multiplier": 1.6,
+      "demo_jaundice_yes_multiplier": 1.2000000000000002,
+      "demo_male_multiplier": 1.04
+    }
+  },
+  {
+    "name": "all_weights_plus_20",
+    "description": "Global +20% perturbation of manual weight magnitudes.",
+    "profile": {
+      "answer_edge_weight": 1.7999999999999998,
+      "demographic_edge_weight": 1.2,
+      "submitter_edge_weight": 1.2,
+      "pattern_edge_weight": 2.16,
+      "complexity_edge_weight": 1.7999999999999998,
+      "similarity_answer_component": 0.7,
+      "similarity_demo_component": 0.3,
+      "similarity_global_scale": 1.2,
+      "demo_family_yes_multiplier": 2.4,
+      "demo_jaundice_yes_multiplier": 1.7999999999999998,
+      "demo_male_multiplier": 1.56
+    }
+  },
+  {
+    "name": "neutral_similarity_family",
+    "description": "Similarity composition neutralized from 0.7/0.3 to 0.5/0.5 while other weights remain heuristic.",
+    "profile": {
+      "answer_edge_weight": 1.5,
+      "demographic_edge_weight": 1.0,
+      "submitter_edge_weight": 1.0,
+      "pattern_edge_weight": 1.8,
+      "complexity_edge_weight": 1.5,
+      "similarity_answer_component": 0.5,
+      "similarity_demo_component": 0.5,
+      "similarity_global_scale": 1.0,
+      "demo_family_yes_multiplier": 2.0,
+      "demo_jaundice_yes_multiplier": 1.5,
+      "demo_male_multiplier": 1.3
+    }
+  },
+  {
+    "name": "neutral_demographic_risk_weights",
+    "description": "Family-history, jaundice, and male-sex demographic multipliers set to 1.0.",
+    "profile": {
+      "answer_edge_weight": 1.5,
+      "demographic_edge_weight": 1.0,
+      "submitter_edge_weight": 1.0,
+      "pattern_edge_weight": 1.8,
+      "complexity_edge_weight": 1.5,
+      "similarity_answer_component": 0.7,
+      "similarity_demo_component": 0.3,
+      "similarity_global_scale": 1.0,
+      "demo_family_yes_multiplier": 1.0,
+      "demo_jaundice_yes_multiplier": 1.0,
+      "demo_male_multiplier": 1.0
+    }
+  }
+]

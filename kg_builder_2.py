@@ -11,8 +11,9 @@ import shutil
 import logging
 import tempfile
 from typing import Dict, List, Tuple
-from dotenv import load_dotenv
 import argparse
+import json
+from env_utils import load_project_env
 
 # Configure logging
 logging.basicConfig(
@@ -22,10 +23,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+load_project_env()
 
 class GraphBuilder:
-    def __init__(self):
+    def __init__(
+        self,
+        include_similarity: bool = True,
+        include_demographics: bool = True,
+        include_behavior_patterns: bool = False,
+        csv_path: str | None = None,
+        weight_profile: Dict[str, float] | None = None,
+    ):
         self.EMBEDDING_DIM = 128
         self.NODE2VEC_PARAMS = {
             "walk_length": 30,
@@ -41,7 +49,43 @@ class GraphBuilder:
         self.MIN_SIMILAR_ANSWERS = 7  # For similarity relationships
         self.BATCH_SIZE = 500
         # Initialize no_labels_flag here so it always exists
-        self.no_labels_flag = False 
+        self.no_labels_flag = False
+        self.include_similarity = include_similarity
+        self.include_demographics = include_demographics
+        self.include_behavior_patterns = include_behavior_patterns
+        self.csv_path = csv_path or "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
+        self.weight_profile = self._build_weight_profile(weight_profile)
+
+    def _build_weight_profile(self, override: Dict[str, float] | None = None) -> Dict[str, float]:
+        profile = {
+            "answer_edge_weight": 1.0,
+            "demographic_edge_weight": 1.0,
+            "submitter_edge_weight": 1.0,
+            "pattern_edge_weight": 1.8,
+            "complexity_edge_weight": 1.5,
+            "similarity_answer_component": 0.7,
+            "similarity_demo_component": 0.3,
+            "similarity_global_scale": 1.0,
+            "demo_family_yes_multiplier": 1.0,
+            "demo_jaundice_yes_multiplier": 1.0,
+            "demo_male_multiplier": 1.0,
+        }
+        if override:
+            profile.update(override)
+        return profile
+
+    def _demographic_edge_weight(self, demo_type: str, demo_value: str) -> float:
+        weight = float(self.weight_profile["demographic_edge_weight"])
+        demo_value_normalized = str(demo_value).strip().lower()
+
+        if demo_type == "Family_mem_with_ASD" and demo_value_normalized == "yes":
+            weight *= float(self.weight_profile["demo_family_yes_multiplier"])
+        elif demo_type == "Jaundice" and demo_value_normalized == "yes":
+            weight *= float(self.weight_profile["demo_jaundice_yes_multiplier"])
+        elif demo_type == "Sex" and demo_value_normalized in {"m", "male"}:
+            weight *= float(self.weight_profile["demo_male_multiplier"])
+
+        return float(weight)
 
     def connect_to_neo4j(self) -> GraphDatabase.driver:
         """Create Neo4j driver with environment variables"""
@@ -53,8 +97,7 @@ class GraphBuilder:
         if not uri or not user or not password:
             raise ValueError("Missing required Neo4j environment variables: NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD")
             
-        password_masked = '*' * len(password) if password else 'N/A'
-        logger.info(f"kg_builder_2.py connecting to: URI='{uri}', User='{user}', Pass='{password_masked}'")
+        logger.info("kg_builder_2.py connecting to Neo4j with configured environment variables")
         
         return GraphDatabase.driver(
             uri,
@@ -104,20 +147,21 @@ class GraphBuilder:
                 tx.run("MERGE (:BehaviorQuestion {name: $q})", q=q)
             
             # Create DemographicAttribute nodes
-            demo_cols = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
-            for col in demo_cols:
-                if col in df.columns:
-                    unique_values = df[col].dropna().unique()
-                    for val in unique_values:
-                        val_str = str(val).strip()
-                        if val_str and val_str.lower() not in ['nan', 'none', '']:
-                            tx.run(
-                                "MERGE (:DemographicAttribute {type: $type, value: $val})",
-                                type=col, val=val_str
-                            )
+            if self.include_demographics:
+                demo_cols = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
+                for col in demo_cols:
+                    if col in df.columns:
+                        unique_values = df[col].dropna().unique()
+                        for val in unique_values:
+                            val_str = str(val).strip()
+                            if val_str and val_str.lower() not in ['nan', 'none', '']:
+                                tx.run(
+                                    "MERGE (:DemographicAttribute {type: $type, value: $val})",
+                                    type=col, val=val_str
+                                )
             
             # Create SubmitterType nodes
-            if "Who_completed_the_test" in df.columns:
+            if self.include_demographics and "Who_completed_the_test" in df.columns:
                 unique_submitters = df["Who_completed_the_test"].dropna().unique()
                 for val in unique_submitters:
                     val_str = str(val).strip()
@@ -133,6 +177,48 @@ class GraphBuilder:
         except Exception as e:
             logger.error(f"❌ Error creating nodes: {str(e)}")
             raise
+
+    def ensure_schema(self, tx) -> None:
+        """Create indexes/constraints needed for acceptable graph build performance."""
+        statements = [
+            """
+            CREATE CONSTRAINT case_id_unique IF NOT EXISTS
+            FOR (c:Case) REQUIRE c.id IS UNIQUE
+            """,
+            """
+            CREATE CONSTRAINT case_upload_id_unique IF NOT EXISTS
+            FOR (c:Case) REQUIRE c.upload_id IS UNIQUE
+            """,
+            """
+            CREATE CONSTRAINT behavior_question_name_unique IF NOT EXISTS
+            FOR (q:BehaviorQuestion) REQUIRE q.name IS UNIQUE
+            """,
+            """
+            CREATE CONSTRAINT demographic_attribute_unique IF NOT EXISTS
+            FOR (d:DemographicAttribute) REQUIRE (d.type, d.value) IS UNIQUE
+            """,
+            """
+            CREATE CONSTRAINT submitter_type_unique IF NOT EXISTS
+            FOR (s:SubmitterType) REQUIRE s.type IS UNIQUE
+            """,
+            """
+            CREATE CONSTRAINT asd_trait_label_unique IF NOT EXISTS
+            FOR (t:ASD_Trait) REQUIRE t.label IS UNIQUE
+            """,
+            """
+            CREATE CONSTRAINT behavior_pattern_unique IF NOT EXISTS
+            FOR (p:BehaviorPattern) REQUIRE (p.pattern, p.intensity) IS UNIQUE
+            """,
+            """
+            CREATE CONSTRAINT complexity_pattern_unique IF NOT EXISTS
+            FOR (p:ComplexityPattern) REQUIRE p.level IS UNIQUE
+            """,
+        ]
+
+        for statement in statements:
+            tx.run(statement).consume()
+
+        logger.info("✅ Ensured Neo4j schema constraints")
 
     def create_relationships(self, tx, df: pd.DataFrame, include_labels: bool = True) -> None:
         """Create relationships between nodes"""
@@ -173,19 +259,20 @@ class GraphBuilder:
                         })
                 
                 # Create demographic relationships
-                demo_cols = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
-                for col in demo_cols:
-                    if col in row:
-                        val = str(row[col]).strip() 
-                        if val and val.lower() not in ['nan', 'none', '']:
-                            demo_data.append({
-                                "upload_id": upload_id,
-                                "type": col,
-                                "val": val
-                            })
+                if self.include_demographics:
+                    demo_cols = ["Sex", "Ethnicity", "Jaundice", "Family_mem_with_ASD"]
+                    for col in demo_cols:
+                        if col in row:
+                            val = str(row[col]).strip() 
+                            if val and val.lower() not in ['nan', 'none', '']:
+                                demo_data.append({
+                                    "upload_id": upload_id,
+                                    "type": col,
+                                    "val": val
+                                })
                 
                 # Create submitter relationship
-                if "Who_completed_the_test" in row:
+                if self.include_demographics and "Who_completed_the_test" in row:
                     submitter_val = str(row["Who_completed_the_test"]).strip()
                     if submitter_val and submitter_val.lower() not in ['nan', 'none', '']:
                         submitter_data.append({
@@ -216,8 +303,16 @@ class GraphBuilder:
                     UNWIND $data as row
                     MATCH (q:BehaviorQuestion {name: row.q})
                     MATCH (c:Case {upload_id: row.upload_id})
-                    MERGE (c)-[:HAS_ANSWER {value: row.val}]->(q)
-                """, data=answer_data)
+                    MERGE (c)-[r:HAS_ANSWER]->(q)
+                    SET r.value = row.val,
+                        r.weight = row.weight
+                """, data=[
+                    {
+                        **row,
+                        "weight": float(self.weight_profile["answer_edge_weight"]),
+                    }
+                    for row in answer_data
+                ])
             
             # Create HAS_DEMOGRAPHIC relationships
             if demo_data:
@@ -226,8 +321,15 @@ class GraphBuilder:
                     UNWIND $data as row
                     MATCH (d:DemographicAttribute {type: row.type, value: row.val})
                     MATCH (c:Case {upload_id: row.upload_id})
-                    MERGE (c)-[:HAS_DEMOGRAPHIC]->(d)
-                """, data=demo_data)
+                    MERGE (c)-[r:HAS_DEMOGRAPHIC]->(d)
+                    SET r.weight = row.weight
+                """, data=[
+                    {
+                        **row,
+                        "weight": self._demographic_edge_weight(row["type"], row["val"]),
+                    }
+                    for row in demo_data
+                ])
             
             # Create SUBMITTED_BY relationships
             if submitter_data:
@@ -236,13 +338,117 @@ class GraphBuilder:
                     UNWIND $data as row
                     MATCH (s:SubmitterType {type: row.val})
                     MATCH (c:Case {upload_id: row.upload_id})
-                    MERGE (c)-[:SUBMITTED_BY]->(s)
-                """, data=submitter_data)
+                    MERGE (c)-[r:SUBMITTED_BY]->(s)
+                    SET r.weight = row.weight
+                """, data=[
+                    {
+                        **row,
+                        "weight": float(self.weight_profile["submitter_edge_weight"]),
+                    }
+                    for row in submitter_data
+                ])
                 
             logger.info("✅ Created all relationships")
             
         except Exception as e:
             logger.error(f"❌ Error creating relationships: {str(e)}")
+            raise
+
+    def create_behavior_pattern_relationships(self, tx, df: pd.DataFrame) -> None:
+        """Create optional behavior-pattern and complexity nodes for ablation experiments."""
+        try:
+            if not self.include_behavior_patterns:
+                logger.info("Skipping behavior pattern node creation")
+                return
+
+            pattern_rows = []
+            complexity_rows = []
+
+            for _, row in df.iterrows():
+                case_id = int(row["Case_No"])
+                upload_id = str(case_id)
+                answers = {}
+                for i in range(1, 11):
+                    value = pd.to_numeric(row.get(f"A{i}"), errors="coerce")
+                    answers[f"A{i}"] = int(value) if not pd.isna(value) else 0
+
+                complexity_score = sum(1 for value in answers.values() if value == 1)
+                if complexity_score >= 5:
+                    complexity_level = "HIGH"
+                elif complexity_score >= 2:
+                    complexity_level = "MODERATE"
+                else:
+                    complexity_level = "LOW"
+
+                complexity_rows.append({
+                    "upload_id": upload_id,
+                    "level": complexity_level,
+                    "score": int(complexity_score),
+                })
+
+                communication = answers["A1"] + answers["A2"] + answers["A8"]
+                social = answers["A3"] + answers["A4"] + answers["A6"] + answers["A7"]
+                activity = answers["A5"] + answers["A9"] + answers["A10"]
+
+                if communication >= 2:
+                    pattern_rows.append({
+                        "upload_id": upload_id,
+                        "pattern_group": "communication",
+                        "intensity": int(communication),
+                        "weight": 1.8,
+                    })
+                if social >= 2:
+                    pattern_rows.append({
+                        "upload_id": upload_id,
+                        "pattern_group": "social",
+                        "intensity": int(social),
+                        "weight": 1.8,
+                    })
+                if activity >= 2:
+                    pattern_rows.append({
+                        "upload_id": upload_id,
+                        "pattern_group": "activity",
+                        "intensity": int(activity),
+                        "weight": 1.8,
+                    })
+
+            if complexity_rows:
+                logger.info(f"Creating {len(complexity_rows)} HAS_COMPLEXITY relationships")
+                tx.run("""
+                    UNWIND $rows AS row
+                    MATCH (c:Case {upload_id: row.upload_id})
+                    MERGE (p:ComplexityPattern {level: row.level})
+                    MERGE (c)-[r:HAS_COMPLEXITY]->(p)
+                    SET r.weight = row.weight,
+                        r.complexity_score = row.score
+                """, rows=[
+                    {
+                        **row,
+                        "weight": float(self.weight_profile["complexity_edge_weight"]),
+                    }
+                    for row in complexity_rows
+                ])
+
+            if pattern_rows:
+                logger.info(f"Creating {len(pattern_rows)} HAS_PATTERN relationships")
+                tx.run("""
+                    UNWIND $rows AS row
+                    MATCH (c:Case {upload_id: row.upload_id})
+                    MERGE (p:BehaviorPattern {pattern: row.pattern_group, intensity: row.intensity})
+                    MERGE (c)-[r:HAS_PATTERN]->(p)
+                    SET r.weight = row.weight
+                """, rows=[
+                    {
+                        **row,
+                        "weight": float(self.weight_profile["pattern_edge_weight"]),
+                    }
+                    for row in pattern_rows
+                ])
+
+            logger.info("✅ Created optional behavior pattern relationships")
+
+        except Exception as e:
+            logger.error(f"❌ Error creating behavior pattern relationships: {str(e)}")
             raise
 
     def create_similarity_relationships(self, tx, df: pd.DataFrame) -> None:
@@ -350,7 +556,14 @@ class GraphBuilder:
             
             demo_sim = demo_sim_score / valid_demo_comparisons if valid_demo_comparisons > 0 else 0.0
             
-            return 0.7 * answer_sim + 0.3 * demo_sim
+            similarity_answer_component = float(self.weight_profile["similarity_answer_component"])
+            similarity_demo_component = float(self.weight_profile["similarity_demo_component"])
+            similarity_global_scale = float(self.weight_profile["similarity_global_scale"])
+
+            return similarity_global_scale * (
+                similarity_answer_component * answer_sim +
+                similarity_demo_component * demo_sim
+            )
             
         except Exception as e:
             logger.error(f"Error calculating similarity weight: {str(e)}")
@@ -403,6 +616,8 @@ class GraphBuilder:
                              WHEN n:BehaviorQuestion THEN 'Q_' + n.name
                              WHEN n:DemographicAttribute THEN 'D_' + n.type + '_' + replace(n.value, ' ', '_')
                              WHEN n:SubmitterType THEN 'S_' + replace(n.type, ' ', '_')
+                             WHEN n:BehaviorPattern THEN 'P_' + n.pattern + '_' + toString(n.intensity)
+                             WHEN n:ComplexityPattern THEN 'C_' + n.level
                              WHEN n:Case THEN 'Case_' + toString(n.id)
                              ELSE 'Node_' + toString(id(n)) 
                            END AS target_id,
@@ -567,11 +782,12 @@ class GraphBuilder:
         driver = None
         try:
             driver = self.connect_to_neo4j()
-            df = self.parse_csv(
-                "https://raw.githubusercontent.com/GiorgosBouh/llm2cypher-asd-app/main/Toddler_Autism_dataset_July_2018_2.csv"
-            )
+            df = self.parse_csv(self.csv_path)
             
             with driver.session() as session:
+                logger.info("⏳ Ensuring schema constraints...")
+                session.execute_write(self.ensure_schema)
+
                 logger.info("🧹 Deleting old graph...")
                 session.run("MATCH (n) DETACH DELETE n")
                 
@@ -581,8 +797,15 @@ class GraphBuilder:
                 logger.info("⏳ Creating relationships...")
                 session.execute_write(self.create_relationships, df, include_labels=True)
                 
-                logger.info("⏳ Creating similarity relationships...")
-                session.execute_write(self.create_similarity_relationships, df)
+                if self.include_behavior_patterns:
+                    logger.info("⏳ Creating behavior pattern relationships...")
+                    session.execute_write(self.create_behavior_pattern_relationships, df)
+
+                if self.include_similarity:
+                    logger.info("⏳ Creating similarity relationships...")
+                    session.execute_write(self.create_similarity_relationships, df)
+                else:
+                    logger.info("Skipping similarity relationships")
             
             logger.info("⏳ Generating embeddings...")
             if not self.generate_embeddings(driver):
@@ -626,9 +849,29 @@ if __name__ == "__main__":
                         help='Delete and rebuild entire graph')
     parser.add_argument('--generate-embeddings-only', action='store_true',
                         help='Generate embeddings for existing graph')
+    parser.add_argument('--exclude-similarity', action='store_true',
+                        help='Exclude SIMILAR_TO edges from graph construction')
+    parser.add_argument('--exclude-demographics', action='store_true',
+                        help='Exclude demographic and submitter context from graph construction')
+    parser.add_argument('--include-behavior-patterns', action='store_true',
+                        help='Include behavior pattern and complexity nodes for ablation experiments')
+    parser.add_argument('--csv-path', default=None,
+                        help='Override the default CSV source used for graph construction')
+    parser.add_argument('--weight-profile-json', default=None,
+                        help='Optional JSON string overriding graph edge weights for experiments')
     args = parser.parse_args()
 
-    builder = GraphBuilder()
+    weight_profile = None
+    if args.weight_profile_json:
+        weight_profile = json.loads(args.weight_profile_json)
+
+    builder = GraphBuilder(
+        include_similarity=not args.exclude_similarity,
+        include_demographics=not args.exclude_demographics,
+        include_behavior_patterns=args.include_behavior_patterns,
+        csv_path=args.csv_path,
+        weight_profile=weight_profile,
+    )
     builder.no_labels_flag = args.no_labels
 
     try:

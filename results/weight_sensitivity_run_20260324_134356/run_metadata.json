@@ -1,0 +1,13 @@
+{
+  "generated_at_utc": "2026-03-24T14:05:55.081657Z",
+  "csv_path": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/Toddler_Autism_dataset_July_2018_2.csv",
+  "results_dir": "/home/ilab/neurocypher_revision/NeuroCypher v3-3/llm2cypher-asd-app-main-4/results/weight_sensitivity_run_20260324_134356",
+  "random_state": 42,
+  "test_size": 0.3,
+  "cv_folds": 5,
+  "duplicate_rows_removed_before_split": 79,
+  "deterministic_target_from_answers": true,
+  "deterministic_target_note": "Target is exactly reconstructed by sum(A1..A10) >= 4.",
+  "study_note": "This sensitivity analysis uses a fixed graph topology with all weighted edge families enabled so that only weight choices vary across runs. Graph embeddings are evaluated with a train-only graph build and per-test-case embedding inference.",
+  "neo4j_uri_present": true
+}
