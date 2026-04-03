@@ -4,7 +4,7 @@ This repository contains the NeuroCypher ASD application, the experiment scripts
 
 NeuroCypher ASD is a graph-enhanced decision-support project for ASD screening in toddlers. The tabular model provides the primary prediction, while the knowledge graph, anomaly support, and natural-language interface provide context, exploration, and interpretability support.
 
-The web application is publicly accessible at http://195.251.143.63:8501/
+The web application is publicly accessible at  http://195.251.143.132:8501
 
 ## What Is Included
 
